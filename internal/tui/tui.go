@@ -121,7 +121,7 @@ func NewTUI() *TUI {
 	// Setup view elements.
 	t.DomainsSearch = tview.NewInputField().SetLabel("Domain ").SetFieldWidth(0).SetAcceptanceFunc(DomainInputFilter)
 	t.Domains = tview.NewList().ShowSecondaryText(false)
-	t.Accounts = tview.NewList().ShowSecondaryText(false).SetSelectedFocusOnly(true)
+	t.Accounts = tview.NewList().ShowSecondaryText(true).SetSelectedFocusOnly(true).SetSecondaryTextColor(tcell.ColorDarkGray)
 	t.DomainInfo = tview.NewTable().SetBorders(false)
 	t.RecordsTable = tview.NewTable()
 	t.FooterText = tview.NewTextView().SetTextAlign(tview.AlignCenter).SetText(TitleFooterView).SetTextColor(Styles.MoreContrastBackgroundColor)
@@ -163,7 +163,13 @@ func NewTUI() *TUI {
 		return event
 	})
 
-	t.RecordEdit = dialog.NewRecordEditor(t.App)
+	t.RecordEdit = dialog.NewRecordEditor(t.App, func(exit string) {
+		if exit == "Done" {
+			t.Pages.HidePage(PageRecordEditor)
+		} else {
+			t.Pages.HidePage(PageRecordEditor)
+		}
+	})
 
 	t.Pages = tview.NewPages()
 	t.Pages.AddPage(PageDomain, t.layout, true, true)
@@ -212,7 +218,7 @@ func (tui *TUI) LoadData() {
 
 	accounts := []string{"cloudflare", "namecheap", "godaddy"}
 	for _, account := range accounts {
-		tui.Accounts.AddItem(account, "", 0, nil)
+		tui.Accounts.AddItem(account, " Provider: "+account, 0, nil)
 	}
 
 	tui.RecordsTable.SetSelectable(true, false)

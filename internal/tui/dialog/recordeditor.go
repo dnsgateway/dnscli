@@ -14,12 +14,12 @@ type RecordEditor struct {
 	recordName   *tview.InputField
 	recordType   *tview.DropDown
 	recordTarget *tview.InputField
-	recordTTL    *tview.DropDown
+	recordTTL    *tview.InputField
 }
 
 var records = []string{"example.com", "test", "dev", "staging", "prod"}
 
-func NewRecordEditor(app *tview.Application) *RecordEditor {
+func NewRecordEditor(app *tview.Application, finished func(button string)) *RecordEditor {
 	f := RecordEditor{
 		Flex: tview.NewFlex(),
 		app:  app,
@@ -56,16 +56,37 @@ func NewRecordEditor(app *tview.Application) *RecordEditor {
 	f.recordTarget = tview.NewInputField().SetLabel("Target")
 	form.AddFormItem(f.recordTarget)
 
-	f.recordTTL = tview.NewDropDown().SetLabel("TTL").SetOptions([]string{"300", "600", "900", "1800", "3600", "7200", "14400", "28800", "57600", "86400"}, nil)
-	f.recordTTL.SetCurrentOption(0)
-	f.recordTTL.SetSelectedFunc(func(text string, index int) {
-		app.SetFocus(form.GetButton(0))
+	f.recordTTL = tview.NewInputField().SetLabel("TTL").SetPlaceholder("300")
+	f.recordTTL.SetAutocompleteFunc(func(currentText string) (entries []string) {
+		if len(currentText) == 0 {
+			return
+		}
+		for _, word := range []string{"300", "600", "900", "1800", "3600", "7200", "14400", "28800", "57600", "86400"} {
+			if strings.HasPrefix(strings.ToLower(word), strings.ToLower(currentText)) {
+				entries = append(entries, word)
+			}
+		}
+		if len(entries) <= 1 {
+			entries = nil
+		}
+		return
 	})
+
+	// f.recordTTL = tview.NewDropDown().SetLabel("TTL").SetOptions([]string{"300", "600", "900", "1800", "3600", "7200", "14400", "28800", "57600", "86400"}, nil)
+	// f.recordTTL.SetCurrentOption(0)
+	// f.recordTTL.SetSelectedFunc(func(text string, index int) {
+	// 	app.SetFocus(form.GetButton(0))
+	// })
+
 	form.AddFormItem(f.recordTTL)
 
 	form.SetButtonsAlign(tview.AlignCenter)
-	form.AddButton("Done", nil)
-	form.AddButton("Cancel", nil)
+	form.AddButton("OK", func() {
+		finished("OK")
+	})
+	form.AddButton("Cancel", func() {
+		finished("Cancel")
+	})
 
 	form.SetBorderPadding(1, 1, 2, 2)
 	form.SetBackgroundColor(tcell.ColorBlack).SetBorder(true)
