@@ -84,6 +84,8 @@ type Model struct {
 	afterUnseal func() tea.Cmd
 	// keychain asks to enroll the Keychain; nil when closed.
 	keychain *keychainConfirm
+	// remove asks to remove an Account; nil when closed.
+	remove *removeConfirm
 }
 
 // notice is a message for the status bar.
@@ -217,6 +219,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.accountAdded(msg)
 	case zonesDiscoveredMsg:
 		return m, m.zonesDiscovered(msg)
+	case accountRemovedMsg:
+		return m, m.accountRemoved(msg)
 	case recordsLoadedMsg:
 		if m.open == nil || m.open.ID != msg.zoneID {
 			return m, nil // the user has moved on to another Zone
@@ -238,6 +242,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.keychain != nil {
 			return m, m.keychainKey(msg)
+		}
+
+		if m.remove != nil {
+			return m, m.removeAccountKey(msg)
 		}
 
 		if m.typeIntoSearch(msg) {
@@ -297,6 +305,8 @@ func (m *Model) handle(a Action) tea.Cmd {
 		m.openAddAccount()
 	case ActionEnrollKeychain:
 		return m.enrollKeychain()
+	case ActionRemoveAccount:
+		return m.removeAccount()
 	}
 
 	return nil

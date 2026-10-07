@@ -30,6 +30,9 @@ const (
 	// ActionEnrollKeychain enrolls the Keychain with Touch ID as another
 	// Unseal Method, after Unseal.
 	ActionEnrollKeychain
+	// ActionRemoveAccount asks to remove the highlighted Account with its
+	// cached Zones, Records and secret.
+	ActionRemoveAccount
 )
 
 // Binding maps one Action to its keys.
@@ -60,6 +63,7 @@ func DefaultShortcutProfile() ShortcutProfile {
 			{Action: ActionSearch, Keys: []string{"/"}, Help: "search"},
 			{Action: ActionAllAccounts, Keys: []string{"*"}, Help: "Zones of all Accounts"},
 			{Action: ActionAddAccount, Keys: []string{"a"}, Help: "add Account"},
+			{Action: ActionRemoveAccount, Keys: []string{"X"}, Help: "remove Account"},
 			{Action: ActionEnrollKeychain, Keys: []string{"K"}, Help: "enroll the Keychain (Touch ID)"},
 			{Action: ActionHelp, Keys: []string{"?"}, Help: "toggle help"},
 			{Action: ActionClose, Keys: []string{"esc"}, Help: "close"},
