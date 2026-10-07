@@ -13,6 +13,7 @@ var (
 	hintStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	errorStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 	statusStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("7"))
+	staleStyle       = lipgloss.NewStyle().Faint(true)
 )
 
 // View renders the three panes and the status bar.
@@ -36,11 +37,24 @@ func (m *Model) View() string {
 }
 
 func (m *Model) domainLines() []string {
-	return nil
+	lines := make([]string, 0, len(m.zones))
+
+	for _, z := range m.zones {
+		// Every Zone is cached and unconfirmed until freshness lands, so all are dimmed.
+		lines = append(lines, staleStyle.Render(" "+z.Name))
+	}
+
+	return lines
 }
 
 func (m *Model) accountLines() []string {
-	return nil
+	lines := make([]string, 0, len(m.accounts))
+
+	for _, a := range m.accounts {
+		lines = append(lines, " "+a.Label())
+	}
+
+	return lines
 }
 
 func (m *Model) recordLines() []string {

@@ -6,19 +6,82 @@ package tui_test
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 
+	"github.com/sergelogvinov/dnscli/internal/dns"
 	"github.com/sergelogvinov/dnscli/internal/store"
 	"github.com/sergelogvinov/dnscli/internal/tui"
 )
 
 var testNow = time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
+
+func TestMain(m *testing.M) {
+	// Render styles as ANSI so tests can see dimming.
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	os.Exit(m.Run())
+}
+
+// seedCache fills the Store with a small cached data set:
+//
+//	cloudflare.personal: example.com (3 Records), two.tv (1 Record)
+//	cloudflare.work:     example.org (no Records)
+func seedCache(t *testing.T, s *store.Store) {
+	t.Helper()
+
+	ctx := context.Background()
+
+	personal := mustAccount(t, s, "cloudflare", "personal")
+	work := mustAccount(t, s, "cloudflare", "work")
+
+	exampleCom := mustZone(t, s, dns.Zone{AccountID: personal.ID, Name: "example.com", ProviderID: "z1", Serial: 2026100701, RefreshedAt: testNow.Add(-3 * time.Hour)})
+	twoTV := mustZone(t, s, dns.Zone{AccountID: personal.ID, Name: "two.tv", ProviderID: "z2"})
+	mustZone(t, s, dns.Zone{AccountID: work.ID, Name: "example.org", ProviderID: "z3"})
+
+	if err := s.ReplaceRecords(ctx, exampleCom.ID, []dns.Record{
+		{ProviderID: "r1", Type: "A", Name: "example.com", Value: "192.0.2.10", TTL: 300},
+		{ProviderID: "r2", Type: "AAAA", Name: "example.com", Value: "2001:db8::10", TTL: 300},
+		{ProviderID: "r3", Type: "CNAME", Name: "www.example.com", Value: "example.com", TTL: 3600, Extras: map[string]string{"proxied": "true"}},
+	}); err != nil {
+		t.Fatalf("seed records: %v", err)
+	}
+
+	if err := s.ReplaceRecords(ctx, twoTV.ID, []dns.Record{
+		{ProviderID: "r4", Type: "A", Name: "two.tv", Value: "198.51.100.7", TTL: 120},
+	}); err != nil {
+		t.Fatalf("seed records: %v", err)
+	}
+}
+
+func mustAccount(t *testing.T, s *store.Store, provider, name string) dns.Account {
+	t.Helper()
+
+	a, err := s.AddAccount(context.Background(), dns.Account{Provider: provider, Name: name})
+	if err != nil {
+		t.Fatalf("add account: %v", err)
+	}
+
+	return a
+}
+
+func mustZone(t *testing.T, s *store.Store, z dns.Zone) dns.Zone {
+	t.Helper()
+
+	z, err := s.PutZone(context.Background(), z)
+	if err != nil {
+		t.Fatalf("put zone: %v", err)
+	}
+
+	return z
+}
 
 type harness struct {
 	t      *testing.T
@@ -139,6 +202,46 @@ func (h *harness) assertShows(texts ...string) {
 			h.t.Fatalf("view does not show %q:\n%s", s, v)
 		}
 	}
+}
+
+// assertDimmed checks that text is rendered with the faint (dim) attribute.
+func (h *harness) assertDimmed(text string) {
+	h.t.Helper()
+
+	if !styledWith(h.rawView(), text, "2") {
+		h.t.Fatalf("%q is not dimmed:\n%q", text, h.rawView())
+	}
+}
+
+// styledWith reports whether the last SGR sequence before text on its line
+// includes the given parameter (e.g. "2" for faint, "7" for reverse).
+func styledWith(raw, text, param string) bool {
+	for _, line := range strings.Split(raw, "\n") {
+		i := strings.Index(line, text)
+		if i < 0 {
+			continue
+		}
+
+		start := strings.LastIndex(line[:i], "\x1b[")
+		if start < 0 {
+			return false
+		}
+
+		end := strings.IndexByte(line[start:], 'm')
+		if end < 0 {
+			return false
+		}
+
+		for _, p := range strings.Split(line[start+2:start+end], ";") {
+			if p == param {
+				return true
+			}
+		}
+
+		return false
+	}
+
+	return false
 }
 
 func (h *harness) assertHides(texts ...string) {

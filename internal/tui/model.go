@@ -24,6 +24,7 @@ type Model struct {
 	loaded   bool
 	err      error
 	accounts []dns.Account
+	zones    []dns.Zone
 }
 
 // New builds the model. All background work derives its context from ctx,
@@ -43,6 +44,7 @@ func New(ctx context.Context, deps Deps) *Model {
 // cacheLoadedMsg carries the cached data read from the Store at startup.
 type cacheLoadedMsg struct {
 	accounts []dns.Account
+	zones    []dns.Zone
 	err      error
 }
 
@@ -53,8 +55,16 @@ func (m *Model) Init() tea.Cmd {
 
 func (m *Model) loadCache() tea.Msg {
 	accounts, err := m.deps.Store.Accounts(m.ctx)
+	if err != nil {
+		return cacheLoadedMsg{err: err}
+	}
 
-	return cacheLoadedMsg{accounts: accounts, err: err}
+	zones, err := m.deps.Store.Zones(m.ctx)
+	if err != nil {
+		return cacheLoadedMsg{err: err}
+	}
+
+	return cacheLoadedMsg{accounts: accounts, zones: zones}
 }
 
 // Update handles a message.
@@ -66,6 +76,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loaded = true
 		m.err = msg.err
 		m.accounts = msg.accounts
+		m.zones = msg.zones
 	}
 
 	return m, nil
