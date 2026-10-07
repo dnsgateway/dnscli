@@ -25,10 +25,10 @@ func (m *Model) View() string {
 	accountsH := max(bodyH-domainsH, 3)
 
 	left := lipgloss.JoinVertical(lipgloss.Left,
-		box("Domains", m.domainLines(), leftW, domainsH, false),
-		box("Accounts", m.accountLines(), leftW, accountsH, false),
+		box("Domains", m.domainLines(), leftW, domainsH, m.focus == paneDomains),
+		box("Accounts", m.accountLines(), leftW, accountsH, m.focus == paneAccounts),
 	)
-	right := box("Records", m.recordLines(), rightW, bodyH, false)
+	right := box("Records", m.recordLines(), rightW, bodyH, m.focus == paneRecords)
 
 	return lipgloss.JoinVertical(lipgloss.Left,
 		lipgloss.JoinHorizontal(lipgloss.Top, left, right),

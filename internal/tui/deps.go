@@ -13,6 +13,8 @@ type Deps struct {
 	Store *store.Store
 	// Clock returns the current time. Defaults to time.Now.
 	Clock func() time.Time
+	// Shortcuts maps keys to actions. Defaults to DefaultShortcutProfile.
+	Shortcuts *ShortcutProfile
 
 	// Providers builds a Provider for an Account's Provider type.
 	// Placeholder until the Provider interface lands (Account discovery, Refresh).
@@ -33,6 +35,14 @@ type Resolver interface{}
 
 // UnsealMethod is one way of performing Unseal. Not built yet.
 type UnsealMethod interface{}
+
+func (d Deps) shortcuts() ShortcutProfile {
+	if d.Shortcuts == nil {
+		return DefaultShortcutProfile()
+	}
+
+	return *d.Shortcuts
+}
 
 func (d Deps) now() time.Time {
 	if d.Clock == nil {

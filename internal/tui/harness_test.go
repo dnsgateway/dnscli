@@ -112,11 +112,18 @@ func openStore(t *testing.T) (*store.Store, string) {
 func newHarness(t *testing.T, s *store.Store) *harness {
 	t.Helper()
 
+	return newHarnessWith(t, s, tui.Deps{})
+}
+
+// newHarnessWith is newHarness with extra dependencies; Store and Clock are filled in.
+func newHarnessWith(t *testing.T, s *store.Store, deps tui.Deps) *harness {
+	t.Helper()
+
+	deps.Store = s
+	deps.Clock = func() time.Time { return testNow }
+
 	h := &harness{t: t, store: s}
-	h.model = tui.New(context.Background(), tui.Deps{
-		Store: s,
-		Clock: func() time.Time { return testNow },
-	})
+	h.model = tui.New(context.Background(), deps)
 
 	h.run(h.model.Init())
 	h.send(tea.WindowSizeMsg{Width: 120, Height: 30})

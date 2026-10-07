@@ -12,14 +12,26 @@ import (
 	"github.com/sergelogvinov/dnscli/internal/dns"
 )
 
+// pane identifies one of the three panes, in Tab order.
+type pane int
+
+const (
+	paneDomains pane = iota
+	paneAccounts
+	paneRecords
+	paneCount
+)
+
 // Model is the top-level Bubble Tea model.
 type Model struct {
 	deps Deps
+	keys keymap
 
 	ctx    context.Context
 	cancel context.CancelFunc
 
 	width, height int
+	focus         pane
 
 	loaded   bool
 	err      error
@@ -34,6 +46,7 @@ func New(ctx context.Context, deps Deps) *Model {
 
 	return &Model{
 		deps:   deps,
+		keys:   newKeymap(deps.shortcuts()),
 		ctx:    ctx,
 		cancel: cancel,
 		width:  80,
@@ -77,7 +90,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err
 		m.accounts = msg.accounts
 		m.zones = msg.zones
+	case tea.KeyMsg:
+		return m, m.handle(m.keys.action(msg.String()))
 	}
 
 	return m, nil
+}
+
+// handle performs a user Action.
+func (m *Model) handle(a Action) tea.Cmd {
+	switch a {
+	case ActionNextPane:
+		m.focus = (m.focus + 1) % paneCount
+	case ActionPrevPane:
+		m.focus = (m.focus + paneCount - 1) % paneCount
+	}
+
+	return nil
 }
