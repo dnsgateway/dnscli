@@ -50,6 +50,7 @@ type Provider struct {
 	fail        map[Op]error
 	failChange  func(dns.Change) error
 	withhold    bool
+	ttlRange    []uint32 // min, max; nil when not scripted
 	calls       []Call
 	nextID      int
 }
@@ -83,6 +84,28 @@ func (p *Provider) SetRecords(zoneProviderID string, records ...dns.Record) {
 	defer p.mu.Unlock()
 
 	p.records[zoneProviderID] = slices.Clone(records)
+}
+
+// SetTTLRange makes the Providers New builds report a TTL range through
+// provider.TTLLimits. Unscripted, they do not implement it.
+func (p *Provider) SetTTLRange(minTTL, maxTTL uint32) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.ttlRange = []uint32{minTTL, maxTTL}
+}
+
+// withTTLRange is the fake with its scripted TTL range.
+type withTTLRange struct {
+	*Provider
+}
+
+// TTLRange implements provider.TTLLimits.
+func (p withTTLRange) TTLRange() (minTTL, maxTTL uint32) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	return p.ttlRange[0], p.ttlRange[1]
 }
 
 // SetZoneStatus scripts a Zone's Zone Status.
@@ -146,6 +169,13 @@ func (p *Provider) Calls() []Call {
 func (p *Provider) New(account dns.Account, token string) (provider.Provider, error) {
 	if err := p.record(Call{Op: OpNew, Account: account, Token: token}); err != nil {
 		return nil, err
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.ttlRange != nil {
+		return withTTLRange{p}, nil
 	}
 
 	return p, nil

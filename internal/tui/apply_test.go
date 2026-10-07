@@ -235,6 +235,23 @@ func TestChangingARecordsTypeKeepsTheProxyFlagOnlyWhereItApplies(t *testing.T) {
 	}
 }
 
+func TestTheRecordFormChecksTheTTLAgainstTheProvidersLimits(t *testing.T) {
+	f := refreshZones()
+	f.SetTTLRange(60, 3600)
+	h := openValidated(t, f)
+
+	for _, ttl := range []string{"30", "7200"} {
+		h.addRecord("TXT", "@", "hello", ttl)
+		h.assertShows("Add Record", "The TTL must be 1 (automatic)", "between 60 and 3600")
+		h.press("esc")
+	}
+
+	h.addRecord("TXT", "@", "hello", "60")
+	h.addRecord("TXT", "@", "auto", "1")
+	h.assertHides("Add Record")
+	h.assertShows("2 pending changes")
+}
+
 func TestARecordWithoutAProviderIDCannotBeChanged(t *testing.T) {
 	f := fake.New().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial},
 		dns.Record{Type: "TXT", Name: "work.example", Value: "first", TTL: 300},

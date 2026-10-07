@@ -31,6 +31,9 @@ type zoneRefresh struct {
 	// rate-limited the Refresh or its Zone Status read; zero when it did
 	// not say.
 	retryAt time.Time
+	// ttl is the TTLs the Zone's Provider takes, as the validating Refresh
+	// found them.
+	ttl dns.TTLRange
 }
 
 // zoneRefreshedMsg carries the result of one Refresh.
@@ -42,7 +45,9 @@ type zoneRefreshedMsg struct {
 	// zone is the Zone as the Refresh stored it, with its serial and
 	// Refresh time.
 	zone dns.Zone
-	err  error
+	// ttl is the TTLs the Zone's Provider takes.
+	ttl dns.TTLRange
+	err error
 	// statusErr is why the Zone Status could not be read, when the
 	// Refresh succeeded without it.
 	statusErr error
@@ -169,9 +174,9 @@ func (m *Model) refreshCmd(z dns.Zone, a dns.Account, r *zoneRefresh) tea.Cmd {
 	ctx, s, key, newProvider, now := m.ctx, m.deps.Store, m.key, m.deps.Providers[a.Provider], m.deps.now
 
 	return func() tea.Msg {
-		stored, statusErr, err := refresh(ctx, s, key, newProvider, a, z, now)
+		stored, ttl, statusErr, err := refresh(ctx, s, key, newProvider, a, z, now)
 
-		return zoneRefreshedMsg{zoneID: z.ID, state: r, zone: stored, err: err, statusErr: statusErr}
+		return zoneRefreshedMsg{zoneID: z.ID, state: r, zone: stored, ttl: ttl, err: err, statusErr: statusErr}
 	}
 }
 
@@ -188,16 +193,18 @@ type zoneStatusRead struct {
 // refresh reads a Zone's Records and, alongside them, its Zone Status from
 // its Provider, and replaces the cached copy with them, with the SOA
 // serial and the Refresh time, in one transaction. It returns the Zone as
-// stored.
+// stored, and the TTLs its Provider takes.
 //
 // A Zone Status that cannot be read does not fail the Refresh: the cached
 // one is kept, and shows as older than the Refresh. Why it could not be
 // read is returned as statusErr.
-func refresh(ctx context.Context, s *store.Store, key *vault.Key, newProvider provider.Constructor, a dns.Account, z dns.Zone, now func() time.Time) (stored dns.Zone, statusErr, err error) {
+func refresh(ctx context.Context, s *store.Store, key *vault.Key, newProvider provider.Constructor, a dns.Account, z dns.Zone, now func() time.Time) (stored dns.Zone, ttl dns.TTLRange, statusErr, err error) {
 	p, err := accountProvider(ctx, s, key, newProvider, a)
 	if err != nil {
-		return dns.Zone{}, nil, err
+		return dns.Zone{}, ttl, nil, err
 	}
+
+	ttl = provider.TTLRangeOf(p)
 
 	statusCtx, cancel := context.WithTimeout(ctx, zoneStatusTimeout)
 	defer cancel()
@@ -211,7 +218,7 @@ func refresh(ctx context.Context, s *store.Store, key *vault.Key, newProvider pr
 
 	rs, err := p.Records(ctx, z)
 	if err != nil {
-		return dns.Zone{}, nil, err
+		return dns.Zone{}, ttl, nil, err
 	}
 
 	status := <-read
@@ -224,7 +231,7 @@ func refresh(ctx context.Context, s *store.Store, key *vault.Key, newProvider pr
 
 	stored, err = s.SaveRefresh(ctx, z, rs.Records, rs.Serial, at)
 
-	return stored, status.err, err
+	return stored, ttl, status.err, err
 }
 
 // accountProvider builds the Provider for an Account with its API token,
@@ -270,7 +277,7 @@ func (m *Model) zoneRefreshed(msg zoneRefreshedMsg) tea.Cmd {
 	}
 
 	// A rate-limited Zone Status read holds back the next Refresh too.
-	*r = zoneRefresh{validated: true, retryAt: m.retryAt(msg.statusErr)}
+	*r = zoneRefresh{validated: true, retryAt: m.retryAt(msg.statusErr), ttl: msg.ttl}
 	m.updateZone(msg.zone)
 
 	cmds := []tea.Cmd{m.startRefreshes()}

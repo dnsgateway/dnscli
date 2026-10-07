@@ -805,3 +805,14 @@ func assertRecords(t *testing.T, got, want []dns.Record) {
 		}
 	}
 }
+
+func TestCloudflareTakesTTLsFrom60Seconds(t *testing.T) {
+	p, err := cloudflare.Config{}.New(dns.Account{Provider: "cloudflare", Name: "work"}, testToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got, want := provider.TTLRangeOf(p), (dns.TTLRange{Min: 60, Max: 86400}); got != want {
+		t.Fatalf("TTL range = %+v, want %+v", got, want)
+	}
+}

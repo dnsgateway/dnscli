@@ -34,21 +34,29 @@ func Editable(typ string) bool {
 	return false
 }
 
-// TTL limits. TTLAuto is Cloudflare's "automatic" TTL; any other TTL must
-// be between MinTTL and MaxTTL seconds.
+// TTLAuto is Cloudflare's "automatic" TTL. Any other TTL must be in the
+// Provider's TTLRange, by default between MinTTL and MaxTTL seconds.
 const (
 	TTLAuto = 1
 	MinTTL  = 30
 	MaxTTL  = 86400
 )
 
-// CheckTTL reports whether a TTL is in range.
-func CheckTTL(ttl uint32) error {
-	if ttl == TTLAuto || (ttl >= MinTTL && ttl <= MaxTTL) {
+// TTLRange is the shortest and the longest TTL a Provider takes, in seconds.
+type TTLRange struct {
+	Min, Max uint32
+}
+
+// DefaultTTLRange is the TTLRange of a Provider that does not say.
+var DefaultTTLRange = TTLRange{Min: MinTTL, Max: MaxTTL}
+
+// Check reports whether a TTL is TTLAuto or in range.
+func (r TTLRange) Check(ttl uint32) error {
+	if ttl == TTLAuto || (ttl >= r.Min && ttl <= r.Max) {
 		return nil
 	}
 
-	return fmt.Errorf("the TTL must be %d (automatic) or between %d and %d seconds", TTLAuto, MinTTL, MaxTTL)
+	return fmt.Errorf("the TTL must be %d (automatic) or between %d and %d seconds", TTLAuto, r.Min, r.Max)
 }
 
 // QualifyName turns a Record name typed for a Zone into the absolute name

@@ -120,7 +120,12 @@ func (m *Model) submitRecordForm() tea.Cmd {
 	f := m.recordForm
 	f.err = ""
 
-	r, field, err := f.record()
+	ttl := m.refreshOf(f.zone.ID).ttl
+	if ttl == (dns.TTLRange{}) {
+		ttl = dns.DefaultTTLRange
+	}
+
+	r, field, err := f.record(ttl)
 	if err != "" {
 		f.err, f.field = err, field
 
@@ -147,9 +152,9 @@ func (m *Model) submitRecordForm() tea.Cmd {
 	return nil
 }
 
-// record builds the Record the form describes, or says what is wrong with
-// it and in which field.
-func (f *recordForm) record() (dns.Record, int, string) {
+// record builds the Record the form describes, with a TTL in the Zone's
+// Provider's range, or says what is wrong with it and in which field.
+func (f *recordForm) record(ttlRange dns.TTLRange) (dns.Record, int, string) {
 	typ := dns.EditableTypes[f.typ]
 
 	name, err := dns.QualifyName(f.zone.Name, f.name)
@@ -166,11 +171,11 @@ func (f *recordForm) record() (dns.Record, int, string) {
 	if s := strings.TrimSpace(f.ttl); s != "auto" {
 		ttl, err = strconv.ParseUint(s, 10, 32)
 		if err == nil {
-			err = dns.CheckTTL(uint32(ttl))
+			err = ttlRange.Check(uint32(ttl))
 		}
 
 		if err != nil {
-			return dns.Record{}, recordFieldTTL, capitalise(dns.CheckTTL(0).Error()) + "."
+			return dns.Record{}, recordFieldTTL, capitalise(ttlRange.Check(0).Error()) + "."
 		}
 	}
 

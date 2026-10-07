@@ -26,6 +26,24 @@ type Provider interface {
 	Nameservers(ctx context.Context) ([]string, error)
 }
 
+// TTLLimits is implemented by a Provider whose Record TTLs have other
+// limits than dns.DefaultTTLRange. TTL dns.TTLAuto stays allowed.
+type TTLLimits interface {
+	// TTLRange is the shortest and the longest TTL, in seconds.
+	TTLRange() (minTTL, maxTTL uint32)
+}
+
+// TTLRangeOf returns the TTLs a Provider takes.
+func TTLRangeOf(p Provider) dns.TTLRange {
+	if l, ok := p.(TTLLimits); ok {
+		minTTL, maxTTL := l.TTLRange()
+
+		return dns.TTLRange{Min: minTTL, Max: maxTTL}
+	}
+
+	return dns.DefaultTTLRange
+}
+
 // RecordSet is a Zone's Records as the Provider returned them.
 type RecordSet struct {
 	Records []dns.Record

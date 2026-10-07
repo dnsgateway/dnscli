@@ -113,7 +113,16 @@ type Provider struct {
 	dnssec   *cfdns.DNSSECService
 }
 
-var _ provider.Provider = (*Provider)(nil)
+var (
+	_ provider.Provider  = (*Provider)(nil)
+	_ provider.TTLLimits = (*Provider)(nil)
+)
+
+// TTLRange implements provider.TTLLimits: below Enterprise plans, a
+// Cloudflare TTL is at least 60 seconds, besides 1 for automatic.
+func (p *Provider) TTLRange() (minTTL, maxTTL uint32) {
+	return 60, 86400
+}
 
 // Zones implements provider.Provider. Each Zone carries the nameservers
 // Cloudflare assigned to it, which can differ between Zones of one Account.
