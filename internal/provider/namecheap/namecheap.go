@@ -183,25 +183,34 @@ type wireHost struct {
 
 // getHostsResult is a getHosts CommandResponse.
 type getHostsResult struct {
-	Hosts []wireHost `xml:"DomainDNSGetHostsResult>host"`
+	Result struct {
+		// EmailType is the domain's mail setting, such as MX or FWD.
+		EmailType string     `xml:"EmailType,attr"`
+		Hosts     []wireHost `xml:"host"`
+	} `xml:"DomainDNSGetHostsResult"`
 }
 
 // Records implements provider.Provider. getHosts answers the whole host
 // list at once. Namecheap reports no SOA serial.
 func (p *Provider) Records(ctx context.Context, zone dns.Zone) (provider.RecordSet, error) {
-	sld, tld := splitDomain(zone.ProviderID)
-
-	res, err := call[getHostsResult](ctx, p, "namecheap.domains.dns.getHosts", url.Values{"SLD": {sld}, "TLD": {tld}})
+	res, err := p.getHosts(ctx, zone)
 	if err != nil {
 		return provider.RecordSet{}, err
 	}
 
-	records := make([]dns.Record, 0, len(res.Hosts))
-	for _, h := range res.Hosts {
+	records := make([]dns.Record, 0, len(res.Result.Hosts))
+	for _, h := range res.Result.Hosts {
 		records = append(records, toRecord(zone.Name, h))
 	}
 
 	return provider.RecordSet{Records: records}, nil
+}
+
+// getHosts reads a Zone's whole host list and its EmailType.
+func (p *Provider) getHosts(ctx context.Context, zone dns.Zone) (getHostsResult, error) {
+	sld, tld := splitDomain(zone.ProviderID)
+
+	return call[getHostsResult](ctx, p, "namecheap.domains.dns.getHosts", url.Values{"SLD": {sld}, "TLD": {tld}})
 }
 
 // toRecord turns a host into a Record of a Zone, with an absolute name, its
@@ -246,21 +255,6 @@ func splitDomain(domain string) (sld, tld string) {
 	sld, tld, _ = strings.Cut(strings.TrimSuffix(domain, "."), ".")
 
 	return sld, tld
-}
-
-// Apply implements provider.Provider. Namecheap writes are not supported
-// yet: every change fails and nothing is sent.
-func (p *Provider) Apply(_ context.Context, cs dns.Changeset) (provider.ApplyResult, error) {
-	res := provider.ApplyResult{Results: make([]provider.ChangeResult, len(cs.Changes))}
-
-	for i, c := range cs.Changes {
-		res.Results[i] = provider.ChangeResult{
-			Change: c,
-			Err:    fmt.Errorf("namecheap: writing records is %w", provider.ErrNotImplemented),
-		}
-	}
-
-	return res, nil
 }
 
 // ZoneStatus implements provider.Provider. getHosts reports neither

@@ -48,6 +48,8 @@ type ncError struct {
 type ncAPI struct {
 	domains []ncDomain
 	hosts   map[string][]ncHost // by domain
+	// emailType is a domain's EmailType; "MX" when not set.
+	emailType map[string]string
 
 	// servedPageSize, when set, is the page size getList serves whatever
 	// PageSize asks for.
@@ -56,6 +58,9 @@ type ncAPI struct {
 	noPaging bool
 	// stuckPage makes getList answer page 1 whatever Page asks for.
 	stuckPage bool
+	// setHostsFalse makes setHosts answer OK with IsSuccess="false" and
+	// change nothing.
+	setHostsFalse bool
 
 	// fail, when it returns errors, answers the request with Status="ERROR".
 	fail func(command string) []ncError
@@ -127,6 +132,8 @@ func (api *ncAPI) handler(t *testing.T) http.Handler {
 			api.getList(w, r)
 		case "namecheap.domains.dns.getHosts":
 			api.getHosts(w, r)
+		case "namecheap.domains.dns.setHosts":
+			api.setHosts(w, r)
 		default:
 			writeErrors(w, ncError{1010104, "Command " + cmd + " is invalid"})
 		}
@@ -181,7 +188,7 @@ func (api *ncAPI) getHosts(w http.ResponseWriter, r *http.Request) {
 
 	var b strings.Builder
 
-	fmt.Fprintf(&b, `<DomainDNSGetHostsResult Domain="%s" EmailType="MX" IsUsingOurDNS="true">`, domain)
+	fmt.Fprintf(&b, `<DomainDNSGetHostsResult Domain="%s" EmailType="%s" IsUsingOurDNS="true">`, domain, api.emailTypeOf(domain))
 
 	for _, h := range hosts {
 		fmt.Fprintf(&b, `<host HostId="%s" Name="%s" Type="%s" Address="%s" MXPref="%d" TTL="%d" AssociatedAppTitle="" FriendlyName="" IsActive="true" IsDDNSEnabled="false"/>`,
@@ -191,6 +198,98 @@ func (api *ncAPI) getHosts(w http.ResponseWriter, r *http.Request) {
 	b.WriteString(`</DomainDNSGetHostsResult>`)
 
 	writeOK(w, "namecheap.domains.dns.getHosts", b.String())
+}
+
+func (api *ncAPI) emailTypeOf(domain string) string {
+	if t, ok := api.emailType[domain]; ok {
+		return t
+	}
+
+	return "MX"
+}
+
+// setHosts replaces a domain's hosts with the numbered HostNameN,
+// RecordTypeN, AddressN, MXPrefN and TTLN form fields, from 1, giving
+// each a new HostId as Namecheap does.
+func (api *ncAPI) setHosts(w http.ResponseWriter, r *http.Request) {
+	domain := r.Form.Get("SLD") + "." + r.Form.Get("TLD")
+
+	if _, ok := api.hosts[domain]; !ok {
+		writeErrors(w, ncError{2019166, "Domain not found"})
+
+		return
+	}
+
+	if api.setHostsFalse {
+		writeOK(w, "namecheap.domains.dns.setHosts",
+			fmt.Sprintf(`<DomainDNSSetHostsResult Domain="%s" IsSuccess="false"><Warnings /></DomainDNSSetHostsResult>`, domain))
+
+		return
+	}
+
+	hosts := sentHosts(r.Form)
+	for i := range hosts {
+		hosts[i].ID = strconv.Itoa(1000 + i)
+	}
+
+	api.mu.Lock()
+	api.hosts[domain] = hosts
+
+	if api.emailType == nil {
+		api.emailType = map[string]string{}
+	}
+
+	api.emailType[domain] = r.Form.Get("EmailType")
+	api.mu.Unlock()
+
+	writeOK(w, "namecheap.domains.dns.setHosts",
+		fmt.Sprintf(`<DomainDNSSetHostsResult Domain="%s" IsSuccess="true"><Warnings /></DomainDNSSetHostsResult>`, domain))
+}
+
+// sentHost is one host of a setHosts request, as sent. MXPref is "" when
+// the request left it out.
+type sentHost struct {
+	Name, Type, Address, MXPref, TTL string
+}
+
+// sentHosts reads the numbered host fields of a setHosts form.
+func sentHosts(form url.Values) []ncHost {
+	var out []ncHost
+
+	for _, h := range sentHostFields(form) {
+		pref, _ := strconv.Atoi(h.MXPref)
+		ttl, _ := strconv.Atoi(h.TTL)
+		out = append(out, ncHost{Name: h.Name, Type: h.Type, Address: h.Address, MXPref: pref, TTL: ttl})
+	}
+
+	return out
+}
+
+func sentHostFields(form url.Values) []sentHost {
+	var out []sentHost
+
+	for i := 1; form.Has("HostName" + strconv.Itoa(i)); i++ {
+		n := strconv.Itoa(i)
+		out = append(out, sentHost{
+			Name: form.Get("HostName" + n), Type: form.Get("RecordType" + n), Address: form.Get("Address" + n),
+			MXPref: form.Get("MXPref" + n), TTL: form.Get("TTL" + n),
+		})
+	}
+
+	return out
+}
+
+// setHostsSent returns the parameters of every setHosts request.
+func (api *ncAPI) setHostsSent() []url.Values {
+	var out []url.Values
+
+	for _, r := range api.Requests() {
+		if r.Get("Command") == "namecheap.domains.dns.setHosts" {
+			out = append(out, r)
+		}
+	}
+
+	return out
 }
 
 func xmlEscape(s string) string {
@@ -714,47 +813,5 @@ func TestNamecheapTakesTTLsFrom60To60000WithoutAutomaticOrProxy(t *testing.T) {
 
 	if provider.AutoTTLOf(p) || provider.ProxiableTypesOf(p) != nil {
 		t.Error("Namecheap has no automatic TTL and no proxy")
-	}
-}
-
-func TestApplyRefusesEveryChangeAndSendsNothing(t *testing.T) {
-	api := &ncAPI{hosts: map[string][]ncHost{"example.com": {
-		{ID: "11", Name: "@", Type: "A", Address: "192.0.2.1", TTL: 1800},
-	}}}
-
-	before := dns.Record{ProviderID: "11", Type: "A", Name: "example.com", Value: "192.0.2.1", TTL: 1800}
-	after := dns.Record{Type: "A", Name: "example.com", Value: "192.0.2.2", TTL: 1800}
-
-	changes := []dns.Change{
-		{Kind: dns.ChangeAdd, After: after},
-		{Kind: dns.ChangeModify, Before: before, After: after},
-		{Kind: dns.ChangeDelete, Before: before},
-	}
-
-	res, err := newProvider(t, api).Apply(context.Background(), dns.Changeset{Zone: example, Changes: changes})
-	if err != nil {
-		t.Fatalf("Apply: %v", err)
-	}
-
-	if len(res.Results) != len(changes) {
-		t.Fatalf("results = %v, want one per change", res.Results)
-	}
-
-	for i, r := range res.Results {
-		if !reflect.DeepEqual(r.Change, changes[i]) {
-			t.Errorf("result %d is for %+v, want %+v", i, r.Change, changes[i])
-		}
-
-		if !errors.Is(r.Err, provider.ErrNotImplemented) || !strings.Contains(r.Err.Error(), "namecheap") {
-			t.Errorf("result %d: err = %v, want Namecheap writes not supported yet", i, r.Err)
-		}
-
-		if !reflect.DeepEqual(r.Record, dns.Record{}) {
-			t.Errorf("result %d: Record = %+v, want none", i, r.Record)
-		}
-	}
-
-	if got := api.Commands(); len(got) != 0 {
-		t.Errorf("Apply sent %v, want nothing", got)
 	}
 }
