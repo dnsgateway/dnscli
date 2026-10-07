@@ -114,12 +114,19 @@ type recordSet struct {
 	// with it, in any case: an SPF Record is the apex TXT starting
 	// "v=spf1", among other apex TXT Records.
 	prefix string
-	want   []want
+	// wildcard sets own the Records at every name their wildcard name,
+	// such as *._domainkey, covers, as well as at the wildcard itself.
+	wildcard bool
+	want     []want
 }
 
 // owns reports whether a Record, named absolutely, belongs to the set.
 func (s recordSet) owns(name string, r dns.Record) bool {
-	if !sameName(r.Name, name) || !slices.Contains(s.types, r.Type) {
+	if !slices.Contains(s.types, r.Type) {
+		return false
+	}
+
+	if !sameName(r.Name, name) && (!s.wildcard || !covers(name, r.Name)) {
 		return false
 	}
 
@@ -187,7 +194,7 @@ func (s recordSet) changes(name string, current []dns.Record, ttl uint32) []dns.
 		}
 
 		i := slices.IndexFunc(missing, func(w want) bool {
-			return w.typ == r.Type && normalValue(r.Type, r.Value) == normalValue(w.typ, w.value)
+			return w.typ == r.Type && sameName(r.Name, name) && normalValue(r.Type, r.Value) == normalValue(w.typ, w.value)
 		})
 		if i >= 0 {
 			missing = slices.Delete(missing, i, i+1)
@@ -198,7 +205,7 @@ func (s recordSet) changes(name string, current []dns.Record, ttl uint32) []dns.
 		extra = append(extra, r)
 	}
 
-	if len(extra) == 1 && len(missing) == 1 && extra[0].Type == missing[0].typ {
+	if len(extra) == 1 && len(missing) == 1 && extra[0].Type == missing[0].typ && sameName(extra[0].Name, name) {
 		after := extra[0]
 		after.Type, after.Name, after.Value, after.TTL = missing[0].typ, name, missing[0].value, ttl
 
@@ -229,6 +236,15 @@ func SameData(a, b dns.Record) bool {
 // sameName compares DNS names: in any case, with or without a trailing dot.
 func sameName(a, b string) bool {
 	return strings.EqualFold(strings.TrimSuffix(a, "."), strings.TrimSuffix(b, "."))
+}
+
+// covers reports whether a wildcard name, such as *._domainkey.example.com,
+// covers a name below it, such as google._domainkey.example.com.
+func covers(wildcard, name string) bool {
+	base := strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(wildcard, "*"), "."))
+	name = strings.ToLower(strings.TrimSuffix(name, "."))
+
+	return strings.HasPrefix(base, ".") && strings.HasSuffix(name, base) && len(name) > len(base)
 }
 
 // normalValue is a Record value in the form the Templates compare: host
@@ -471,13 +487,13 @@ func checkDKIMKey(v string) (string, error) {
 func parked() Template {
 	return Template{
 		Name:    "Parked domain",
-		Summary: "No mail to or from the domain: a null MX, an SPF and a DMARC reject policy, and an empty DKIM key for every selector.",
+		Summary: "No mail to or from the domain: a null MX, an SPF and a DMARC reject policy, and an empty DKIM key for every selector, in place of every DKIM Record under _domainkey.",
 		sets: func(Values) []recordSet {
 			return []recordSet{
 				mxSet(want{"MX", "0 ."}),
 				spf("v=spf1 -all"),
 				dmarc("v=DMARC1; p=reject; sp=reject; adkim=s; aspf=s"),
-				txtAt("*._domainkey", "v=DKIM1; p="),
+				{name: "*._domainkey", types: []string{"TXT", "CNAME"}, wildcard: true, want: []want{{"TXT", "v=DKIM1; p="}}},
 			}
 		},
 	}

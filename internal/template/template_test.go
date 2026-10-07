@@ -77,6 +77,9 @@ var (
 	parkedSPF = rec("p2", "TXT", "example.com", `"v=spf1 -all"`, 300)
 	parkedDM  = rec("p3", "TXT", "_dmarc.example.com", "v=DMARC1; p=reject; sp=reject; adkim=s; aspf=s", 300)
 	parkedDK  = rec("p4", "TXT", "*._domainkey.example.com", "v=DKIM1; p=", 300)
+
+	googleDKIM = rec("d1", "TXT", "google._domainkey.example.com", "v=DKIM1; k=rsa; p=MIIB", 300)
+	protonDKIM = rec("d2", "CNAME", "protonmail._domainkey.Example.com.", "protonmail.domainkey.d.domains.proton.ch", 300)
 )
 
 func TestParkedDomainReplacesTheRecordsItOwnsAndLeavesTheRestAlone(t *testing.T) {
@@ -114,6 +117,23 @@ func TestParkedDomainReplacesTheRecordsItOwnsAndLeavesTheRestAlone(t *testing.T)
 				add("TXT", "_dmarc.example.com", "v=DMARC1; p=reject; sp=reject; adkim=s; aspf=s"),
 				add("TXT", "*._domainkey.example.com", "v=DKIM1; p="),
 			},
+		},
+		{
+			name: "every DKIM Record under _domainkey is deleted for the empty wildcard key",
+			current: []dns.Record{
+				parkedMX, parkedSPF, parkedDM, googleDKIM, protonDKIM,
+				rec("d3", "TXT", "_domainkey.example.com", "o=-", 300),
+				rec("d4", "TXT", "s1._domainkey.sub.example.com", "v=DKIM1; p=SUB", 300),
+			},
+			want: []dns.Change{
+				del(googleDKIM), del(protonDKIM),
+				add("TXT", "*._domainkey.example.com", "v=DKIM1; p="),
+			},
+		},
+		{
+			name:    "a DKIM Record holding the empty key at a selector is deleted too",
+			current: []dns.Record{parkedMX, parkedSPF, parkedDM, parkedDK, rec("d5", "TXT", "s1._domainkey.example.com", "v=DKIM1; p=", 300)},
+			want:    []dns.Change{del(rec("d5", "TXT", "s1._domainkey.example.com", "v=DKIM1; p=", 300))},
 		},
 		{
 			name:    "Records already as the Template wants them are kept, whatever their TTL, case or quoting",
