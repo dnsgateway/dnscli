@@ -143,7 +143,7 @@ type want struct {
 
 // Builtin returns the built-in Templates, in the order the UI offers them.
 func Builtin() []Template {
-	return []Template{google(), parked()}
+	return []Template{google(), proton(), parked()}
 }
 
 // Changes returns the changes that make current hold the Template's
@@ -349,6 +349,68 @@ func google() Template {
 	}
 }
 
+func proton() Template {
+	dkim := func(n string) Param {
+		return Param{
+			Name: "dkim" + n, Label: "DKIM target " + n, Required: true, check: checkHost,
+			Hint: "The value of the protonmail" + strings.TrimPrefix(n, "1") + "._domainkey CNAME on the DKIM tab.",
+		}
+	}
+
+	return Template{
+		Name:    "Proton mail",
+		Summary: "Mail through Proton: the verification token, its MX, an SPF that includes Proton, the three DKIM CNAMEs and a DMARC policy.",
+		Params: append([]Param{
+			{
+				Name: "verification", Label: "Verification token", Required: true, check: checkProtonToken,
+				Hint: "The protonmail-verification= value on the Verify tab.",
+			},
+			dkim("1"), dkim("2"), dkim("3"),
+		}, dmarcParams()...),
+		sets: func(v Values) []recordSet {
+			return []recordSet{
+				{name: "@", types: []string{"TXT"}, prefix: protonVerification, want: []want{{"TXT", v["verification"]}}},
+				mxSet(want{"MX", "10 mail.protonmail.ch"}, want{"MX", "20 mailsec.protonmail.ch"}),
+				spf("v=spf1 include:_spf.protonmail.ch ~all"),
+				cnameAt("protonmail._domainkey", v["dkim1"]),
+				cnameAt("protonmail2._domainkey", v["dkim2"]),
+				cnameAt("protonmail3._domainkey", v["dkim3"]),
+				dmarcRecord(v),
+			}
+		},
+	}
+}
+
+const protonVerification = "protonmail-verification="
+
+var tokenRE = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+// checkProtonToken takes Proton's verification token, with or without
+// its "protonmail-verification=" prefix, and returns the TXT value.
+func checkProtonToken(v string) (string, error) {
+	token := v
+	if len(token) > len(protonVerification) && strings.EqualFold(token[:len(protonVerification)], protonVerification) {
+		token = token[len(protonVerification):]
+	}
+
+	if !tokenRE.MatchString(token) {
+		return "", fmt.Errorf("%q is not a verification token", v)
+	}
+
+	return protonVerification + token, nil
+}
+
+// checkHost takes a host name, such as a CNAME target, and returns it
+// without a trailing dot.
+func checkHost(v string) (string, error) {
+	v = strings.TrimSuffix(v, ".")
+	if err := dns.CheckValue("CNAME", v); err != nil {
+		return "", fmt.Errorf("%q is not a host name", v)
+	}
+
+	return v, nil
+}
+
 // checkMailto takes an email address, with or without "mailto:", and
 // returns it as a DMARC report URI.
 func checkMailto(v string) (string, error) {
@@ -435,4 +497,10 @@ func dmarc(value string) recordSet {
 // its name, such as a DKIM key at <selector>._domainkey.
 func txtAt(name, value string) recordSet {
 	return recordSet{name: name, types: []string{"TXT", "CNAME"}, want: []want{{"TXT", value}}}
+}
+
+// cnameAt is a single CNAME Record that replaces every TXT and CNAME
+// Record at its name, such as a DKIM key a mail service hosts.
+func cnameAt(name, target string) recordSet {
+	return recordSet{name: name, types: []string{"TXT", "CNAME"}, want: []want{{"CNAME", target}}}
 }

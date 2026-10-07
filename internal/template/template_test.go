@@ -243,6 +243,78 @@ func TestGoogleMail(t *testing.T) {
 	}
 }
 
+func TestProtonMail(t *testing.T) {
+	values := template.Values{
+		"verification": "protonmail-verification=0123456789abcdef",
+		"dkim1":        "protonmail.domainkey.dabc.domains.proton.ch.",
+		"dkim2":        "protonmail2.domainkey.dabc.domains.proton.ch",
+		"dkim3":        "protonmail3.domainkey.dabc.domains.proton.ch",
+		"dmarc_policy": "quarantine",
+	}
+
+	oldDKIM := rec("r9", "TXT", "protonmail._domainkey.example.com", "v=DKIM1; p=OLD", 300)
+	oldVerify := rec("r10", "TXT", "example.com", "protonmail-verification=old", 300)
+
+	cases := []struct {
+		name    string
+		current []dns.Record
+		values  template.Values
+		want    []dns.Change
+	}{
+		{
+			name:   "an empty Zone",
+			values: values,
+			want: []dns.Change{
+				add("TXT", "example.com", "protonmail-verification=0123456789abcdef"),
+				add("MX", "example.com", "10 mail.protonmail.ch"),
+				add("MX", "example.com", "20 mailsec.protonmail.ch"),
+				add("TXT", "example.com", "v=spf1 include:_spf.protonmail.ch ~all"),
+				add("CNAME", "protonmail._domainkey.example.com", "protonmail.domainkey.dabc.domains.proton.ch"),
+				add("CNAME", "protonmail2._domainkey.example.com", "protonmail2.domainkey.dabc.domains.proton.ch"),
+				add("CNAME", "protonmail3._domainkey.example.com", "protonmail3.domainkey.dabc.domains.proton.ch"),
+				add("TXT", "_dmarc.example.com", "v=DMARC1; p=quarantine"),
+			},
+		},
+		{
+			name:    "a Zone with SPF, DMARC, MX, an old verification token and a TXT DKIM key",
+			current: []dns.Record{webA, otherTXT, oldSPF, oldDMARC, oldMX10, oldVerify, oldDKIM},
+			values:  template.Values{"verification": "0123456789abcdef", "dkim1": "a.example.net", "dkim2": "b.example.net", "dkim3": "c.example.net"},
+			want: []dns.Change{
+				modify(oldVerify, "protonmail-verification=0123456789abcdef"),
+				del(oldMX10),
+				add("MX", "example.com", "10 mail.protonmail.ch"),
+				add("MX", "example.com", "20 mailsec.protonmail.ch"),
+				modify(oldSPF, "v=spf1 include:_spf.protonmail.ch ~all"),
+				del(oldDKIM),
+				add("CNAME", "protonmail._domainkey.example.com", "a.example.net"),
+				add("CNAME", "protonmail2._domainkey.example.com", "b.example.net"),
+				add("CNAME", "protonmail3._domainkey.example.com", "c.example.net"),
+				modify(oldDMARC, "v=DMARC1; p=none"),
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tpl := byName(t, "Proton mail")
+
+			got, err := tpl.Changes(zone, tc.current, tc.values, 3600)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("changes =\n%+v\nwant\n%+v", got, tc.want)
+			}
+
+			again, err := tpl.Changes(zone, applied(tc.current, got), tc.values, 3600)
+			if err != nil || len(again) != 0 {
+				t.Fatalf("applying again = %+v, %v; want no changes", again, err)
+			}
+		})
+	}
+}
+
 func TestTemplateParametersAreChecked(t *testing.T) {
 	cases := []struct {
 		template string
@@ -255,6 +327,10 @@ func TestTemplateParametersAreChecked(t *testing.T) {
 		{"Google mail", template.Values{"dkim_key": "not base64!"}, "dkim_key"},
 		{"Google mail", template.Values{"dkim_key": "v=DKIM1; k=rsa"}, "dkim_key"},
 		{"Google mail", template.Values{"dkim_selector": "bad selector", "dkim_key": "AAAA"}, "dkim_selector"},
+		{"Proton mail", template.Values{"dkim1": "a.example", "dkim2": "b.example", "dkim3": "c.example"}, "verification"},
+		{"Proton mail", template.Values{"verification": "bad token!", "dkim1": "a.example", "dkim2": "b.example", "dkim3": "c.example"}, "verification"},
+		{"Proton mail", template.Values{"verification": "abc", "dkim2": "b.example", "dkim3": "c.example"}, "dkim1"},
+		{"Proton mail", template.Values{"verification": "abc", "dkim1": "a.example", "dkim2": "not a host", "dkim3": "c.example"}, "dkim2"},
 	}
 
 	for _, tc := range cases {
