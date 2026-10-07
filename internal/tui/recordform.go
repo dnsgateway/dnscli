@@ -20,6 +20,12 @@ const (
 	recordFieldCount
 )
 
+// proxiedExtra is the Record extra holding Cloudflare's proxy flag, which
+// only proxiableTypes take: changing a Record to another type drops it.
+const proxiedExtra = "proxied"
+
+var proxiableTypes = []string{"A", "AAAA", "CNAME"}
+
 // defaultTTL is the TTL the Record form offers for a new Record.
 const defaultTTL = 300
 
@@ -175,6 +181,10 @@ func (f *recordForm) record() (dns.Record, int, string) {
 	if f.edit != nil {
 		r.ProviderID = f.edit.rec.ProviderID
 		r.Extras = maps.Clone(f.edit.rec.Extras)
+
+		if !slices.Contains(proxiableTypes, typ) {
+			delete(r.Extras, proxiedExtra)
+		}
 	}
 
 	return r, 0, ""

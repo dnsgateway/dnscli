@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -178,6 +179,60 @@ func TestDeletingAModifiedRecordDeletesItAsTheChangeWasBuiltFrom(t *testing.T) {
 	h.press("d", "p")
 
 	h.assertShows("- @ A 203.0.113.20 TTL 300")
+}
+
+func TestChangingARecordsTypeKeepsTheProxyFlagOnlyWhereItApplies(t *testing.T) {
+	proxied := dns.Record{ProviderID: "rw3", Type: "CNAME", Name: "www.work.example", Value: "work.example", TTL: 300,
+		Extras: map[string]string{"proxied": "true", "comment": "kept"}}
+
+	cases := []struct {
+		typ  string
+		want map[string]string
+	}{
+		{"A", map[string]string{"proxied": "true", "comment": "kept"}},
+		{"TXT", map[string]string{"comment": "kept"}},
+	}
+
+	for _, c := range cases {
+		t.Run(c.typ, func(t *testing.T) {
+			f := fake.New().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial},
+				liveRecords[0], liveRecords[1], proxied)
+			h := openValidated(t, f)
+
+			// The CNAME is the third row; step its type to c.typ.
+			h.press("j", "j", "e")
+			h.assertShows("Edit Record", "‹ CNAME ›")
+
+			key, steps := "down", slices.Index(dns.EditableTypes, c.typ)-slices.Index(dns.EditableTypes, "CNAME")
+			if steps < 0 {
+				key, steps = "up", -steps
+			}
+
+			for range steps {
+				h.press(key)
+			}
+
+			h.press("tab", "tab")
+			if c.typ == "A" {
+				h.clearText(len("work.example"))
+				h.typeText("192.0.2.1")
+			}
+
+			h.press("enter", "enter")
+			h.assertShows("~ www.work.example", "1 pending change")
+
+			h.press("p", "enter")
+
+			calls := applyCalls(f)
+			if len(calls) != 1 || len(calls[0].Changes) != 1 {
+				t.Fatalf("Apply calls = %+v", calls)
+			}
+
+			if got := calls[0].Changes[0].After; got.Type != c.typ || !reflect.DeepEqual(got.Extras, c.want) {
+				t.Fatalf("applied Record = %+v, want type %s with extras %v", got, c.typ, c.want)
+			}
+		})
+	}
 }
 
 func TestARecordWithoutAProviderIDCannotBeChanged(t *testing.T) {
