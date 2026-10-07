@@ -1,12 +1,15 @@
 package tui_test
 
 import (
+	"context"
 	"errors"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
+	"github.com/sergelogvinov/dnscli/internal/provider"
 	"github.com/sergelogvinov/dnscli/internal/provider/fake"
 	"github.com/sergelogvinov/dnscli/internal/tui"
 )
@@ -122,4 +125,81 @@ func TestAZoneWhoseDNSSECIsPendingSaysSo(t *testing.T) {
 	h = newHarness(t, s)
 	h.press("enter")
 	h.assertStatusBarShows("DNSSEC pending")
+}
+
+func TestARateLimitedZoneStatusReadStillSavesTheRecordsButHoldsTheNextRefresh(t *testing.T) {
+	f := refreshZones()
+	f.SetZoneStatus("zw1", dns.ZoneStatus{DNSSEC: dns.On, HSTS: dns.Off})
+	now := testNow
+	h, _, _ := newRefreshHarnessWith(t, f, tui.Deps{Clock: func() time.Time { return now }})
+
+	f.Fail(fake.OpZoneStatus, &provider.APIError{Provider: "cloudflare", StatusCode: http.StatusTooManyRequests, RetryAfter: 90 * time.Second})
+	h.press("enter")
+
+	h.assertShows("validated this session", "203.0.113.20")
+	h.assertStatusBarShows("DNSSEC ?", "HSTS ?")
+
+	// The Provider asked not to be called again yet.
+	f.Fail(fake.OpZoneStatus, nil)
+	h.press("r")
+
+	retryAt := testNow.Add(90 * time.Second).Local().Format(time.TimeOnly)
+	h.assertShows("rate-limited until " + retryAt)
+
+	if n := recordsCalls(f, "zw1"); n != 1 {
+		t.Fatalf("Records calls = %d before the Provider's retry time, want 1", n)
+	}
+
+	now = testNow.Add(90 * time.Second)
+	h.press("r")
+
+	h.assertStatusBarShows("DNSSEC on", "HSTS off")
+}
+
+// statusFirst is a Provider whose Records answer only once its Zone Status
+// is being read, so a Refresh that reads them one after the other fails.
+type statusFirst struct {
+	provider.Provider
+
+	statusAsked chan struct{}
+}
+
+func (p *statusFirst) ZoneStatus(ctx context.Context, z dns.Zone) (dns.ZoneStatus, error) {
+	close(p.statusAsked)
+
+	return p.Provider.ZoneStatus(ctx, z)
+}
+
+func (p *statusFirst) Records(ctx context.Context, z dns.Zone) (provider.RecordSet, error) {
+	select {
+	case <-p.statusAsked:
+		return p.Provider.Records(ctx, z)
+	case <-time.After(5 * time.Second):
+		return provider.RecordSet{}, errors.New("the Zone Status was not read alongside the Records")
+	}
+}
+
+func TestARefreshReadsTheZoneStatusAlongsideTheRecords(t *testing.T) {
+	f := refreshZones()
+	f.SetZoneStatus("zw1", dns.ZoneStatus{DNSSEC: dns.On, HSTS: dns.On})
+
+	s, _ := openStore(t)
+	h := newHarnessWith(t, s, tui.Deps{
+		Providers: provider.Registry{"cloudflare": func(a dns.Account, token string) (provider.Provider, error) {
+			p, err := f.New(a, token)
+
+			return &statusFirst{Provider: p, statusAsked: make(chan struct{})}, err
+		}},
+		UnsealMethod: fastPassphrase(),
+	})
+	h.fillAddAccount("work", token)
+	h.typeText(passphrase)
+	h.press("tab")
+	h.typeText(passphrase)
+	h.press("enter")
+
+	h.press("enter")
+
+	h.assertShows("validated this session", "203.0.113.20")
+	h.assertStatusBarShows("DNSSEC on", "HSTS on")
 }

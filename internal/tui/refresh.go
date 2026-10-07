@@ -28,7 +28,8 @@ type zoneRefresh struct {
 	// err is why the latest Refresh failed.
 	err error
 	// retryAt is when the Provider asked to be called again, after it
-	// rate-limited the Refresh; zero when it did not say.
+	// rate-limited the Refresh or its Zone Status read; zero when it did
+	// not say.
 	retryAt time.Time
 }
 
@@ -42,6 +43,9 @@ type zoneRefreshedMsg struct {
 	// Refresh time.
 	zone dns.Zone
 	err  error
+	// statusErr is why the Zone Status could not be read, when the
+	// Refresh succeeded without it.
+	statusErr error
 }
 
 // validatedZone reports whether a Zone is a Validated Zone: Refreshed
@@ -161,37 +165,62 @@ func (m *Model) refreshCmd(z dns.Zone, a dns.Account, r *zoneRefresh) tea.Cmd {
 	ctx, s, key, newProvider, now := m.ctx, m.deps.Store, m.key, m.deps.Providers[a.Provider], m.deps.now
 
 	return func() tea.Msg {
-		stored, err := refresh(ctx, s, key, newProvider, a, z, now)
+		stored, statusErr, err := refresh(ctx, s, key, newProvider, a, z, now)
 
-		return zoneRefreshedMsg{zoneID: z.ID, state: r, zone: stored, err: err}
+		return zoneRefreshedMsg{zoneID: z.ID, state: r, zone: stored, err: err, statusErr: statusErr}
 	}
 }
 
-// refresh reads a Zone's Records and Zone Status from its Provider and
-// replaces the cached copy with them, with the SOA serial and the Refresh
-// time, in one transaction. It returns the Zone as stored.
+// zoneStatusTimeout bounds the Zone Status read of a Refresh, so a slow
+// one holds back saving the Records for no longer than this.
+const zoneStatusTimeout = 10 * time.Second
+
+// zoneStatusRead is the result of a Zone Status read.
+type zoneStatusRead struct {
+	status dns.ZoneStatus
+	err    error
+}
+
+// refresh reads a Zone's Records and, alongside them, its Zone Status from
+// its Provider, and replaces the cached copy with them, with the SOA
+// serial and the Refresh time, in one transaction. It returns the Zone as
+// stored.
 //
 // A Zone Status that cannot be read does not fail the Refresh: the cached
-// one is kept, and shows as older than the Refresh.
-func refresh(ctx context.Context, s *store.Store, key *vault.Key, newProvider provider.Constructor, a dns.Account, z dns.Zone, now func() time.Time) (dns.Zone, error) {
+// one is kept, and shows as older than the Refresh. Why it could not be
+// read is returned as statusErr.
+func refresh(ctx context.Context, s *store.Store, key *vault.Key, newProvider provider.Constructor, a dns.Account, z dns.Zone, now func() time.Time) (stored dns.Zone, statusErr, err error) {
 	p, err := accountProvider(ctx, s, key, newProvider, a)
 	if err != nil {
-		return dns.Zone{}, err
+		return dns.Zone{}, nil, err
 	}
+
+	statusCtx, cancel := context.WithTimeout(ctx, zoneStatusTimeout)
+	defer cancel()
+
+	read := make(chan zoneStatusRead, 1)
+
+	go func() {
+		status, err := p.ZoneStatus(statusCtx, z)
+		read <- zoneStatusRead{status: status, err: err}
+	}()
 
 	rs, err := p.Records(ctx, z)
 	if err != nil {
-		return dns.Zone{}, err
+		return dns.Zone{}, nil, err
 	}
 
+	status := <-read
 	at := now()
 
 	z.Status, z.StatusAt = dns.ZoneStatus{}, time.Time{}
-	if status, err := p.ZoneStatus(ctx, z); err == nil {
-		z.Status, z.StatusAt = status, at
+	if status.err == nil {
+		z.Status, z.StatusAt = status.status, at
 	}
 
-	return s.SaveRefresh(ctx, z, rs.Records, rs.Serial, at)
+	stored, err = s.SaveRefresh(ctx, z, rs.Records, rs.Serial, at)
+
+	return stored, status.err, err
 }
 
 // accountProvider builds the Provider for an Account with its API token,
@@ -231,17 +260,13 @@ func (m *Model) zoneRefreshed(msg zoneRefreshedMsg) tea.Cmd {
 	}
 
 	if msg.err != nil {
-		*r = zoneRefresh{err: msg.err}
-
-		var apiErr *provider.APIError
-		if errors.As(msg.err, &apiErr) && apiErr.RetryAfter > 0 {
-			r.retryAt = m.deps.now().Add(apiErr.RetryAfter)
-		}
+		*r = zoneRefresh{err: msg.err, retryAt: m.retryAt(msg.err)}
 
 		return m.startRefreshes()
 	}
 
-	*r = zoneRefresh{validated: true}
+	// A rate-limited Zone Status read holds back the next Refresh too.
+	*r = zoneRefresh{validated: true, retryAt: m.retryAt(msg.statusErr)}
 	m.updateZone(msg.zone)
 
 	cmds := []tea.Cmd{m.startRefreshes()}
@@ -250,6 +275,17 @@ func (m *Model) zoneRefreshed(msg zoneRefreshedMsg) tea.Cmd {
 	}
 
 	return tea.Batch(cmds...)
+}
+
+// retryAt is when the Provider asked to be called again, after err;
+// zero when it did not say.
+func (m *Model) retryAt(err error) time.Time {
+	var apiErr *provider.APIError
+	if errors.As(err, &apiErr) && apiErr.RetryAfter > 0 {
+		return m.deps.now().Add(apiErr.RetryAfter)
+	}
+
+	return time.Time{}
 }
 
 // updateZone replaces a cached Zone, such as with the serial and Refresh
