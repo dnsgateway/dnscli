@@ -227,6 +227,8 @@ func (m *Model) submitTemplateForm() tea.Cmd {
 			f.conflicts = append(f.conflicts, describeRecord(z.Name, rows[j].rec))
 		case rows[j].base.ProviderID == "":
 			// Without its Provider ID, it cannot be changed at the Provider.
+			// That alone stops the Template, whatever it conflicts with.
+			f.conflicts = nil
 			f.err = fmt.Sprintf("Nothing was staged: %s would change %s, which has no Provider ID, so dnscli cannot change it.",
 				t.Name, describeRecord(z.Name, rows[j].rec))
 

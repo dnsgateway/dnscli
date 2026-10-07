@@ -348,6 +348,27 @@ func TestATemplateDoesNotChangeARecordWithoutAProviderID(t *testing.T) {
 	h.assertHides("pending change")
 }
 
+func TestTheNoProviderIDErrorListsNoConflicts(t *testing.T) {
+	strict := dns.Record{ProviderID: "rm6", Type: "TXT", Name: "work.example", Value: "v=spf1 -all", TTL: 3600}
+	noID := dns.Record{Type: "TXT", Name: "_dmarc.work.example", Value: "v=DMARC1; p=none", TTL: 3600}
+	f := fake.New().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial},
+		mailRecords[0], mailRecords[2], strict, noID)
+	h := openValidatedShowing(t, f, "v=spf1 mx -all")
+
+	// The SPF the Template would bring back is staged for deletion, and
+	// the DMARC it would change has no Provider ID.
+	h.press("down", "down", "d")
+	h.press("p")
+	h.assertShows("- @ TXT v=spf1 -all")
+	h.press("esc")
+
+	h.openTemplate(parkedDomain)
+	h.enter(parkedFields)
+
+	h.assertShows("Apply a Template", "Nothing was staged", "no Provider ID")
+	h.assertHides("(pending deletion)")
+}
+
 func TestTheWriteGateRefusesTemplatesOnAStaleZone(t *testing.T) {
 	f := refreshZones()
 	h, _, _ := newRefreshHarness(t, f)
