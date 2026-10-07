@@ -247,9 +247,9 @@ func toRecord(r cfdns.RecordResponse) (dns.Record, error) {
 		TTL:        w.TTL,
 	}
 
-	// Cloudflare keeps the MX and SRV priority out of the content; the
-	// Value is in zone-file presentation form, priority first.
-	if w.Type == "MX" || w.Type == "SRV" {
+	// Cloudflare keeps the MX, SRV and URI priority out of the content;
+	// the Value is in zone-file presentation form, priority first.
+	if w.Type == "MX" || w.Type == "SRV" || w.Type == "URI" {
 		rec.Value = strconv.FormatFloat(w.Priority, 'f', -1, 64) + " " + w.Content
 	}
 

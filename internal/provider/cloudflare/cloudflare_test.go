@@ -432,7 +432,11 @@ func TestRecordsPutThePriorityInTheValue(t *testing.T) {
 	srv["priority"] = 20
 	srv["data"] = map[string]any{"priority": 20, "weight": 5, "port": 5060, "target": "sip.example.com"}
 
-	api := &cfAPI{records: map[string][]map[string]any{"z1": {mx, srv}}}
+	uri := cfRecord("r3", "URI", "_ftp._tcp.example.com", `1 "ftp://ftp.example.com/public"`, 3600, false, false)
+	uri["priority"] = 10
+	uri["data"] = map[string]any{"weight": 1, "target": "ftp://ftp.example.com/public"}
+
+	api := &cfAPI{records: map[string][]map[string]any{"z1": {mx, srv, uri}}}
 	p := newProvider(t, api)
 
 	rs, err := p.Records(context.Background(), dns.Zone{Name: "example.com", ProviderID: "z1"})
@@ -443,6 +447,7 @@ func TestRecordsPutThePriorityInTheValue(t *testing.T) {
 	assertRecords(t, rs.Records, []dns.Record{
 		{ProviderID: "r1", Type: "MX", Name: "example.com", Value: "10 mail.example.com", TTL: 3600},
 		{ProviderID: "r2", Type: "SRV", Name: "_sip._tcp.example.com", Value: "20 5 5060 sip.example.com", TTL: 3600},
+		{ProviderID: "r3", Type: "URI", Name: "_ftp._tcp.example.com", Value: `10 1 "ftp://ftp.example.com/public"`, TTL: 3600},
 	})
 }
 
