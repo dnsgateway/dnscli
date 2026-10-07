@@ -14,19 +14,22 @@
 // dnscli_keychain_store adds a generic password item holding secret to the
 // data protection keychain, with an access control that only Touch ID with
 // the currently enrolled fingers satisfies. It stores nothing when Touch ID
-// cannot be evaluated or the binary lacks the keychain entitlement: there
-// is no weaker fallback. On failure it returns non-zero and sets *err to a
-// malloc'd message.
-int dnscli_keychain_store(const char *account, const void *secret, int secret_len, char **err);
+// cannot be evaluated. When the binary lacks the keychain entitlement it
+// stores nothing either, unless allow_login is set (devkeychain builds only):
+// then the item goes into the login keychain, where only dnscli's own Touch
+// ID check guards it, and *in_login is set to 1. On failure it returns
+// non-zero and sets *err to a malloc'd message.
+int dnscli_keychain_store(const char *account, const void *secret, int secret_len, int allow_login, int *in_login, char **err);
 
 // dnscli_keychain_load asks for Touch ID, showing reason, and then reads the
 // item. On success it sets *secret to malloc'd bytes and *secret_len; on
 // failure it returns non-zero and sets *err to a malloc'd message.
-int dnscli_keychain_load(const char *account, const char *reason, void **secret, int *secret_len, char **err);
+// login selects the login keychain, for an item a devkeychain build stored.
+int dnscli_keychain_load(const char *account, int login, const char *reason, void **secret, int *secret_len, char **err);
 
 // dnscli_keychain_delete deletes the item without asking for Touch ID. An
 // item that does not exist is not an error. On failure it returns non-zero
 // and sets *err to a malloc'd message.
-int dnscli_keychain_delete(const char *account, char **err);
+int dnscli_keychain_delete(const char *account, int login, char **err);
 
 #endif

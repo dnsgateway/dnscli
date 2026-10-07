@@ -36,18 +36,21 @@ static char *statusMessage(OSStatus status) {
 }
 
 // itemQuery matches dnscli's item for account in the data protection
-// keychain, the only keychain where an access control is enforced.
-static NSMutableDictionary *itemQuery(const char *account) {
+// keychain, the only keychain where an access control is enforced, or in
+// the login keychain for an item a devkeychain build stored.
+static NSMutableDictionary *itemQuery(const char *account, int login) {
 	NSMutableDictionary *q = [NSMutableDictionary dictionary];
 	q[(__bridge id)kSecClass] = (__bridge id)kSecClassGenericPassword;
 	q[(__bridge id)kSecAttrService] = kDnscliService;
 	q[(__bridge id)kSecAttrAccount] = [NSString stringWithUTF8String:account];
-	q[(__bridge id)kSecUseDataProtectionKeychain] = @YES;
+	if (!login) {
+		q[(__bridge id)kSecUseDataProtectionKeychain] = @YES;
+	}
 
 	return q;
 }
 
-int dnscli_keychain_store(const char *account, const void *secret, int secret_len, char **err) {
+int dnscli_keychain_store(const char *account, const void *secret, int secret_len, int allow_login, int *in_login, char **err) {
 	@autoreleasepool {
 		// An item that requires Touch ID is useless, and cannot be made,
 		// where Touch ID cannot be evaluated, such as on a Mac without it.
@@ -71,22 +74,39 @@ int dnscli_keychain_store(const char *account, const void *secret, int secret_le
 			return DNSCLI_KEYCHAIN_NO_PROTECTION;
 		}
 
-		NSMutableDictionary *attrs = itemQuery(account);
-		attrs[(__bridge id)kSecValueData] = [NSData dataWithBytes:secret length:(NSUInteger)secret_len];
+		NSData *data = [NSData dataWithBytes:secret length:(NSUInteger)secret_len];
+
+		NSMutableDictionary *attrs = itemQuery(account, 0);
+		attrs[(__bridge id)kSecValueData] = data;
 		attrs[(__bridge id)kSecAttrLabel] = kDnscliLabel;
 		attrs[(__bridge id)kSecAttrAccessControl] = (__bridge_transfer id)access;
 
 		OSStatus status = SecItemAdd((__bridge CFDictionaryRef)attrs, NULL);
 		if (status == errSecSuccess) {
+			*in_login = 0;
+
 			return 0;
+		}
+
+		// A binary without the keychain-access-groups entitlement, such as
+		// one built with go build, cannot use the data protection keychain.
+		// Only a devkeychain build falls back to the login keychain, where
+		// the item is guarded by dnscli's own Touch ID check, not by the OS.
+		if (status == kMissingEntitlement && allow_login) {
+			NSMutableDictionary *login = itemQuery(account, 1);
+			login[(__bridge id)kSecValueData] = data;
+			login[(__bridge id)kSecAttrLabel] = kDnscliLabel;
+
+			status = SecItemAdd((__bridge CFDictionaryRef)login, NULL);
+			if (status == errSecSuccess) {
+				*in_login = 1;
+
+				return 0;
+			}
 		}
 
 		*err = statusMessage(status);
 
-		// A binary without the keychain-access-groups entitlement, such as
-		// one built with go build, cannot use the data protection keychain.
-		// There is no fallback: an item in the login keychain would be
-		// guarded by dnscli alone, not by the OS.
 		if (status == kMissingEntitlement) {
 			return DNSCLI_KEYCHAIN_NOT_ENTITLED;
 		}
@@ -95,7 +115,7 @@ int dnscli_keychain_store(const char *account, const void *secret, int secret_le
 	}
 }
 
-int dnscli_keychain_load(const char *account, const char *reason, void **secret, int *secret_len, char **err) {
+int dnscli_keychain_load(const char *account, int login, const char *reason, void **secret, int *secret_len, char **err) {
 	@autoreleasepool {
 		LAContext *context = [[LAContext alloc] init];
 		// The fallback button returns to dnscli, which asks for the passphrase.
@@ -136,12 +156,14 @@ int dnscli_keychain_load(const char *account, const char *reason, void **secret,
 			}
 		}
 
-		NSMutableDictionary *query = itemQuery(account);
+		NSMutableDictionary *query = itemQuery(account, login);
 		query[(__bridge id)kSecReturnData] = @YES;
 		query[(__bridge id)kSecMatchLimit] = (__bridge id)kSecMatchLimitOne;
-		// The evaluated context satisfies the item's Touch ID access
-		// control, so the user is not asked twice.
-		query[(__bridge id)kSecUseAuthenticationContext] = context;
+		if (!login) {
+			// The evaluated context satisfies the item's Touch ID access
+			// control, so the user is not asked twice.
+			query[(__bridge id)kSecUseAuthenticationContext] = context;
+		}
 
 		CFTypeRef result = NULL;
 		OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, &result);
@@ -160,9 +182,9 @@ int dnscli_keychain_load(const char *account, const char *reason, void **secret,
 	}
 }
 
-int dnscli_keychain_delete(const char *account, char **err) {
+int dnscli_keychain_delete(const char *account, int login, char **err) {
 	@autoreleasepool {
-		OSStatus status = SecItemDelete((__bridge CFDictionaryRef)itemQuery(account));
+		OSStatus status = SecItemDelete((__bridge CFDictionaryRef)itemQuery(account, login));
 		if (status == errSecSuccess || status == errSecItemNotFound) {
 			return 0;
 		}

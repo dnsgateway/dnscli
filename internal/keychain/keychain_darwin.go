@@ -31,11 +31,13 @@ func System() vault.KeychainBackend {
 
 type darwinKeychain struct{}
 
-// itemRef locates a Keychain item in the data protection keychain. The key
-// slot stores it.
+// itemRef locates a Keychain item. The key slot stores it.
 type itemRef struct {
 	// Account is the item's account attribute; the service is "dnscli".
 	Account string `json:"account"`
+	// Login marks an item a devkeychain build put in the login keychain,
+	// guarded only by dnscli's own Touch ID check.
+	Login bool `json:"login,omitempty"`
 }
 
 // Store implements vault.KeychainBackend. It stores the secret only where
@@ -56,9 +58,12 @@ func (darwinKeychain) Store(secret []byte) ([]byte, error) {
 	account := C.CString(ref.Account)
 	defer C.free(unsafe.Pointer(account))
 
-	var msg *C.char
+	var (
+		msg     *C.char
+		inLogin C.int
+	)
 
-	if status := C.dnscli_keychain_store(account, unsafe.Pointer(&secret[0]), C.int(len(secret)), &msg); status != 0 {
+	if status := C.dnscli_keychain_store(account, unsafe.Pointer(&secret[0]), C.int(len(secret)), cbool(devKeychain), &inLogin, &msg); status != 0 {
 		text := message(status, msg)
 
 		switch status {
@@ -73,6 +78,8 @@ func (darwinKeychain) Store(secret []byte) ([]byte, error) {
 		return nil, errors.New(text)
 	}
 
+	ref.Login = inLogin != 0
+
 	return json.Marshal(ref)
 }
 
@@ -81,6 +88,10 @@ func (darwinKeychain) Load(raw []byte) ([]byte, error) {
 	ref, err := parseRef(raw)
 	if err != nil {
 		return nil, err
+	}
+
+	if ref.Login && !devKeychain {
+		return nil, errors.New("this Keychain slot was enrolled by a devkeychain build and is not protected by macOS: Unseal with the passphrase and enroll the Keychain again")
 	}
 
 	account := C.CString(ref.Account)
@@ -95,7 +106,7 @@ func (darwinKeychain) Load(raw []byte) ([]byte, error) {
 		msg    *C.char
 	)
 
-	if status := C.dnscli_keychain_load(account, reason, &secret, &n, &msg); status != 0 {
+	if status := C.dnscli_keychain_load(account, cbool(ref.Login), reason, &secret, &n, &msg); status != 0 {
 		return nil, loadError(status, message(status, msg))
 	}
 	defer C.free(secret)
@@ -115,11 +126,19 @@ func (darwinKeychain) Delete(raw []byte) error {
 
 	var msg *C.char
 
-	if status := C.dnscli_keychain_delete(account, &msg); status != 0 {
+	if status := C.dnscli_keychain_delete(account, cbool(ref.Login), &msg); status != 0 {
 		return errors.New(message(status, msg))
 	}
 
 	return nil
+}
+
+func cbool(b bool) C.int {
+	if b {
+		return 1
+	}
+
+	return 0
 }
 
 func parseRef(raw []byte) (itemRef, error) {
