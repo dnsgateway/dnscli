@@ -315,6 +315,27 @@ func TestATemplateKeepsAChangeTheUserStagedThatItAgreesWith(t *testing.T) {
 	}
 }
 
+func TestATemplateDoesNotModifyARecordIntoOneStagedForDeletion(t *testing.T) {
+	strict := dns.Record{ProviderID: "rm6", Type: "TXT", Name: "work.example", Value: "v=spf1 -all", TTL: 3600}
+	f := fake.New().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial},
+		mailRecords[0], mailRecords[2], strict)
+	h := openValidatedShowing(t, f, "v=spf1 mx -all")
+
+	// The user deletes the strict SPF; the Template would turn the other
+	// SPF into it.
+	h.press("down", "d")
+	h.press("p")
+	h.assertShows("- @ TXT v=spf1 -all")
+	h.press("esc")
+
+	h.openTemplate(parkedDomain)
+	h.enter(parkedFields)
+
+	h.assertShows("Apply a Template", "Nothing was staged", "@ TXT v=spf1 -all TTL 3600 (pending deletion)")
+	h.press("esc")
+	h.assertShows("1 pending change")
+}
+
 func TestATemplateDoesNotChangeARecordWithoutAProviderID(t *testing.T) {
 	noID := dns.Record{Type: "TXT", Name: "work.example", Value: "v=spf1 mx -all", TTL: 3600}
 	f := fake.New().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial}, mailRecords[0], noID)

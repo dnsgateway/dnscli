@@ -189,13 +189,17 @@ func (m *Model) submitTemplateForm() tea.Cmd {
 	used := map[int]bool{}
 
 	for i, c := range changes {
-		if c.Kind == dns.ChangeAdd {
+		// An addition or a modification must not bring back a Record the
+		// user staged for deletion.
+		if c.Kind != dns.ChangeDelete {
 			for _, row := range m.rows {
 				if row.kind == dns.ChangeDelete && template.SameData(row.rec, c.After) {
 					f.conflicts = append(f.conflicts, describeRecord(z.Name, row.rec)+" (pending deletion)")
 				}
 			}
+		}
 
+		if c.Kind == dns.ChangeAdd {
 			continue
 		}
 
