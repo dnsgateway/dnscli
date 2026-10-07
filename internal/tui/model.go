@@ -76,6 +76,9 @@ type Model struct {
 	delegations map[string]*delegation
 	// lookups schedules the Delegation lookups, by nameKey.
 	lookups workQueue[string]
+	// delegationOf is the zone name whose Delegation view is shown; empty
+	// when closed.
+	delegationOf string
 
 	// addForm is the add-Account dialog; nil when closed.
 	addForm *addAccountForm
@@ -321,6 +324,16 @@ func (m *Model) handle(a Action) tea.Cmd {
 		return nil
 	}
 
+	if m.delegationOf != "" {
+		// The Delegation view is read-only: every other Action is ignored.
+		switch a {
+		case ActionDelegation, ActionClose:
+			m.delegationOf = ""
+		}
+
+		return nil
+	}
+
 	if a != ActionNone && a != ActionUp && a != ActionDown {
 		m.search[m.focus].typing = false // the filter stays; keys are actions again
 	}
@@ -354,6 +367,10 @@ func (m *Model) handle(a Action) tea.Cmd {
 		return m.relistZones()
 	case ActionRefresh:
 		return m.retryRefresh()
+	case ActionDelegation:
+		if len(m.visible) > 0 {
+			m.delegationOf = m.visible[m.cursor[paneDomains]].Name
+		}
 	}
 
 	return nil

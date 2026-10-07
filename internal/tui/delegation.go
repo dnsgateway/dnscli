@@ -2,7 +2,9 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"slices"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -182,3 +184,81 @@ func (m *Model) liveMarker(z dns.Zone) string {
 }
 
 var errNoNameservers = errors.New("the resolver gave no nameservers")
+
+// liveZoneText says, in a few words, whether z is the Live Zone, for
+// anywhere that shows one Zone's state, such as the Zone Status bar.
+func (m *Model) liveZoneText(z dns.Zone) string {
+	switch m.liveness(z) {
+	case liveYes:
+		return "Live Zone"
+	case liveNo:
+		return "not the Live Zone"
+	}
+
+	if d, ok := m.delegations[nameKey(z.Name)]; ok && len(z.Nameservers) > 0 && (d.state == lookupQueued || d.state == lookupResolving) {
+		return "checking the Live Zone…"
+	}
+
+	return "Live Zone unknown"
+}
+
+// delegationView renders the read-only Delegation view of a zone name: the
+// nameservers the resolver gives for it, and those each Account with a
+// Zone of that name expects. Delegation cannot be changed in v1 (ADR-0004).
+func (m *Model) delegationView() string {
+	name := m.delegationOf
+
+	lines := []string{"", headerStyle.Render("Delegation (system resolver)")}
+
+	d, ok := m.delegations[nameKey(name)]
+
+	switch {
+	case m.deps.Resolver == nil || !ok:
+		lines = append(lines, hintStyle.Render("  not looked up"))
+	case d.state == lookupDone:
+		lines = append(lines, "  "+strings.Join(d.ns, ", "))
+	case d.state == lookupFailed:
+		lines = append(lines, wrapNote(errorStyle, "Delegation lookup failed: "+d.err.Error(), noteWidth)...)
+	default:
+		lines = append(lines, hintStyle.Render("  resolving…"))
+	}
+
+	lines = append(lines, "", headerStyle.Render("Expected nameservers"))
+
+	for _, z := range m.zones {
+		if nameKey(z.Name) != nameKey(name) {
+			continue
+		}
+
+		label := ""
+		if a, ok := m.account(z.AccountID); ok {
+			label = a.Label()
+		}
+
+		state := m.liveZoneText(z)
+		if m.liveness(z) == liveYes {
+			state = liveStyle.Render("● " + state)
+		}
+
+		lines = append(lines, "  "+label+" · "+state)
+
+		if len(z.Nameservers) == 0 {
+			lines = append(lines, hintStyle.Render(fmt.Sprintf("    not cached: re-list the Account (%s) to read them", m.keys.keysFor(ActionRelistZones))))
+		} else {
+			lines = append(lines, "    "+strings.Join(nameSet(z.Nameservers), ", "))
+		}
+	}
+
+	lines = append(lines, "",
+		hintStyle.Render("Delegation is read-only in dnscli v1."),
+		hintStyle.Render(m.keys.keysFor(ActionClose)+" close"),
+		"")
+
+	width := 48
+	for i, l := range lines {
+		lines[i] = " " + l
+		width = max(width, lipgloss.Width(lines[i])+1)
+	}
+
+	return box("Delegation of "+name, lines, width+2, len(lines)+2, true)
+}

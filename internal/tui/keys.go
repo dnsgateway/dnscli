@@ -39,6 +39,9 @@ const (
 	// ActionRefresh Refreshes the open Zone again, such as to retry a
 	// failed Refresh.
 	ActionRefresh
+	// ActionDelegation shows the highlighted Zone's Delegation next to the
+	// nameservers its Account expects, read-only (ADR-0004).
+	ActionDelegation
 )
 
 // Binding maps one Action to its keys.
@@ -69,6 +72,7 @@ func DefaultShortcutProfile() ShortcutProfile {
 			{Action: ActionSearch, Keys: []string{"/"}, Help: "search"},
 			{Action: ActionAllAccounts, Keys: []string{"*"}, Help: "Zones of all Accounts"},
 			{Action: ActionRefresh, Keys: []string{"r"}, Help: "Refresh the open Zone (retry)"},
+			{Action: ActionDelegation, Keys: []string{"N"}, Help: "Delegation (nameservers), read-only"},
 			{Action: ActionAddAccount, Keys: []string{"a"}, Help: "add Account"},
 			{Action: ActionRemoveAccount, Keys: []string{"X"}, Help: "remove Account"},
 			{Action: ActionRelistZones, Keys: []string{"L"}, Help: "re-list the Account's Zones"},
