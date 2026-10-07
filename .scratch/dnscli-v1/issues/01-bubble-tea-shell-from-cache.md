@@ -6,16 +6,20 @@ This ticket also sets up the main test seam (Seam 1 in the spec). The top-level 
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] tview is removed from the module, and the app runs on Bubble Tea
-- [ ] The Store uses pure-Go SQLite (`modernc.org/sqlite`) with versioned migrations applied on open. The schema holds Accounts (name, Provider type), Zones (Account, zone name, Provider zone ID, cached SOA serial, last Refresh time) and Records (Provider record ID, type, name, value, TTL, extras)
-- [ ] On launch, the cached data renders straight from the Store with no network access, and cached Zones show as dimmed
-- [ ] Tab and Shift+Tab move focus to the next and previous pane, and the focused pane is visibly highlighted
-- [ ] ↑/↓ and j/k move within a pane, and Enter on a Zone shows its cached Records
-- [ ] Accounts are listed as `<provider>.<account>`
-- [ ] A help overlay lists the current keys
-- [ ] Keys map to actions through a default Shortcut Profile, and no key is hard-coded in action handling
-- [ ] Quitting cancels the root context, so all background work stops
-- [ ] An empty database shows an "add your first Account" prompt
-- [ ] Seam 1 test harness exists (model + temp-file Store), with tests covering startup from cache, navigation, opening a Zone and the empty state
+- [x] tview is removed from the module, and the app runs on Bubble Tea
+- [x] The Store uses pure-Go SQLite (`modernc.org/sqlite`) with versioned migrations applied on open. The schema holds Accounts (name, Provider type), Zones (Account, zone name, Provider zone ID, cached SOA serial, last Refresh time) and Records (Provider record ID, type, name, value, TTL, extras)
+- [x] On launch, the cached data renders straight from the Store with no network access, and cached Zones show as dimmed
+- [x] Tab and Shift+Tab move focus to the next and previous pane, and the focused pane is visibly highlighted
+- [x] ↑/↓ and j/k move within a pane, and Enter on a Zone shows its cached Records
+- [x] Accounts are listed as `<provider>.<account>`
+- [x] A help overlay lists the current keys
+- [x] Keys map to actions through a default Shortcut Profile, and no key is hard-coded in action handling
+- [x] Quitting cancels the root context, so all background work stops
+- [x] An empty database shows an "add your first Account" prompt
+- [x] Seam 1 test harness exists (model + temp-file Store), with tests covering startup from cache, navigation, opening a Zone and the empty state
+
+## Comments
+
+- 2026-10-07: Implemented on `dnscli-v1` (8aff998..2c75179). Review fixes are in 601c6bb..f7e93f4. Deviations: the `go` directive is now 1.24 (needed by Bubble Tea) and sqlite is pinned at v1.46.1; `Model.Context()` was added so tests can check cancellation; an invalid injected Shortcut Profile is replaced by the default and the status bar says so.
