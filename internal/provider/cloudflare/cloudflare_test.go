@@ -557,6 +557,52 @@ func TestApplyKeepsGoingAfterAChangeFails(t *testing.T) {
 	}
 }
 
+func TestApplyTakesAnySuccessful2xxResponse(t *testing.T) {
+	for _, status := range []int{http.StatusOK, http.StatusCreated, http.StatusAccepted} {
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			api := &cfAPI{records: map[string][]map[string]any{"z1": {}}, writeStatus: status}
+			p := newProvider(t, api)
+
+			add := dns.Change{Kind: dns.ChangeAdd, After: dns.Record{Type: "TXT", Name: "example.com", Value: "\"hi\"", TTL: 300}}
+
+			res, err := p.Apply(context.Background(), dns.Changeset{Zone: dns.Zone{Name: "example.com", ProviderID: "z1"}, Changes: []dns.Change{add}})
+			if err != nil {
+				t.Fatalf("Apply: %v", err)
+			}
+
+			assertResults(t, res, []provider.ChangeResult{{Change: add, Record: dns.Record{
+				ProviderID: "new1", Type: "TXT", Name: "example.com", Value: "\"hi\"", TTL: 300,
+			}}})
+		})
+	}
+}
+
+func TestApplyFailsAChangeCloudflareDoesNotMarkAsSuccess(t *testing.T) {
+	api := &cfAPI{fail: func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"success":  false,
+			"errors":   []any{map[string]any{"code": 81057, "message": "Record already exists."}},
+			"messages": []any{},
+			"result":   nil,
+		})
+	}}
+	p := newProvider(t, api)
+
+	add := dns.Change{Kind: dns.ChangeAdd, After: dns.Record{Type: "TXT", Name: "example.com", Value: "\"hi\"", TTL: 300}}
+
+	res, err := p.Apply(context.Background(), dns.Changeset{Zone: dns.Zone{Name: "example.com", ProviderID: "z1"}, Changes: []dns.Change{add}})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	assertResults(t, res, []provider.ChangeResult{{Change: add, Err: errors.New("Record already exists. (code 81057)")}})
+
+	var apiErr *provider.APIError
+	if !errors.As(res.Results[0].Err, &apiErr) || apiErr.StatusCode != http.StatusOK {
+		t.Errorf("err = %v, want a *provider.APIError with HTTP 200", res.Results[0].Err)
+	}
+}
+
 func assertWrites(t *testing.T, api *cfAPI, want []write) {
 	t.Helper()
 

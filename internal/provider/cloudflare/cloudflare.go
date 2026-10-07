@@ -350,6 +350,15 @@ func (p *Provider) applyChange(ctx context.Context, zone dns.Zone, c dns.Change)
 		return dns.Record{}, apiError(err, raw)
 	}
 
+	// Any 2xx is an answer; Cloudflare says in the body whether it took
+	// the change.
+	if !env.Success {
+		e := &provider.APIError{Provider: "cloudflare", StatusCode: raw.StatusCode}
+		addErrors(e, env.Errors)
+
+		return dns.Record{}, e
+	}
+
 	if c.Kind == dns.ChangeDelete {
 		return dns.Record{}, nil
 	}
@@ -360,6 +369,7 @@ func (p *Provider) applyChange(ctx context.Context, zone dns.Zone, c dns.Change)
 // envelope is the v4 response envelope of a record write.
 type envelope struct {
 	Success bool            `json:"success"`
+	Errors  []wireError     `json:"errors"`
 	Result  json.RawMessage `json:"result"`
 }
 

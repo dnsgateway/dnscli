@@ -41,23 +41,32 @@ func apiError(err error, res *http.Response) error {
 
 	// cloudflare-go leaves the error body readable.
 	var body struct {
-		Errors []struct {
-			Code    int    `json:"code"`
-			Message string `json:"message"`
-		} `json:"errors"`
+		Errors []wireError `json:"errors"`
 	}
 
 	if data, rerr := io.ReadAll(res.Body); rerr == nil && json.Unmarshal(data, &body) == nil {
-		for _, m := range body.Errors {
-			e.Messages = append(e.Messages, fmt.Sprintf("%s (code %d)", m.Message, m.Code))
-
-			if kind, ok := errorCodes[m.Code]; ok && e.Kind == nil {
-				e.Kind = kind
-			}
-		}
+		addErrors(e, body.Errors)
 	}
 
 	return e
+}
+
+// wireError is one error of a v4 response.
+type wireError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
+// addErrors adds a response's errors to e, and classifies e by the first
+// error code that says what went wrong.
+func addErrors(e *provider.APIError, errs []wireError) {
+	for _, m := range errs {
+		e.Messages = append(e.Messages, fmt.Sprintf("%s (code %d)", m.Message, m.Code))
+
+		if kind, ok := errorCodes[m.Code]; ok && e.Kind == nil {
+			e.Kind = kind
+		}
+	}
 }
 
 // errorCodes are the Cloudflare v4 error codes that say what went wrong
