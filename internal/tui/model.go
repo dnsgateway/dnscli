@@ -160,6 +160,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 	case cacheLoadedMsg:
+		if msg.err != nil && m.loaded {
+			// A failed reload keeps the data already shown.
+			m.notice = notice{text: "Could not reload the local database: " + msg.err.Error(), err: true}
+
+			return m, nil
+		}
+
 		m.loaded = true
 		m.err = msg.err
 		m.accounts = msg.accounts
