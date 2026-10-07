@@ -45,10 +45,10 @@ func renderZoneStatus(items []string) string {
 func mailItem(zone string, records []dns.Record) string {
 	var mx, nullMX, spf, dmarc, dkim bool
 
-	zone = strings.ToLower(strings.TrimSuffix(zone, "."))
+	zone = nameKey(zone)
 
 	for _, r := range records {
-		name := strings.ToLower(strings.TrimSuffix(r.Name, "."))
+		name := nameKey(r.Name)
 		value := strings.ToLower(strings.TrimLeft(r.Value, `"`))
 
 		switch {
