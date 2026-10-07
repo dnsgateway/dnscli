@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
@@ -13,8 +14,8 @@ import (
 
 // PutZone inserts a Zone, or updates the existing Zone with the same
 // Account and zone name, and returns it as stored, with its ID set.
-// A zero Serial or RefreshedAt keeps the cached value, so relisting an
-// Account's Zones does not forget their last Refresh.
+// A zero Serial or RefreshedAt, or no Nameservers, keeps the cached value,
+// so relisting an Account's Zones does not forget their last Refresh.
 func (s *Store) PutZone(ctx context.Context, z dns.Zone) (dns.Zone, error) {
 	return putZone(ctx, s.db, z)
 }
@@ -25,23 +26,28 @@ type queryRower interface {
 }
 
 func putZone(ctx context.Context, db queryRower, z dns.Zone) (dns.Zone, error) {
-	var refreshed int64
+	var (
+		refreshed int64
+		ns        string
+	)
 
 	err := db.QueryRowContext(ctx, `
-		INSERT INTO zones (account_id, name, provider_zone_id, soa_serial, refreshed_at)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO zones (account_id, name, provider_zone_id, soa_serial, refreshed_at, nameservers)
+		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT (account_id, name) DO UPDATE SET
 			provider_zone_id = excluded.provider_zone_id,
 			soa_serial       = IIF(excluded.soa_serial = 0, soa_serial, excluded.soa_serial),
-			refreshed_at     = IIF(excluded.refreshed_at = 0, refreshed_at, excluded.refreshed_at)
-		RETURNING id, soa_serial, refreshed_at`,
-		z.AccountID, z.Name, z.ProviderID, z.Serial, unixOrZero(z.RefreshedAt),
-	).Scan(&z.ID, &z.Serial, &refreshed)
+			refreshed_at     = IIF(excluded.refreshed_at = 0, refreshed_at, excluded.refreshed_at),
+			nameservers      = IIF(excluded.nameservers = '', nameservers, excluded.nameservers)
+		RETURNING id, soa_serial, refreshed_at, nameservers`,
+		z.AccountID, z.Name, z.ProviderID, z.Serial, unixOrZero(z.RefreshedAt), joinNames(z.Nameservers),
+	).Scan(&z.ID, &z.Serial, &refreshed, &ns)
 	if err != nil {
 		return dns.Zone{}, fmt.Errorf("put zone %s: %w", z.Name, err)
 	}
 
 	z.RefreshedAt = timeOrZero(refreshed)
+	z.Nameservers = splitNames(ns)
 
 	return z, nil
 }
@@ -148,7 +154,7 @@ func accountZones(ctx context.Context, conn *sql.Conn, accountID int64) (map[str
 // Zones returns every cached Zone, ordered by zone name and then Account.
 func (s *Store) Zones(ctx context.Context) ([]dns.Zone, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT z.id, z.account_id, z.name, z.provider_zone_id, z.soa_serial, z.refreshed_at
+		SELECT z.id, z.account_id, z.name, z.provider_zone_id, z.soa_serial, z.refreshed_at, z.nameservers
 		FROM zones z JOIN accounts a ON a.id = z.account_id
 		ORDER BY z.name, a.provider, a.name`)
 	if err != nil {
@@ -162,13 +168,15 @@ func (s *Store) Zones(ctx context.Context) ([]dns.Zone, error) {
 		var (
 			z         dns.Zone
 			refreshed int64
+			ns        string
 		)
 
-		if err := rows.Scan(&z.ID, &z.AccountID, &z.Name, &z.ProviderID, &z.Serial, &refreshed); err != nil {
+		if err := rows.Scan(&z.ID, &z.AccountID, &z.Name, &z.ProviderID, &z.Serial, &refreshed, &ns); err != nil {
 			return nil, fmt.Errorf("list zones: %w", err)
 		}
 
 		z.RefreshedAt = timeOrZero(refreshed)
+		z.Nameservers = splitNames(ns)
 
 		out = append(out, z)
 	}
@@ -314,6 +322,17 @@ func timeOrZero(unix int64) time.Time {
 	}
 
 	return time.Unix(unix, 0).UTC()
+}
+
+// joinNames stores a list of DNS names, such as nameservers, in one column.
+// DNS names hold no spaces.
+func joinNames(names []string) string {
+	return strings.Join(names, " ")
+}
+
+// splitNames reads a list stored by joinNames; nil when empty.
+func splitNames(s string) []string {
+	return strings.Fields(s)
 }
 
 func nonNil(m map[string]string) map[string]string {

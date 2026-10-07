@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -191,16 +192,42 @@ func TestZonesListsEveryPage(t *testing.T) {
 	}
 
 	want := []dns.Zone{
-		{Name: "example.com", ProviderID: "z1"},
-		{Name: "example.net", ProviderID: "z2"},
-		{Name: "example.org", ProviderID: "z3"},
+		{Name: "example.com", ProviderID: "z1", Nameservers: []string{"ada.ns.cloudflare.com", "bob.ns.cloudflare.com"}},
+		{Name: "example.net", ProviderID: "z2", Nameservers: []string{"ada.ns.cloudflare.com", "bob.ns.cloudflare.com"}},
+		{Name: "example.org", ProviderID: "z3", Nameservers: []string{"ada.ns.cloudflare.com", "bob.ns.cloudflare.com"}},
 	}
-	if !slices.Equal(zones, want) {
+	if !reflect.DeepEqual(zones, want) {
 		t.Fatalf("Zones = %+v, want %+v", zones, want)
 	}
 
 	if got := strings.Join(api.Requests(), " "); got != "/client/v4/zones?page=1 /client/v4/zones?page=2" {
 		t.Errorf("requests = %s, want one per page", got)
+	}
+}
+
+func TestZonesCarryTheNameserversCloudflareAssignedToEachZone(t *testing.T) {
+	api := &cfAPI{zones: []map[string]any{
+		cfZone("z1", "example.com", "bob.ns.cloudflare.com", "ada.ns.cloudflare.com"),
+		cfZone("z2", "example.net", "cruz.ns.cloudflare.com", "dee.ns.cloudflare.com"),
+	}}
+	p := newProvider(t, api)
+
+	zones, err := p.Zones(context.Background())
+	if err != nil {
+		t.Fatalf("Zones: %v", err)
+	}
+
+	got := map[string][]string{}
+	for _, z := range zones {
+		got[z.Name] = z.Nameservers
+	}
+
+	want := map[string][]string{
+		"example.com": {"bob.ns.cloudflare.com", "ada.ns.cloudflare.com"},
+		"example.net": {"cruz.ns.cloudflare.com", "dee.ns.cloudflare.com"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Zone nameservers = %v, want %v", got, want)
 	}
 }
 

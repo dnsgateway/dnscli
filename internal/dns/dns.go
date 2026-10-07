@@ -28,6 +28,10 @@ type Zone struct {
 	Serial uint32
 	// RefreshedAt is the time of the last Refresh; zero when never Refreshed.
 	RefreshedAt time.Time
+	// Nameservers are the nameservers the Zone's Account expects its
+	// Delegation to name, as the Provider assigned them to this Zone; nil
+	// when not known.
+	Nameservers []string
 }
 
 // Record is a single DNS resource record inside a Zone.

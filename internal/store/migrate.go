@@ -57,6 +57,10 @@ var migrations = []string{
 		wrapped BLOB NOT NULL  -- the data key, wrapped by the method
 	);
 	`,
+	// 3: Zone nameservers for the Delegation and the Live Zone (ticket 14).
+	`
+	ALTER TABLE zones ADD COLUMN nameservers TEXT NOT NULL DEFAULT ''; -- space-separated; '' = unknown
+	`,
 }
 
 // migrate applies pending migrations in one write transaction. BEGIN IMMEDIATE

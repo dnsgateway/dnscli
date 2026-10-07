@@ -110,7 +110,8 @@ type Provider struct {
 
 var _ provider.Provider = (*Provider)(nil)
 
-// Zones implements provider.Provider.
+// Zones implements provider.Provider. Each Zone carries the nameservers
+// Cloudflare assigned to it, which can differ between Zones of one Account.
 func (p *Provider) Zones(ctx context.Context) ([]dns.Zone, error) {
 	all, err := p.listZones(ctx)
 	if err != nil {
@@ -119,7 +120,7 @@ func (p *Provider) Zones(ctx context.Context) ([]dns.Zone, error) {
 
 	out := make([]dns.Zone, 0, len(all))
 	for _, z := range all {
-		out = append(out, dns.Zone{Name: z.Name, ProviderID: z.ID})
+		out = append(out, dns.Zone{Name: z.Name, ProviderID: z.ID, Nameservers: slices.Clone(z.NameServers)})
 	}
 
 	return out, nil
