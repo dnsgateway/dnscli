@@ -79,6 +79,33 @@ func TestAnApplyWhoseRecordsChangedAtTheProviderIsNotSentAndRefreshesTheZone(t *
 	}
 }
 
+func TestAPartialApplyShowsTheOutcomeOfEachChange(t *testing.T) {
+	f := refreshZones()
+	h := openValidated(t, f)
+	h.buildChangeset()
+
+	f.FailChanges(func(c dns.Change) error {
+		if c.Kind == dns.ChangeDelete {
+			return errors.New("record is locked")
+		}
+
+		return nil
+	})
+	h.press("p", "enter")
+
+	h.assertShows("The Provider applied 2 of 3 changes:",
+		"✓ + _verify TXT token-123 TTL 3600",
+		"✓ ~ @ A 203.0.113.20 TTL 300 → @ A 203.0.113.99 TTL 300",
+		"✗ - @ MX 10 mail.work.example TTL 3600",
+		"    record is locked",
+		"Applying sends 1 pending change to the Provider:")
+
+	// The outcomes belong to that Apply: reopening the preview drops them.
+	h.press("esc", "p")
+	h.assertShows("Applying sends 1 pending change")
+	h.assertHides("The Provider applied", "✓ +", "✗ -")
+}
+
 func TestAnApplyWhoseReCheckFailsIsNotSent(t *testing.T) {
 	f := refreshZones()
 	h := openValidated(t, f)

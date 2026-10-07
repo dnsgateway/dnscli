@@ -26,6 +26,16 @@ type changesetPreview struct {
 	// conflicts describe the Records that changed at the Provider since
 	// the Changeset was built, which stopped the last Apply.
 	conflicts []string
+	// outcomes are the changes the last Apply sent, with how each fared,
+	// when the Provider failed some of them.
+	outcomes []changeOutcome
+}
+
+// changeOutcome is how one change of an Apply fared.
+type changeOutcome struct {
+	change dns.Change
+	// err is why the Provider failed the change; nil when it applied it.
+	err error
 }
 
 // changesApplied reports the result of applying a Changeset.
@@ -151,7 +161,7 @@ func (m *Model) previewKey(msg tea.KeyMsg) tea.Cmd {
 // write gate.
 func (m *Model) applyChanges() tea.Cmd {
 	p := m.preview
-	p.err, p.conflicts = "", nil
+	p.err, p.conflicts, p.outcomes = "", nil, nil
 
 	z, cmd, ok := m.writeGate()
 	if !ok || z.ID != p.zoneID {
@@ -365,7 +375,15 @@ func (m *Model) changesApplied(msg changesAppliedMsg) tea.Cmd {
 	}
 
 	if p != nil && m.preview != nil && failed > 0 {
-		p.err = m.notice.text
+		p.outcomes = make([]changeOutcome, len(msg.sent.Changes))
+		for i, c := range msg.sent.Changes {
+			p.outcomes[i] = changeOutcome{change: c, err: msg.failed[i]}
+		}
+
+		// The outcomes say which changes failed and why.
+		if !msg.saved || msg.uncached > 0 {
+			p.err = m.notice.text
+		}
 	}
 
 	return nil
@@ -453,7 +471,14 @@ func (m *Model) previewView() string {
 
 	var lines []string
 
+	if len(p.outcomes) > 0 {
+		lines = append(lines, outcomeLines(z.Name, p.outcomes)...)
+		lines = append(lines, "")
+	}
+
 	if cs := m.pendingOf(p.zoneID); cs != nil {
+		lines = append(lines, "Applying sends "+plural(len(cs.Changes), "pending change")+" to the Provider:", "")
+
 		for i, c := range cs.Changes {
 			if i == maxPreviewLines {
 				lines = append(lines, hintStyle.Render(fmt.Sprintf("… and %d more", len(cs.Changes)-i)))
@@ -463,8 +488,6 @@ func (m *Model) previewView() string {
 
 			lines = append(lines, changeStyle(c.Kind).Render(describeChange(z.Name, c)))
 		}
-
-		lines = append([]string{"Applying sends " + plural(len(cs.Changes), "pending change") + " to the Provider:", ""}, lines...)
 	}
 
 	if p.err != "" {
@@ -484,4 +507,39 @@ func (m *Model) previewView() string {
 		m.keys.keysFor(ActionDiscardChanges)+" discard · "+m.keys.keysFor(ActionClose)+" close"))
 
 	return dialogView("Changes to "+z.Name, nil, -1, false, lines)
+}
+
+// outcomeLines lists how each change of an Apply fared: ✓ for a change
+// the Provider applied, ✗ for one it failed, followed by why.
+func outcomeLines(zone string, outcomes []changeOutcome) []string {
+	applied := 0
+
+	for _, o := range outcomes {
+		if o.err == nil {
+			applied++
+		}
+	}
+
+	lines := []string{fmt.Sprintf("The Provider applied %d of %d changes:", applied, len(outcomes))}
+
+	for i, o := range outcomes {
+		if i == maxPreviewLines {
+			lines = append(lines, hintStyle.Render(fmt.Sprintf("… and %d more", len(outcomes)-i)))
+
+			break
+		}
+
+		if o.err == nil {
+			lines = append(lines, hintCurrentStyle.Render("✓ "+describeChange(zone, o.change)))
+
+			continue
+		}
+
+		lines = append(lines, errorStyle.Render("✗ "+describeChange(zone, o.change)))
+		for _, l := range wrapNote(errorStyle, o.err.Error(), noteWidth-4) {
+			lines = append(lines, "    "+l)
+		}
+	}
+
+	return lines
 }
