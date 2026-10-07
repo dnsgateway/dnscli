@@ -74,6 +74,8 @@ func (m *Model) recordLines(w, h int) []string {
 	switch {
 	case !m.loaded:
 		return nil
+	case len(m.accounts) == 0 && m.err != nil:
+		return []string{"", errorStyle.Render("  Could not read the local database.")}
 	case len(m.accounts) == 0:
 		return []string{
 			"",
