@@ -129,6 +129,19 @@ func TestOpeningAnotherZoneStartsWithAllItsRecords(t *testing.T) {
 	h.assertHides("/www")
 }
 
+func TestSearchWithoutMatchesSaysSo(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	h := newHarness(t, s)
+	h.press("enter", "/", "z", "z")
+	h.assertShows("No matching Zones")
+
+	h.press("esc", "shift+tab", "/", "z", "z")
+	h.assertShows("No matching Records")
+	h.assertHides("No matching Zones")
+}
+
 func TestKeysTypedIntoSearchDoNotTriggerActions(t *testing.T) {
 	s, _ := openStore(t)
 	seedCache(t, s)

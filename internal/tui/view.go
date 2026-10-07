@@ -80,6 +80,10 @@ func (m *Model) domainLines(w, h int) []string {
 		lines = append(lines, m.row(paneDomains, i, " "+zones[i].Name, w, staleStyle))
 	}
 
+	if len(zones) == 0 && len(m.zones) > 0 {
+		lines = append(lines, hintStyle.Render(" No matching Zones."))
+	}
+
 	return lines
 }
 
@@ -129,6 +133,10 @@ func (m *Model) recordLines(w, h int) []string {
 	for i := start; i < end; i++ {
 		r := records[i]
 		lines = append(lines, m.row(paneRecords, i, cols.format(r.Name, r.Type, r.Value, strconv.FormatUint(uint64(r.TTL), 10)), w, staleStyle))
+	}
+
+	if len(records) == 0 {
+		lines = append(lines, hintStyle.Render("  No matching Records."))
 	}
 
 	return lines
