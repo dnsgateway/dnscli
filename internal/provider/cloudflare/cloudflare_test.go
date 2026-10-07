@@ -93,7 +93,7 @@ func (api *cfAPI) handler(t *testing.T) http.Handler {
 	})
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		api.record(r.URL.Path+"?page="+r.URL.Query().Get("page"))
+		api.record(r.URL.Path + "?page=" + r.URL.Query().Get("page"))
 
 		if got := r.Header.Get("Authorization"); got != "Bearer "+testToken {
 			t.Errorf("Authorization = %q, want the Account's API token", got)
