@@ -97,10 +97,11 @@ func (m *Model) retryRefresh() tea.Cmd {
 }
 
 // refreshZone Refreshes a Zone in the background once the session is
-// unsealed. A Zone with a Refresh already pending, or that the Provider
-// rate-limited until later, is left alone.
+// unsealed. A Zone with a Refresh already pending, such as one queued
+// again while the Unseal prompt was open, or that the Provider rate-limited
+// until later, is left alone.
 func (m *Model) refreshZone(z dns.Zone) tea.Cmd {
-	if r := m.refreshOf(z.ID); !m.canRefresh(z) || r.pending || m.rateLimited(r) {
+	if !m.canRefresh(z) {
 		return nil
 	}
 
@@ -115,8 +116,8 @@ func (m *Model) refreshZone(z dns.Zone) tea.Cmd {
 			m.refreshes[z.ID] = r
 		}
 
-		if r.pending {
-			return nil // queued again while the Unseal prompt was open
+		if r.pending || m.rateLimited(*r) {
+			return nil
 		}
 
 		r.pending = true
@@ -211,8 +212,6 @@ func (m *Model) zoneRefreshed(msg zoneRefreshedMsg) tea.Cmd {
 	if !ok || r != msg.state {
 		return m.startRefreshes()
 	}
-
-	r.pending = false
 
 	if msg.err != nil {
 		*r = zoneRefresh{err: msg.err}
