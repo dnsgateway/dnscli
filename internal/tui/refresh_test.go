@@ -276,6 +276,93 @@ func TestRefreshesOfOneZoneAreSingleFlight(t *testing.T) {
 	}
 }
 
+func TestARestartStartsEveryZoneNotValidatedAndSelectingPromptsForUnseal(t *testing.T) {
+	f := refreshZones()
+	h, s, _ := newRefreshHarness(t, f)
+	h.press("enter")
+	h.assertShows("validated this session")
+
+	// A new session on the same database: the Refreshed cache is there, but
+	// nothing is validated.
+	f = refreshZones()
+	later := newAccountHarness(t, s, f)
+
+	later.assertShows("sealed · read-only", "work.example")
+	if row := strings.TrimSpace(later.domainRow("work.example")); row != "›work.example" {
+		t.Fatalf("work.example row = %q, want no marker", row)
+	}
+
+	later.assertDimmed("work.example")
+
+	later.press("enter")
+
+	// The cached Records show behind the Unseal prompt, which the Refresh needs.
+	later.assertShows("203.0.113.20", "Unseal", "needs your Account secrets")
+	later.assertHides("validated this session")
+
+	if n := recordsCalls(f, "zw1"); n != 0 {
+		t.Fatalf("Records calls = %d while sealed, want 0", n)
+	}
+
+	later.typeText(passphrase)
+	later.press("enter")
+
+	later.assertShows("unsealed", "validated this session")
+	later.assertMarker("work.example", "✓")
+
+	if n := recordsCalls(f, "zw1"); n != 1 {
+		t.Fatalf("Records calls = %d after Unseal, want 1", n)
+	}
+}
+
+func TestCancellingUnsealLeavesTheZoneStaleWithItsCache(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	f := refreshZones()
+	h := newAccountHarness(t, s, f)
+
+	h.press("enter", "esc")
+
+	h.assertShows("sealed · read-only", "work.example")
+	h.assertHides("Unseal", "refreshing…", "validated this session")
+	h.assertDimmed("work.example")
+
+	if calls := f.Calls(); len(calls) != 0 {
+		t.Fatalf("provider calls = %+v, want none", calls)
+	}
+}
+
+func TestTheSerialCheckHintNeverContradictsAValidatedZone(t *testing.T) {
+	f := refreshZones()
+	// The resolver lags behind the Provider.
+	h, _, _ := newRefreshHarnessWith(t, f, tui.Deps{Resolver: &fakeResolver{serials: map[string]uint32{"work.example": liveSerial - 1}}})
+	h.assertMarker("work.example", "!")
+
+	h.press("enter")
+
+	h.assertMarker("work.example", "✓")
+	h.assertShows("validated this session")
+	h.assertHides("possibly stale", "serial matches")
+}
+
+func TestAFailedRefreshOfAValidatedZoneMakesItStaleAgain(t *testing.T) {
+	f := refreshZones()
+	h, s, _ := newRefreshHarness(t, f)
+	h.press("enter")
+	h.assertShows("validated this session")
+
+	f.Fail(fake.OpRecords, &provider.APIError{Provider: "cloudflare", StatusCode: http.StatusServiceUnavailable})
+	h.press("r")
+
+	h.assertShows("Refresh failed", "503", "203.0.113.20")
+	h.assertHides("validated this session")
+	h.assertMarker("work.example", "✗")
+	h.assertDimmed("work.example")
+
+	if got := cachedRecordValues(t, s, "work.example"); len(got) != 2 {
+		t.Fatalf("cached records = %q, want the last Refresh kept", got)
+	}
+}
+
 func TestRefreshesRunWithBoundedConcurrency(t *testing.T) {
 	f := refreshZones()
 	h, _, _ := newRefreshHarnessWith(t, f, tui.Deps{Refreshes: 1})
