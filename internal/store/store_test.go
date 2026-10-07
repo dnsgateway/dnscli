@@ -152,6 +152,56 @@ func TestAZoneListOfARemovedAccountIsRefused(t *testing.T) {
 	}
 }
 
+func TestARefreshOfAZoneWhoseIDWasReusedIsRefused(t *testing.T) {
+	ctx := context.Background()
+	s := open(t, filepath.Join(t.TempDir(), "dnscli.db"))
+
+	a, err := s.AddAccount(ctx, dns.Account{Provider: "cloudflare", Name: "work"})
+	if err != nil {
+		t.Fatalf("add account: %v", err)
+	}
+
+	old, err := s.PutZone(ctx, dns.Zone{AccountID: a.ID, Name: "example.com", ProviderID: "z1"})
+	if err != nil {
+		t.Fatalf("put zone: %v", err)
+	}
+
+	// The Account is removed and another added, while a Refresh of old is
+	// in flight: the emptied tables hand out the same IDs again.
+	if err := s.RemoveAccount(ctx, a.ID); err != nil {
+		t.Fatalf("remove account: %v", err)
+	}
+
+	b, err := s.AddAccount(ctx, dns.Account{Provider: "cloudflare", Name: "home"})
+	if err != nil {
+		t.Fatalf("add account: %v", err)
+	}
+
+	reused, err := s.PutZone(ctx, dns.Zone{AccountID: b.ID, Name: "example.com", ProviderID: "z9"})
+	if err != nil {
+		t.Fatalf("put zone: %v", err)
+	}
+
+	if reused.ID != old.ID {
+		t.Fatalf("the new Zone has ID %d; the test needs it to reuse ID %d", reused.ID, old.ID)
+	}
+
+	stale := []dns.Record{{ProviderID: "r1", Type: "A", Name: "example.com", Value: "192.0.2.1", TTL: 300}}
+	if err := s.SaveRefresh(ctx, old, stale, 2026100701, time.Now()); !errors.Is(err, store.ErrZoneNotCached) {
+		t.Fatalf("save refresh of the removed Zone: %v, want ErrZoneNotCached", err)
+	}
+
+	records, err := s.Records(ctx, reused.ID)
+	if err != nil || len(records) != 0 {
+		t.Fatalf("Records of the new Zone = %+v, %v; want none", records, err)
+	}
+
+	zones, err := s.Zones(ctx)
+	if err != nil || len(zones) != 1 || zones[0].Serial != 0 || !zones[0].RefreshedAt.IsZero() {
+		t.Fatalf("zones = %+v, %v; want the new Zone never Refreshed", zones, err)
+	}
+}
+
 func TestOpenAcceptsARelativePath(t *testing.T) {
 	t.Chdir(t.TempDir())
 

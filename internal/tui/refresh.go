@@ -173,7 +173,7 @@ func refresh(ctx context.Context, s *store.Store, key *vault.Key, newProvider pr
 		return err
 	}
 
-	return s.SaveRefresh(ctx, z.ID, rs.Records, rs.Serial, now())
+	return s.SaveRefresh(ctx, z, rs.Records, rs.Serial, now())
 }
 
 // accountProvider builds the Provider for an Account with its API token,
