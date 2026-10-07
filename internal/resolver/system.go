@@ -76,6 +76,37 @@ func (s *System) SOA(ctx context.Context, zone string) (uint32, error) {
 	return 0, fmt.Errorf("no SOA record for %s", zone)
 }
 
+// NS returns the nameservers the system resolver gives for zone.
+//
+// A recursive resolver answers an NS query from the zone's own apex NS
+// records, served by the nameservers the parent delegates to, not from
+// the parent's delegation NS set. The two are usually the same set. Asking
+// the parent's servers directly would bypass the system resolver, which a
+// network may block, so dnscli takes the apex answer as the Delegation.
+func (s *System) NS(ctx context.Context, zone string) ([]string, error) {
+	q := new(mdns.Msg)
+	q.SetQuestion(mdns.Fqdn(zone), mdns.TypeNS)
+
+	r, err := s.exchange(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+
+	var ns []string
+
+	for _, rr := range r.Answer {
+		if n, ok := rr.(*mdns.NS); ok && strings.EqualFold(n.Hdr.Name, q.Question[0].Name) {
+			ns = append(ns, n.Ns)
+		}
+	}
+
+	if len(ns) == 0 {
+		return nil, fmt.Errorf("no NS records for %s", zone)
+	}
+
+	return ns, nil
+}
+
 // exchange sends q to each configured nameserver in turn, retrying over TCP
 // when a UDP answer is truncated, and returns the first conclusive answer.
 func (s *System) exchange(ctx context.Context, q *mdns.Msg) (*mdns.Msg, error) {

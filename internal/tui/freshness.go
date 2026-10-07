@@ -45,17 +45,20 @@ type serialCheckedMsg struct {
 	err    error
 }
 
-// zoneQueue schedules background work per Zone, such as Serial Checks or
-// Refreshes, with bounded concurrency. Each result message lets the next
-// queued Zone start.
-type zoneQueue struct {
-	queue   []int64 // Zone IDs waiting for their turn
+// workQueue schedules background work per key, such as Serial Checks per
+// Zone or Delegation lookups per zone name, with bounded concurrency. Each
+// result message lets the next queued key start.
+type workQueue[K comparable] struct {
+	queue   []K // keys waiting for their turn
 	running int
 }
 
-// drop removes a Zone from the queue, such as one that left the cache.
-func (q *zoneQueue) drop(id int64) {
-	q.queue = slices.DeleteFunc(q.queue, func(queued int64) bool { return queued == id })
+// zoneQueue schedules background work per Zone ID.
+type zoneQueue = workQueue[int64]
+
+// drop removes a key from the queue, such as a Zone that left the cache.
+func (q *workQueue[K]) drop(key K) {
+	q.queue = slices.DeleteFunc(q.queue, func(queued K) bool { return queued == key })
 }
 
 // queueSerialChecks runs after each cache (re)load. It queues a Serial

@@ -85,9 +85,10 @@ func (m *Model) domainLines(w, h int) []string {
 	start, end := window(len(m.visible), m.cursor[paneDomains], h)
 
 	for i := start; i < end; i++ {
-		// Stale Zones are dimmed; the marker shows the Refresh, else the Serial Check hint.
+		// Stale Zones are dimmed. The markers show the Live Zone, then the
+		// Refresh, else the Serial Check hint.
 		z := m.visible[i]
-		lines = append(lines, m.row(paneDomains, i, " "+m.zoneLabel(z), w-2, m.zoneStyle(z.ID))+" "+m.zoneMarker(z.ID))
+		lines = append(lines, m.row(paneDomains, i, " "+m.zoneLabel(z), w-3, m.zoneStyle(z.ID))+" "+m.liveMarker(z)+m.zoneMarker(z.ID))
 	}
 
 	if len(m.visible) == 0 && len(m.zones) > 0 {

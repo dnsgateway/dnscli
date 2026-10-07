@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,11 +19,41 @@ import (
 
 // Seeded cached serials: example.com 2026100701; two.tv and example.org unknown.
 
-// fakeResolver answers SOA queries from a script keyed by zone name. A zone
-// with no scripted answer fails like an unreachable resolver.
+// fakeResolver answers SOA and NS queries from a script keyed by zone name.
+// A zone with no scripted answer fails like an unreachable resolver.
 type fakeResolver struct {
 	serials map[string]uint32
 	errs    map[string]error
+	// ns are the Delegations; nsErrs fail NS queries.
+	ns     map[string][]string
+	nsErrs map[string]error
+
+	mu      sync.Mutex
+	nsAsked []string // zone names asked for NS, in order
+}
+
+func (r *fakeResolver) NS(_ context.Context, zone string) ([]string, error) {
+	r.mu.Lock()
+	r.nsAsked = append(r.nsAsked, zone)
+	r.mu.Unlock()
+
+	if err, ok := r.nsErrs[zone]; ok {
+		return nil, err
+	}
+
+	if ns, ok := r.ns[zone]; ok {
+		return ns, nil
+	}
+
+	return nil, errors.New("no NS answer scripted for " + zone)
+}
+
+// nsQueries returns the zone names asked for NS so far.
+func (r *fakeResolver) nsQueries() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return append([]string(nil), r.nsAsked...)
 }
 
 func (r *fakeResolver) SOA(_ context.Context, zone string) (uint32, error) {

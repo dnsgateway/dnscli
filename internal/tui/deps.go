@@ -23,10 +23,11 @@ type Deps struct {
 
 	// Providers builds a Provider for an Account from its Provider type.
 	Providers provider.Registry
-	// Resolver is the system DNS resolver the Serial Checks ask. Nil runs
-	// no Serial Checks.
+	// Resolver is the system DNS resolver the Serial Checks and the
+	// Delegation lookups ask. Nil runs neither.
 	Resolver Resolver
-	// SerialChecks is how many Serial Checks may run at once. Defaults to
+	// SerialChecks is how many Serial Checks may run at once, and, apart
+	// from them, how many Delegation lookups. Defaults to
 	// DefaultSerialChecks.
 	SerialChecks int
 	// Refreshes is how many Refreshes may run at once. Defaults to
@@ -45,12 +46,15 @@ type Deps struct {
 	Keychain vault.Method
 }
 
-// Resolver answers DNS queries through the system resolver. It is a
-// freshness hint only: a caching resolver can lag behind the Provider and
-// follows public Delegation (ADR-0001). Delegation (NS) lookups join it later.
+// Resolver answers DNS queries through the system resolver. Its answers
+// are hints only: a caching resolver can lag behind the Provider and
+// follows public Delegation (ADR-0001).
 type Resolver interface {
 	// SOA returns the SOA serial the resolver gives for a zone name.
 	SOA(ctx context.Context, zone string) (serial uint32, err error)
+	// NS returns the nameservers the resolver gives for a zone name: the
+	// Delegation, as far as the resolver shows it.
+	NS(ctx context.Context, zone string) (nameservers []string, err error)
 }
 
 // DefaultSerialChecks is the default limit on Serial Checks running at once.

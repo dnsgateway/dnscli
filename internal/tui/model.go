@@ -72,6 +72,10 @@ type Model struct {
 	refreshes map[int64]*zoneRefresh
 	// refreshQueue schedules the Refreshes.
 	refreshQueue zoneQueue
+	// delegations is each zone name's Delegation this session, by nameKey.
+	delegations map[string]*delegation
+	// lookups schedules the Delegation lookups, by nameKey.
+	lookups workQueue[string]
 
 	// addForm is the add-Account dialog; nil when closed.
 	addForm *addAccountForm
@@ -234,7 +238,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cursor[p] = min(m.cursor[p], max(m.itemCount(p)-1, 0))
 		}
 
-		return m, m.queueSerialChecks()
+		return m, tea.Batch(m.queueSerialChecks(), m.queueDelegations())
+	case delegationMsg:
+		return m, m.delegationResolved(msg)
 	case serialCheckedMsg:
 		return m, m.serialChecked(msg)
 	case zoneRefreshedMsg:
