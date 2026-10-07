@@ -97,6 +97,19 @@ func TestEditingARecordShowsAndChangesItsProxyFlag(t *testing.T) {
 	}
 }
 
+func TestThePreviewShowsAProxyOnlyChange(t *testing.T) {
+	proxied := dns.Record{ProviderID: "rw3", Type: "CNAME", Name: "www.work.example", Value: "work.example", TTL: 300,
+		Extras: map[string]string{"proxied": "true"}}
+	f := fake.New().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial}, proxied)
+	f.SetProxiableTypes("A", "AAAA", "CNAME")
+	h := openValidatedShowing(t, f, "www")
+
+	h.press("e", "tab", "tab", "tab", "tab", "up", "enter")
+	h.press("p")
+
+	h.assertShows("~ www CNAME work.example TTL 300 proxied → www CNAME work.example TTL 300 not proxied")
+}
+
 // unproxiable is an A Record Cloudflare cannot proxy, such as one with a
 // private address: it carries no proxy flag.
 var unproxiable = dns.Record{ProviderID: "rw3", Type: "A", Name: "lan.work.example", Value: "10.0.0.1", TTL: 300}

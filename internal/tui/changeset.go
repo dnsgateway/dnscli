@@ -312,7 +312,17 @@ func describeChange(zone string, c dns.Change) string {
 }
 
 // describeRecord is a Record as the Changeset preview shows it, named
-// relative to its Zone.
+// relative to its Zone, with its proxy flag when it has one.
 func describeRecord(zone string, r dns.Record) string {
-	return strings.Join([]string{dns.RelativeName(zone, r.Name), r.Type, r.Value, "TTL " + strconv.FormatUint(uint64(r.TTL), 10)}, " ")
+	parts := []string{dns.RelativeName(zone, r.Name), r.Type, r.Value, "TTL " + strconv.FormatUint(uint64(r.TTL), 10)}
+
+	if v, ok := r.Extras[proxiedExtra]; ok {
+		if v == "true" {
+			parts = append(parts, "proxied")
+		} else {
+			parts = append(parts, "not proxied")
+		}
+	}
+
+	return strings.Join(parts, " ")
 }
