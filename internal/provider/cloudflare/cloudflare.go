@@ -348,11 +348,22 @@ func (p *Provider) applyChange(ctx context.Context, zone dns.Zone, c dns.Change)
 		opts = append(opts, option.WithRequestBody("application/json", body))
 	}
 
+	// tries counts the requests a change takes, retries included.
+	var tries int
+
+	opts = append(opts, option.WithMiddleware(func(req *http.Request, next option.MiddlewareNext) (*http.Response, error) {
+		tries++
+
+		return next(req)
+	}))
+
 	switch c.Kind {
 	case dns.ChangeAdd:
+		// A create is not idempotent: a retry of one Cloudflare stored,
+		// but whose answer was lost, would make a second Record.
 		var params cfdns.RecordNewParams
 		params.ZoneID.Value, params.ZoneID.Present = zone.ProviderID, true
-		_, err = p.records.New(ctx, params, opts...)
+		_, err = p.records.New(ctx, params, append(opts, option.WithMaxRetries(0))...)
 	case dns.ChangeModify:
 		var params cfdns.RecordEditParams
 		params.ZoneID.Value, params.ZoneID.Present = zone.ProviderID, true
@@ -366,12 +377,20 @@ func (p *Provider) applyChange(ctx context.Context, zone dns.Zone, c dns.Change)
 	}
 
 	if err != nil {
-		return dns.Record{}, apiError(err, raw)
+		err = apiError(err, raw)
+
+		// A retried delete that finds the Record gone was made by an
+		// earlier try whose answer was lost.
+		if c.Kind == dns.ChangeDelete && tries > 1 && errors.Is(err, provider.ErrNotFound) {
+			return dns.Record{}, nil
+		}
+
+		return dns.Record{}, err
 	}
 
-	// Any 2xx is an answer; Cloudflare says in the body whether it took
-	// the change.
-	if !env.Success {
+	// Any 2xx is an answer; Cloudflare says in the body when it did not
+	// take the change. A body without "success" took it.
+	if env.Success != nil && !*env.Success {
 		e := &provider.APIError{Provider: "cloudflare", StatusCode: raw.StatusCode}
 		addErrors(e, env.Errors)
 
@@ -387,7 +406,7 @@ func (p *Provider) applyChange(ctx context.Context, zone dns.Zone, c dns.Change)
 
 // envelope is the v4 response envelope of a record write.
 type envelope struct {
-	Success bool            `json:"success"`
+	Success *bool           `json:"success"`
 	Errors  []wireError     `json:"errors"`
 	Result  json.RawMessage `json:"result"`
 }
@@ -478,7 +497,8 @@ func writeBody(r dns.Record) (recordBody, error) {
 		b.Priority = &nums[0]
 		b.Data = uriData{Weight: nums[1], Target: unquote(f[2])}
 	case "CAA":
-		if len(f) < 3 || !num(1) {
+		// CAA flags are one octet (RFC 8659).
+		if len(f) < 3 || !num(1) || nums[0] > 255 {
 			return b, bad
 		}
 

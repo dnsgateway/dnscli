@@ -41,6 +41,9 @@ type cfAPI struct {
 	forbidden []string
 	// fail, when set, answers every request instead of the scripted data.
 	fail http.HandlerFunc
+	// intercept, when set, sees each request first and answers it when it
+	// returns true; the scripted data answers the others.
+	intercept func(w http.ResponseWriter, r *http.Request) bool
 	// writeStatus is the HTTP status of a successful record write; zero
 	// means 200.
 	writeStatus int
@@ -164,6 +167,10 @@ func (api *cfAPI) handler(t *testing.T) http.Handler {
 		if api.fail != nil {
 			api.fail(w, r)
 
+			return
+		}
+
+		if api.intercept != nil && api.intercept(w, r) {
 			return
 		}
 
@@ -628,6 +635,137 @@ func TestApplyFailsAChangeCloudflareDoesNotMarkAsSuccess(t *testing.T) {
 	if !errors.As(res.Results[0].Err, &apiErr) || apiErr.StatusCode != http.StatusOK {
 		t.Errorf("err = %v, want a *provider.APIError with HTTP 200", res.Results[0].Err)
 	}
+}
+
+func TestApplyTakesA2xxResponseWithoutASuccessField(t *testing.T) {
+	api := &cfAPI{fail: func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"result": cfRecord("r1", "TXT", "example.com", `"hi"`, 300, false, false),
+		})
+	}}
+	p := newProvider(t, api)
+
+	add := dns.Change{Kind: dns.ChangeAdd, After: dns.Record{Type: "TXT", Name: "example.com", Value: `"hi"`, TTL: 300}}
+
+	res, err := p.Apply(context.Background(), dns.Changeset{Zone: dns.Zone{Name: "example.com", ProviderID: "z1"}, Changes: []dns.Change{add}})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	assertResults(t, res, []provider.ChangeResult{{Change: add, Record: dns.Record{
+		ProviderID: "r1", Type: "TXT", Name: "example.com", Value: `"hi"`, TTL: 300,
+	}}})
+}
+
+// serverError answers a request with a 5xx that asks for an immediate
+// retry, as a flaky edge might.
+func serverError(w http.ResponseWriter) {
+	w.Header().Set("Retry-After-Ms", "0")
+	writeErrors(w, http.StatusBadGateway, 10000+502, "Bad gateway")
+}
+
+func TestApplyDoesNotRetryACreate(t *testing.T) {
+	var posts int
+
+	api := &cfAPI{records: map[string][]map[string]any{"z1": {}}}
+	api.intercept = func(w http.ResponseWriter, r *http.Request) bool {
+		if r.Method != http.MethodPost {
+			return false
+		}
+
+		api.mu.Lock()
+		posts++
+		first := posts == 1
+		api.mu.Unlock()
+
+		if first {
+			serverError(w)
+
+			return true
+		}
+
+		return false
+	}
+	p := newProvider(t, api)
+
+	add := dns.Change{Kind: dns.ChangeAdd, After: dns.Record{Type: "TXT", Name: "example.com", Value: `"hi"`, TTL: 300}}
+
+	res, err := p.Apply(context.Background(), dns.Changeset{Zone: dns.Zone{Name: "example.com", ProviderID: "z1"}, Changes: []dns.Change{add}})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+
+	if posts != 1 {
+		t.Errorf("got %d POSTs, want exactly 1: a create is not retried", posts)
+	}
+
+	assertResults(t, res, []provider.ChangeResult{{Change: add, Err: errors.New("HTTP 502")}})
+}
+
+func TestApplyTakesADeleteWhoseRetryFindsTheRecordGone(t *testing.T) {
+	var deletes int
+
+	api := &cfAPI{records: map[string][]map[string]any{"z1": {
+		cfRecord("r1", "TXT", "example.com", `"hi"`, 300, false, false),
+	}}}
+	api.intercept = func(w http.ResponseWriter, r *http.Request) bool {
+		if r.Method != http.MethodDelete {
+			return false
+		}
+
+		api.mu.Lock()
+		deletes++
+		first := deletes == 1
+
+		// The first DELETE is made, but its answer is lost to a 5xx.
+		if first {
+			api.records["z1"] = nil
+		}
+		api.mu.Unlock()
+
+		if first {
+			serverError(w)
+
+			return true
+		}
+
+		return false
+	}
+	p := newProvider(t, api)
+
+	del := dns.Change{Kind: dns.ChangeDelete, Before: dns.Record{ProviderID: "r1", Type: "TXT", Name: "example.com", Value: `"hi"`, TTL: 300}}
+
+	res, err := p.Apply(context.Background(), dns.Changeset{Zone: dns.Zone{Name: "example.com", ProviderID: "z1"}, Changes: []dns.Change{del}})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+
+	if deletes != 2 {
+		t.Errorf("got %d DELETEs, want 2: a delete is retried", deletes)
+	}
+
+	assertResults(t, res, []provider.ChangeResult{{Change: del}})
+}
+
+func TestApplyRejectsCAAFlagsAbove255(t *testing.T) {
+	api := &cfAPI{records: map[string][]map[string]any{"z1": {}}}
+	p := newProvider(t, api)
+
+	add := dns.Change{Kind: dns.ChangeAdd, After: dns.Record{Type: "CAA", Name: "example.com", Value: `256 issue "letsencrypt.org"`, TTL: 300}}
+
+	res, err := p.Apply(context.Background(), dns.Changeset{Zone: dns.Zone{Name: "example.com", ProviderID: "z1"}, Changes: []dns.Change{add}})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	assertResults(t, res, []provider.ChangeResult{{Change: add, Err: errors.New("presentation form")}})
+	assertWrites(t, api, nil)
 }
 
 func TestApplySplitsThePriorityAndDataOutOfTheValue(t *testing.T) {
