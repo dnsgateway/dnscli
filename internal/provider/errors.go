@@ -31,6 +31,10 @@ type APIError struct {
 	Messages []string
 	// RetryAfter is how long the Provider asked to wait; zero when it did not say.
 	RetryAfter time.Duration
+	// Kind is the typed Provider error the adapter read from the Provider's
+	// own error codes, such as ErrUnauthorized. Nil classifies the error by
+	// its HTTP status alone.
+	Kind error
 }
 
 func (e *APIError) Error() string {
@@ -61,6 +65,10 @@ func (e *APIError) Unwrap() error {
 }
 
 func (e *APIError) kind() error {
+	if e.Kind != nil {
+		return e.Kind
+	}
+
 	switch e.StatusCode {
 	case http.StatusTooManyRequests:
 		return ErrRateLimited

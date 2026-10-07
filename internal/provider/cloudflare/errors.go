@@ -50,10 +50,26 @@ func apiError(err error, res *http.Response) error {
 	if data, rerr := io.ReadAll(res.Body); rerr == nil && json.Unmarshal(data, &body) == nil {
 		for _, m := range body.Errors {
 			e.Messages = append(e.Messages, fmt.Sprintf("%s (code %d)", m.Message, m.Code))
+
+			if kind, ok := errorCodes[m.Code]; ok && e.Kind == nil {
+				e.Kind = kind
+			}
 		}
 	}
 
 	return e
+}
+
+// errorCodes are the Cloudflare v4 error codes that say what went wrong
+// when the HTTP status does not, such as a bad token answered with 400.
+// The list is short on purpose: any other code is classified by status.
+var errorCodes = map[int]error{
+	6003:  provider.ErrUnauthorized, // Invalid request headers (e.g. a malformed token)
+	6111:  provider.ErrUnauthorized, // Invalid format for Authorization header
+	9106:  provider.ErrUnauthorized, // Missing X-Auth-Key, X-Auth-Email or Authorization headers
+	10000: provider.ErrUnauthorized, // Authentication error
+	7003:  provider.ErrNotFound,     // Could not route to …, perhaps your object identifier is invalid?
+	81044: provider.ErrNotFound,     // Record does not exist.
 }
 
 // retryAfter parses a Retry-After header: delay seconds or an HTTP date.

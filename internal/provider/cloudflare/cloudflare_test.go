@@ -295,6 +295,14 @@ func TestErrorResponsesAreTypedErrors(t *testing.T) {
 		{"missing permission", http.StatusForbidden, 9109, "Unauthorized to access requested resource", provider.ErrUnauthorized},
 		{"unknown zone", http.StatusNotFound, 7003, "Could not route to /zones/nope/dns_records, perhaps your object identifier is invalid?", provider.ErrNotFound},
 		{"server error", http.StatusInternalServerError, 10001, "Internal server error", nil},
+		{"other bad request", http.StatusBadRequest, 9005, "Content for A record is invalid", nil},
+		// Cloudflare answers these with HTTP 400: the error code says what went wrong.
+		{"invalid request headers", http.StatusBadRequest, 6003, "Invalid request headers", provider.ErrUnauthorized},
+		{"malformed Authorization header", http.StatusBadRequest, 6111, "Invalid format for Authorization header", provider.ErrUnauthorized},
+		{"missing credentials", http.StatusBadRequest, 9106, "Missing X-Auth-Key, X-Auth-Email or Authorization headers", provider.ErrUnauthorized},
+		{"authentication error", http.StatusBadRequest, 10000, "Authentication error", provider.ErrUnauthorized},
+		{"unroutable zone ID", http.StatusBadRequest, 7003, "Could not route to /zones/nope/dns_records, perhaps your object identifier is invalid?", provider.ErrNotFound},
+		{"record does not exist", http.StatusBadRequest, 81044, "Record does not exist.", provider.ErrNotFound},
 	}
 
 	for _, tt := range tests {
