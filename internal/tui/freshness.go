@@ -100,7 +100,7 @@ func (m *Model) startSerialChecks() tea.Cmd {
 		id := m.checks.queue[0]
 		m.checks.queue = m.checks.queue[1:]
 
-		z, ok := m.zone(id)
+		z, ok := m.zoneByID[id]
 		if !ok {
 			continue // removed from the cache meanwhile
 		}
@@ -130,7 +130,7 @@ func (m *Model) serialChecked(msg serialCheckedMsg) tea.Cmd {
 	m.checks.running--
 
 	f, ok := m.fresh[msg.zoneID]
-	z, cached := m.zone(msg.zoneID)
+	z, cached := m.zoneByID[msg.zoneID]
 
 	switch {
 	case !ok || !cached:
@@ -150,16 +150,6 @@ func (m *Model) freshnessOf(id int64) zoneFreshness {
 	}
 
 	return zoneFreshness{}
-}
-
-func (m *Model) zone(id int64) (dns.Zone, bool) {
-	for _, z := range m.zones {
-		if z.ID == id {
-			return z, true
-		}
-	}
-
-	return dns.Zone{}, false
 }
 
 var (

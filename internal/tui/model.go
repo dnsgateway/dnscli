@@ -43,6 +43,8 @@ type Model struct {
 	err      error // reading Accounts and Zones failed
 	accounts []dns.Account
 	zones    []dns.Zone
+	// zoneByID indexes zones by Zone ID.
+	zoneByID map[int64]dns.Zone
 
 	// accountFilter is the Account filter: the Domains pane shows only this
 	// Account's Zones. Zero means every Account.
@@ -181,6 +183,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err
 		m.accounts = msg.accounts
 		m.zones = msg.zones
+		m.zoneByID = make(map[int64]dns.Zone, len(msg.zones))
+
+		for _, z := range msg.zones {
+			m.zoneByID[z.ID] = z
+		}
+
 		m.slots = msg.slots
 		m.shared = sharedNames(msg.zones)
 		m.refilter(paneDomains)
