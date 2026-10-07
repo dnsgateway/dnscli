@@ -1,6 +1,10 @@
 package tui_test
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/sergelogvinov/dnscli/internal/tui"
+)
 
 // Seeded Zones are listed by zone name: example.com, example.org, two.tv.
 
@@ -152,6 +156,50 @@ func TestRecordsSearchNeedsRecordsToSearch(t *testing.T) {
 	if !h.quit {
 		t.Fatal("with no Records to search, q should still quit")
 	}
+}
+
+// The harness enrols no Unseal Method, so its session is sealed, and no Zone
+// has been Refreshed in it, so every Zone is a Stale Zone.
+func TestSearchWorksOnStaleZonesInASealedSession(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	h := newHarness(t, s)
+
+	h.press("/", "t", "w", "o")
+	h.assertShows("two.tv")
+	h.assertDimmed("two.tv")
+	h.assertHides("example.com")
+
+	h.press("enter", "tab", "tab", "/", "1", "9", "8")
+	h.assertShows("198.51.100.7")
+	h.assertDimmed("198.51.100.7")
+}
+
+func TestSearchKeyComesFromTheShortcutProfile(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	profile := profileWith(tui.ActionSearch, "ctrl+f")
+
+	h := newHarnessWith(t, s, tui.Deps{Shortcuts: &profile})
+
+	h.press("/", "t", "w", "o")
+	h.assertShows("example.com")
+
+	h.press("ctrl+f", "t", "w", "o")
+	h.assertShows("two.tv")
+	h.assertHides("example.com")
+}
+
+func TestHelpOverlayListsTheSearchKey(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	h := newHarness(t, s)
+	h.press("?")
+
+	h.assertShows("search")
 }
 
 func TestKeysTypedIntoSearchDoNotTriggerActions(t *testing.T) {
