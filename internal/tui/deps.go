@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/sergelogvinov/dnscli/internal/provider"
 	"github.com/sergelogvinov/dnscli/internal/store"
+	"github.com/sergelogvinov/dnscli/internal/vault"
 )
 
 // Deps are the model's injected dependencies. main wires the real
@@ -18,25 +20,26 @@ type Deps struct {
 	// which also replaces a profile that fails Validate.
 	Shortcuts *ShortcutProfile
 
-	// Providers builds a Provider for an Account's Provider type.
-	// Placeholder until the Provider interface lands (Account discovery, Refresh).
-	Providers ProviderRegistry
+	// Providers builds a Provider for an Account from its Provider type.
+	Providers provider.Registry
 	// Resolver answers SOA and NS queries for Serial Checks and Delegation.
 	// Placeholder until Serial Checks land.
 	Resolver Resolver
-	// UnsealMethods are the enrolled ways to Unseal the session.
-	// Placeholder until the Vault lands.
-	UnsealMethods []UnsealMethod
+	// UnsealMethod is the session's Unseal Method. Defaults to the
+	// passphrase method with the default argon2id cost.
+	UnsealMethod vault.Method
 }
-
-// ProviderRegistry maps a Provider type to a constructor. Not built yet.
-type ProviderRegistry interface{}
 
 // Resolver is the system DNS resolver used for Serial Checks. Not built yet.
 type Resolver interface{}
 
-// UnsealMethod is one way of performing Unseal. Not built yet.
-type UnsealMethod interface{}
+func (d Deps) unsealMethod() vault.Method {
+	if d.UnsealMethod == nil {
+		return vault.Passphrase{}
+	}
+
+	return d.UnsealMethod
+}
 
 // shortcuts returns the Shortcut Profile to use. An invalid injected profile
 // is replaced by the default, and the error says why.

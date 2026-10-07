@@ -48,8 +48,11 @@ func (m *Model) View() string {
 		ansi.Truncate(m.statusLine(), m.width, "…"),
 	)
 
-	if m.help {
+	switch {
+	case m.help:
 		view = overlay(view, m.helpView(), m.width, m.height)
+	case m.addForm != nil:
+		view = overlay(view, m.addAccountView(), m.width, m.height)
 	}
 
 	// Terminals too small to draw the panes in get a clipped view.

@@ -59,6 +59,9 @@ type Model struct {
 	records        []dns.Record
 	// visibleRecords are the Records the Records pane lists, after its search.
 	visibleRecords []dns.Record
+
+	// addForm is the add-Account dialog; nil when closed.
+	addForm *addAccountForm
 }
 
 // New builds the model. All background work derives its context from ctx,
@@ -150,6 +153,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refilter(paneRecords)
 		m.cursor[paneRecords] = 0
 	case tea.KeyMsg:
+		if m.addForm != nil {
+			return m, m.addAccountKey(msg)
+		}
+
 		if m.typeIntoSearch(msg) {
 			return m, nil
 		}
@@ -201,6 +208,8 @@ func (m *Model) handle(a Action) tea.Cmd {
 		m.startSearch()
 	case ActionClose:
 		m.clearSearch()
+	case ActionAddAccount:
+		m.openAddAccount()
 	}
 
 	return nil

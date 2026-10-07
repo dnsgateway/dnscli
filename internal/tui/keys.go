@@ -25,6 +25,8 @@ const (
 	// ActionAllAccounts clears the Account filter, so the Domains pane shows
 	// the Zones of every Account.
 	ActionAllAccounts
+	// ActionAddAccount opens the add-Account dialog.
+	ActionAddAccount
 )
 
 // Binding maps one Action to its keys.
@@ -54,6 +56,7 @@ func DefaultShortcutProfile() ShortcutProfile {
 			{Action: ActionSelect, Keys: []string{"enter"}, Help: "open / select"},
 			{Action: ActionSearch, Keys: []string{"/"}, Help: "search"},
 			{Action: ActionAllAccounts, Keys: []string{"*"}, Help: "Zones of all Accounts"},
+			{Action: ActionAddAccount, Keys: []string{"a"}, Help: "add Account"},
 			{Action: ActionHelp, Keys: []string{"?"}, Help: "toggle help"},
 			{Action: ActionClose, Keys: []string{"esc"}, Help: "close"},
 			{Action: ActionQuit, Keys: []string{"q", "ctrl+c"}, Help: "quit"},

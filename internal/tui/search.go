@@ -46,32 +46,42 @@ func (m *Model) clearSearch() {
 }
 
 // typeIntoSearch sends a typed key to the focused pane's search input, and
-// reports whether it did. Keys that are not text still reach actions, and so
-// do Alt+key and the keys that leave the search: Close, Select, NextPane and
-// PrevPane act even when bound to a printable key.
+// reports whether it did. See typeInto for which keys are typed.
 func (m *Model) typeIntoSearch(msg tea.KeyMsg) bool {
 	s := &m.search[m.focus]
-	if m.help || !s.typing || msg.Alt {
+	if m.help || !s.typing || !m.keys.typeInto(&s.query, msg) {
 		return false
 	}
 
-	switch m.keys.action(msg.String()) {
+	m.cursor[m.focus] = 0
+	m.refilter(m.focus)
+
+	return true
+}
+
+// typeInto edits a text input with a key, and reports whether it did.
+// Printable keys are typed and Backspace deletes. Keys that are not text
+// still reach actions, and so do Alt+key and the keys that leave the input:
+// Close, Select, NextPane and PrevPane act even when bound to a printable key.
+func (km keymap) typeInto(text *string, msg tea.KeyMsg) bool {
+	if msg.Alt {
+		return false
+	}
+
+	switch km.action(msg.String()) {
 	case ActionClose, ActionSelect, ActionNextPane, ActionPrevPane:
 		return false
 	}
 
 	switch msg.Type {
 	case tea.KeyRunes, tea.KeySpace:
-		s.query += string(msg.Runes)
+		*text += string(msg.Runes)
 	case tea.KeyBackspace, tea.KeyCtrlH: // some terminals send ^H for Backspace
-		r := []rune(s.query)
-		s.query = string(r[:max(len(r)-1, 0)])
+		r := []rune(*text)
+		*text = string(r[:max(len(r)-1, 0)])
 	default:
 		return false
 	}
-
-	m.cursor[m.focus] = 0
-	m.refilter(m.focus)
 
 	return true
 }
