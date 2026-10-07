@@ -41,9 +41,9 @@ type serialCheckedMsg struct {
 	err    error
 }
 
-// serialChecks schedules Serial Checks with bounded concurrency. Results
+// checkQueue schedules Serial Checks with bounded concurrency. Results
 // arrive as serialCheckedMsg, and each one lets the next queued check start.
-type serialChecks struct {
+type checkQueue struct {
 	queue   []int64 // Zone IDs waiting for a Serial Check
 	running int
 }
