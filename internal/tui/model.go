@@ -132,7 +132,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.accounts = msg.accounts
 		m.zones = msg.zones
 		m.shared = sharedNames(msg.zones)
-		m.setFilter(m.filter)
+		m.visible = filterZones(m.zones, m.filter)
 	case recordsLoadedMsg:
 		if m.open == nil || m.open.ID != msg.zoneID {
 			return m, nil // the user has moved on to another Zone
@@ -241,8 +241,13 @@ func (m *Model) selectItem() tea.Cmd {
 	return nil
 }
 
-// setFilter changes which Zones the Domains pane shows.
+// setFilter changes which Zones the Domains pane shows. An unchanged filter
+// changes nothing, so the cursor stays put.
 func (m *Model) setFilter(f zoneFilter) {
+	if f == m.filter {
+		return
+	}
+
 	m.filter = f
 	m.visible = filterZones(m.zones, f)
 	m.cursor[paneDomains] = 0

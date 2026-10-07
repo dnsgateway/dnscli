@@ -46,6 +46,27 @@ func TestClearingTheAccountFilterShowsTheZonesOfEveryAccount(t *testing.T) {
 	h.assertShows("example.com", "two.tv", "example.org")
 }
 
+func TestClearingAnAbsentAccountFilterKeepsTheCursor(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	h := newHarness(t, s)
+	h.press("j", "*", "enter")
+
+	h.assertShows("No cached Records for example.org")
+}
+
+func TestReselectingTheSelectedAccountKeepsTheCursor(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	h := newHarness(t, s)
+	h.press("tab", "enter", "shift+tab", "j") // two.tv, cloudflare.personal's second Zone
+	h.press("tab", "enter", "shift+tab", "enter")
+
+	h.assertShows("198.51.100.7")
+}
+
 func TestSelectedAccountIsMarkedUntilTheFilterIsCleared(t *testing.T) {
 	s, _ := openStore(t)
 	seedCache(t, s)
