@@ -116,6 +116,7 @@ type Provider struct {
 var (
 	_ provider.Provider  = (*Provider)(nil)
 	_ provider.TTLLimits = (*Provider)(nil)
+	_ provider.ProxyFlag = (*Provider)(nil)
 )
 
 // TTLRange implements provider.TTLLimits: below Enterprise plans, a
@@ -214,9 +215,14 @@ func (p *Provider) Records(ctx context.Context, zone dns.Zone) (provider.RecordS
 	return provider.RecordSet{Records: records}, nil
 }
 
-// proxiedExtra is the Record extra holding Cloudflare's proxy flag, "true"
-// or "false". It is set only on Records Cloudflare can proxy.
-const proxiedExtra = "proxied"
+// proxiedExtra is the Record extra holding Cloudflare's proxy flag. It is
+// set only on Records Cloudflare can proxy.
+const proxiedExtra = provider.ProxiedExtra
+
+// ProxiableTypes implements provider.ProxyFlag.
+func (p *Provider) ProxiableTypes() []string {
+	return []string{"A", "AAAA", "CNAME"}
+}
 
 // wireRecord is the part of a v4 DNS record that dnscli reads.
 //

@@ -1180,3 +1180,14 @@ func TestCloudflareTakesTTLsFrom60Seconds(t *testing.T) {
 		t.Fatalf("TTL range = %+v, want %+v", got, want)
 	}
 }
+
+func TestCloudflareProxiesAAAAAAndCNAMERecords(t *testing.T) {
+	p, err := cloudflare.Config{}.New(dns.Account{Provider: "cloudflare", Name: "work"}, testToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got, want := provider.ProxiableTypesOf(p), []string{"A", "AAAA", "CNAME"}; !slices.Equal(got, want) {
+		t.Fatalf("proxiable types = %v, want %v", got, want)
+	}
+}

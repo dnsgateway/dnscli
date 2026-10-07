@@ -44,6 +44,27 @@ func TTLRangeOf(p Provider) dns.TTLRange {
 	return dns.DefaultTTLRange
 }
 
+// ProxiedExtra is the Record extra holding a Provider's proxy flag, such
+// as Cloudflare's: "true" or "false".
+const ProxiedExtra = "proxied"
+
+// ProxyFlag is implemented by a Provider that can proxy traffic to some
+// Record types, such as Cloudflare. Their Records carry the ProxiedExtra.
+type ProxyFlag interface {
+	// ProxiableTypes are the Record types the Provider can proxy.
+	ProxiableTypes() []string
+}
+
+// ProxiableTypesOf returns the Record types a Provider can proxy; none
+// when it does not implement ProxyFlag.
+func ProxiableTypesOf(p Provider) []string {
+	if f, ok := p.(ProxyFlag); ok {
+		return f.ProxiableTypes()
+	}
+
+	return nil
+}
+
 // RecordSet is a Zone's Records as the Provider returned them.
 type RecordSet struct {
 	Records []dns.Record
