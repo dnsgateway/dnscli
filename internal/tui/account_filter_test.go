@@ -14,7 +14,7 @@ func TestSelectingAnAccountShowsOnlyItsZones(t *testing.T) {
 	seedCache(t, s)
 
 	h := newHarness(t, s)
-	h.press("tab", "enter")
+	h.press("shift+tab", "enter")
 
 	h.assertShows("example.com", "two.tv")
 	h.assertHides("example.org")
@@ -31,7 +31,7 @@ func TestEnterAfterFilteringOpensTheZoneShownUnderTheCursor(t *testing.T) {
 
 	h := newHarness(t, s)
 	h.press("j", "j") // two.tv, the last Zone
-	h.press("tab", "j", "enter", "shift+tab", "enter")
+	h.press("shift+tab", "j", "enter", "tab", "enter")
 
 	h.assertShows("No cached Records for example.org")
 }
@@ -41,7 +41,7 @@ func TestClearingTheAccountFilterShowsTheZonesOfEveryAccount(t *testing.T) {
 	seedCache(t, s)
 
 	h := newHarness(t, s)
-	h.press("tab", "enter", "*")
+	h.press("shift+tab", "enter", "*")
 
 	h.assertShows("example.com", "two.tv", "example.org")
 }
@@ -61,8 +61,8 @@ func TestReselectingTheSelectedAccountKeepsTheCursor(t *testing.T) {
 	seedCache(t, s)
 
 	h := newHarness(t, s)
-	h.press("tab", "enter", "shift+tab", "j") // two.tv, cloudflare.personal's second Zone
-	h.press("tab", "enter", "shift+tab", "enter")
+	h.press("shift+tab", "enter", "tab", "j") // two.tv, cloudflare.personal's second Zone
+	h.press("shift+tab", "enter", "tab", "enter")
 
 	h.assertShows("198.51.100.7")
 }
@@ -74,7 +74,7 @@ func TestSelectedAccountIsMarkedUntilTheFilterIsCleared(t *testing.T) {
 	h := newHarness(t, s)
 	h.assertHides("✓")
 
-	h.press("tab", "j", "enter")
+	h.press("shift+tab", "j", "enter")
 	h.assertShows("cloudflare.work ✓")
 	h.assertHides("cloudflare.personal ✓")
 
@@ -89,7 +89,7 @@ func TestClearingTheAccountFilterUsesTheShortcutProfile(t *testing.T) {
 	profile := profileWith(tui.ActionAllAccounts, "c")
 
 	h := newHarnessWith(t, s, tui.Deps{Shortcuts: &profile})
-	h.press("tab", "enter", "*")
+	h.press("shift+tab", "enter", "*")
 	h.assertHides("example.org")
 
 	h.press("c")
@@ -105,7 +105,7 @@ func TestAccountFilterAndDomainsSearchNarrowTheZonesTogether(t *testing.T) {
 
 	h := newHarness(t, s)
 	h.press("/", "e", "x")               // example.com, example.org
-	h.press("tab", "enter", "shift+tab") // and cloudflare.personal's
+	h.press("shift+tab", "enter", "tab") // and cloudflare.personal's
 
 	h.assertShows("example.com", "/ex")
 	h.assertHides("example.org", "two.tv")
@@ -116,7 +116,7 @@ func TestAccountFilterAndDomainsSearchNarrowTheZonesTogether(t *testing.T) {
 	h.assertHides("two.tv")
 
 	// Clearing the search leaves the Account filter's result.
-	h.press("tab", "enter", "shift+tab", "esc")
+	h.press("shift+tab", "enter", "tab", "esc")
 	h.assertShows("example.com", "two.tv")
 	h.assertHides("example.org", "/ex")
 }

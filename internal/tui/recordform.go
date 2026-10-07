@@ -44,6 +44,8 @@ type recordForm struct {
 	err     string
 	// edit is the row being edited; nil when adding.
 	edit *recordRow
+	// picker lists every value of the focused option field; nil when closed.
+	picker *picker
 }
 
 // newRecordForm opens the Record form, prefilled with the row's Record
@@ -63,15 +65,26 @@ func newRecordForm(z dns.Zone, edit *recordRow) *recordForm {
 	return f
 }
 
-// recordFormKey handles a key while the Record form is open.
+// recordFormKey handles a key while the Record form is open. Up and Down
+// move between the fields, like Tab, and Left and Right change an option
+// field's value. Enter opens an option field's picker, moves on from a
+// text field, and on Save stages the Record.
 func (m *Model) recordFormKey(msg tea.KeyMsg) tea.Cmd {
 	f := m.recordForm
 	a := m.keys.action(msg.String())
-	fields := m.recordFormFields()
-	f.field = min(f.field, fields-1)
+	rows := m.recordFormFields() + 1 // the fields, then Save
+	f.field = min(f.field, rows-1)
 
 	if quitsDialog(a, msg) {
 		return m.handle(ActionQuit)
+	}
+
+	if f.picker != nil {
+		if f.picker.key(a) {
+			f.picker = nil
+		}
+
+		return nil
 	}
 
 	switch f.field {
@@ -92,35 +105,69 @@ func (m *Model) recordFormKey(msg tea.KeyMsg) tea.Cmd {
 	switch a {
 	case ActionClose:
 		m.recordForm = nil
-	case ActionNextPane:
-		f.field = (f.field + 1) % fields
-	case ActionPrevPane:
-		f.field = (f.field + fields - 1) % fields
-	case ActionUp, ActionDown:
-		if f.field == recordFieldProxied {
-			f.proxied = !f.proxied
-		}
-
-		if f.field == recordFieldType {
-			n := len(dns.EditableTypes)
+	case ActionNextPane, ActionDown:
+		f.field = (f.field + 1) % rows
+	case ActionPrevPane, ActionUp:
+		f.field = (f.field + rows - 1) % rows
+	case ActionPaneLeft, ActionPaneRight:
+		if options, at, ok := f.options(); ok && f.field < rows-1 {
 			step := 1
-			if a == ActionUp {
-				step = n - 1
+			if a == ActionPaneLeft {
+				step = len(options) - 1
 			}
 
-			f.typ = (f.typ + step) % n
+			f.setOption((at + step) % len(options))
 		}
 	case ActionSelect:
-		if f.field < fields-1 {
-			f.field++
+		if f.field == rows-1 {
+			return m.submitRecordForm()
+		}
+
+		if options, at, ok := f.options(); ok {
+			f.picker = &picker{title: recordFieldLabels[f.field], options: options, cursor: at, pick: f.setOption}
 
 			return nil
 		}
 
-		return m.submitRecordForm()
+		f.field++
 	}
 
 	return nil
+}
+
+// recordFieldLabels are the labels of the Record form's fields.
+var recordFieldLabels = []string{"Type", "Name", "Value", "TTL", "Proxied"}
+
+// onOff are the values of the proxy flag, as the form shows them.
+var onOff = []string{"off", "on"}
+
+// options returns the values of the focused field and the index of its
+// current one; ok is false for a field that is typed, not picked. The
+// caller rules out Save, which takes the proxy flag's place when the form
+// has none.
+func (f *recordForm) options() (options []string, at int, ok bool) {
+	switch f.field {
+	case recordFieldType:
+		return dns.EditableTypes, f.typ, true
+	case recordFieldProxied:
+		if f.proxied {
+			return onOff, 1, true
+		}
+
+		return onOff, 0, true
+	}
+
+	return nil, 0, false
+}
+
+// setOption sets the focused option field to its i-th value.
+func (f *recordForm) setOption(i int) {
+	switch f.field {
+	case recordFieldType:
+		f.typ = i
+	case recordFieldProxied:
+		f.proxied = i == 1
+	}
 }
 
 // submitRecordForm validates the form and stages the Record in the
@@ -281,20 +328,17 @@ func (m *Model) recordFormView() string {
 		fields = append(fields, dialogField{label: "Proxied", value: v, choice: true})
 	}
 
-	hint := "Zone " + f.zone.Name + ": a name is relative to it, or absolute with a trailing dot; @ is the apex."
-	if m.refreshOf(f.zone.ID).caps.autoTTL {
-		hint += " TTL 1 is automatic."
-	}
-
-	notes := wrapNote(hintStyle, hint, noteWidth)
+	notes := []string{saveRow(f.field == len(fields))}
 
 	if f.err != "" {
 		notes = append(notes, "")
 		notes = append(notes, wrapNote(errorStyle, f.err, noteWidth)...)
 	}
 
-	notes = append(notes, "", hintStyle.Render(m.keys.keysFor(ActionNextPane)+" next field · "+
-		m.keys.keysFor(ActionSelect)+" add to the Changeset · "+m.keys.keysFor(ActionClose)+" cancel"))
+	hint := "Zone " + f.zone.Name + ": a name is relative to it, or absolute with a trailing dot; @ is the apex."
+	if m.refreshOf(f.zone.ID).caps.autoTTL {
+		hint += " TTL 1 is automatic."
+	}
 
-	return dialogView(title, fields, f.field, true, notes)
+	return sizedDialogView(title, fields, f.field, true, notes, wrapNote(hintStyle, hint, noteWidth), dialogSize{})
 }

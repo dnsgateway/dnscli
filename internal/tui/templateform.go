@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -32,8 +33,12 @@ type templateForm struct {
 	// which stopped it.
 	conflicts []string
 	// warning says what the Template would weaken, such as the Zone's
-	// DMARC policy; a second Enter stages it anyway.
+	// DMARC policy; a second Save stages it anyway.
 	warning string
+	// picker lists every value of the focused option field; nil when closed.
+	picker *picker
+	// size is the largest size the dialog takes, which it keeps.
+	size dialogSize
 }
 
 // openTemplateForm opens the Template dialog for the open Zone, past the
@@ -57,6 +62,7 @@ func (m *Model) openTemplateForm() tea.Cmd {
 		f.values[t.Name] = t.Prefill(z.Name, current)
 	}
 
+	f.size = f.measure()
 	m.templateForm = f
 
 	return nil
@@ -67,24 +73,35 @@ func (f *templateForm) template() template.Template {
 }
 
 // param returns the parameter of the focused field; false on the
-// Template field.
+// Template field and on Save.
 func (f *templateForm) param() (template.Param, bool) {
-	if f.field == 0 {
+	if f.field == 0 || f.field > len(f.template().Params) {
 		return template.Param{}, false
 	}
 
 	return f.template().Params[f.field-1], true
 }
 
-// templateFormKey handles a key while the Template dialog is open.
+// templateFormKey handles a key while the Template dialog is open. Like
+// the Record form, Up and Down move between the fields, Left and Right
+// change an option field's value, Enter opens an option field's picker or
+// moves on from a text field, and Save stages the Template's changes.
 func (m *Model) templateFormKey(msg tea.KeyMsg) tea.Cmd {
 	f := m.templateForm
 	a := m.keys.action(msg.String())
-	fields := 1 + len(f.template().Params)
+	rows := 1 + len(f.template().Params) + 1 // the Template, its parameters, then Save
 	values := f.values[f.template().Name]
 
 	if quitsDialog(a, msg) {
 		return m.handle(ActionQuit)
+	}
+
+	if f.picker != nil {
+		if f.picker.key(a) {
+			f.picker = nil
+		}
+
+		return nil
 	}
 
 	if p, ok := f.param(); ok && p.Choices == nil {
@@ -100,40 +117,79 @@ func (m *Model) templateFormKey(msg tea.KeyMsg) tea.Cmd {
 	switch a {
 	case ActionClose:
 		m.templateForm = nil
-	case ActionNextPane:
-		f.field = (f.field + 1) % fields
-	case ActionPrevPane:
-		f.field = (f.field + fields - 1) % fields
-	case ActionUp, ActionDown:
-		step := 1
-		if a == ActionUp {
-			step = -1
-		}
+	case ActionNextPane, ActionDown:
+		f.field = (f.field + 1) % rows
+	case ActionPrevPane, ActionUp:
+		f.field = (f.field + rows - 1) % rows
+	case ActionPaneLeft, ActionPaneRight:
+		if options, at, ok := f.options(); ok {
+			step := 1
+			if a == ActionPaneLeft {
+				step = len(options) - 1
+			}
 
-		p, ok := f.param()
-
-		switch {
-		case !ok:
-			n := len(f.templates)
-			f.pick = (f.pick + step + n) % n
-			f.err, f.conflicts, f.warning = "", nil, ""
-		case p.Choices != nil:
-			n := len(p.Choices)
-			i := max(slices.Index(p.Choices, values[p.Name]), 0)
-			values[p.Name] = p.Choices[(i+step+n)%n]
-			f.warning = ""
+			f.setOption(f.field, (at+step)%len(options))
 		}
 	case ActionSelect:
-		if f.field < fields-1 {
-			f.field++
+		if f.field == rows-1 {
+			return m.submitTemplateForm()
+		}
+
+		if options, at, ok := f.options(); ok {
+			field := f.field
+			f.picker = &picker{title: f.fieldLabel(), options: options, cursor: at, pick: func(i int) { f.setOption(field, i) }}
 
 			return nil
 		}
 
-		return m.submitTemplateForm()
+		f.field++
 	}
 
 	return nil
+}
+
+// options returns the values of the focused field and the index of its
+// current one; ok is false for a field that is typed, not picked, and
+// for Save.
+func (f *templateForm) options() (options []string, at int, ok bool) {
+	if f.field == 0 {
+		names := make([]string, len(f.templates))
+		for i, t := range f.templates {
+			names[i] = t.Name
+		}
+
+		return names, f.pick, true
+	}
+
+	p, ok := f.param()
+	if !ok || p.Choices == nil {
+		return nil, 0, false
+	}
+
+	return p.Choices, max(slices.Index(p.Choices, f.values[f.template().Name][p.Name]), 0), true
+}
+
+// setOption sets option field field to its i-th value.
+func (f *templateForm) setOption(field, i int) {
+	if field == 0 {
+		f.pick = i
+		f.err, f.conflicts, f.warning = "", nil, ""
+
+		return
+	}
+
+	p := f.template().Params[field-1]
+	f.values[f.template().Name][p.Name] = p.Choices[i]
+	f.warning = ""
+}
+
+// fieldLabel is the label of the focused field.
+func (f *templateForm) fieldLabel() string {
+	if p, ok := f.param(); ok {
+		return p.Label
+	}
+
+	return "Template"
 }
 
 // submitTemplateForm stages the changes the picked Template makes to the
@@ -142,7 +198,7 @@ func (m *Model) templateFormKey(msg tea.KeyMsg) tea.Cmd {
 // overrides one: if it would change a Record the user has a pending change
 // for, or bring back one staged for deletion, it stages nothing and lists
 // those changes. If it would weaken something, such as the Zone's DMARC
-// policy, it says so first and stages on a second Enter.
+// policy, it says so first and stages on a second Save.
 func (m *Model) submitTemplateForm() tea.Cmd {
 	f := m.templateForm
 	f.err, f.conflicts = "", nil
@@ -302,17 +358,8 @@ func (m *Model) templateFormView() string {
 	t := f.template()
 	values := f.values[t.Name]
 
-	fields := []dialogField{{label: "Template", value: t.Name, choice: true}}
-	for _, p := range t.Params {
-		fields = append(fields, dialogField{label: p.Label, value: values[p.Name], choice: p.Choices != nil})
-	}
-
-	notes := wrapNote(hintStyle, t.Summary, noteWidth)
-
-	if p, ok := f.param(); ok && p.Hint != "" {
-		notes = append(notes, "")
-		notes = append(notes, wrapNote(hintStyle, p.Hint, noteWidth)...)
-	}
+	fields := f.dialogFields(t, values)
+	notes := []string{saveRow(f.field == len(fields))}
 
 	if f.err != "" {
 		notes = append(notes, "")
@@ -327,12 +374,67 @@ func (m *Model) templateFormView() string {
 
 	if f.warning != "" {
 		notes = append(notes, "")
-		notes = append(notes, wrapNote(hintStaleStyle, f.warning+" Press "+m.keys.keysFor(ActionSelect)+
-			" again to add it to the Changeset anyway.", noteWidth)...)
+		notes = append(notes, wrapNote(hintStaleStyle, f.warning+" Save again to add it to the Changeset anyway.", noteWidth)...)
 	}
 
-	notes = append(notes, "", hintStyle.Render(m.keys.keysFor(ActionNextPane)+" next field · "+
-		m.keys.keysFor(ActionSelect)+" add to the Changeset · "+m.keys.keysFor(ActionClose)+" cancel"))
+	return sizedDialogView(f.title(), fields, f.field, true, notes, f.hints(t, f.field), f.size)
+}
 
-	return dialogView("Apply a Template to "+f.zone.Name, fields, f.field, true, notes)
+func (f *templateForm) title() string {
+	return "Apply a Template to " + f.zone.Name
+}
+
+// dialogFields are the rows of the dialog for Template t with values: the
+// Template, then its parameters.
+func (f *templateForm) dialogFields(t template.Template, values template.Values) []dialogField {
+	fields := []dialogField{{label: "Template", value: t.Name, choice: true}}
+	for _, p := range t.Params {
+		fields = append(fields, dialogField{label: p.Label, value: values[p.Name], choice: p.Choices != nil})
+	}
+
+	return fields
+}
+
+// hints are the lines at the bottom of the dialog for Template t with
+// field focused: the Template's summary and the focused parameter's hint.
+func (f *templateForm) hints(t template.Template, field int) []string {
+	hints := wrapNote(hintStyle, t.Summary, noteWidth)
+
+	if field > 0 && field <= len(t.Params) && t.Params[field-1].Hint != "" {
+		hints = append(hints, "")
+		hints = append(hints, wrapNote(hintStyle, t.Params[field-1].Hint, noteWidth)...)
+	}
+
+	return hints
+}
+
+// measure works out the largest size the dialog takes, over every
+// Template and focused field, with each typed value as wide as the dialog
+// shows one and each choice at its widest. The dialog then keeps that size
+// as the user moves through it; only an error or warning grows it.
+func (f *templateForm) measure() dialogSize {
+	var size dialogSize
+
+	widest := strings.Repeat("W", maxValueWidth)
+
+	for _, t := range f.templates {
+		values := template.Values{}
+
+		for _, p := range t.Params {
+			values[p.Name] = widest
+			if p.Choices != nil {
+				values[p.Name] = slices.MaxFunc(p.Choices, func(a, b string) int { return len(a) - len(b) })
+			}
+		}
+
+		fields := f.dialogFields(t, values)
+		fields[0].value = slices.MaxFunc(f.templates, func(a, b template.Template) int { return len(a.Name) - len(b.Name) }).Name
+
+		for field := range len(fields) + 1 {
+			notes := []string{saveRow(field == len(fields))}
+			size = size.grow(sizedDialogView(f.title(), fields, field, true, notes, f.hints(t, field), dialogSize{}))
+		}
+	}
+
+	return size
 }

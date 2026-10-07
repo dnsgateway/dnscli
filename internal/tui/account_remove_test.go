@@ -92,7 +92,7 @@ func TestRemovingAnAccountAsksForConfirmationThenDeletesItsZonesRecordsAndSecret
 	h := newAccountHarness(t, s, f)
 
 	// Accounts are listed by label: cloudflare.personal, then cloudflare.work.
-	h.press("tab", "j", "X")
+	h.press("shift+tab", "j", "X")
 	h.unsealWith(passphrase)
 
 	h.assertShows("Remove Account", "cloudflare.work", "2 Zones")
@@ -153,7 +153,7 @@ func TestRemovingTheLastAccountKeepsTheDataKeyEnrolled(t *testing.T) {
 
 	h := newAccountHarness(t, s, fake.New())
 
-	h.press("tab", "X")
+	h.press("shift+tab", "X")
 	h.unsealWith(passphrase)
 	h.typeText("cloudflare.work")
 	h.press("enter")
@@ -182,7 +182,7 @@ func TestCancellingTheRemovalKeepsTheAccountAndTypesBoundKeys(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
 	h := newAccountHarness(t, s, fake.New())
 
-	h.press("tab", "X")
+	h.press("shift+tab", "X")
 	h.unsealWith(passphrase)
 
 	// q quits, ? opens help and X removes outside the dialog; here they are typed.
@@ -238,12 +238,12 @@ func TestRemovingTheAccountOfTheOpenZoneClosesIt(t *testing.T) {
 	h := newAccountHarness(t, s, fake.New())
 
 	// Unseal first, then open work.example: Zones are listed by name.
-	h.press("tab", "X")
+	h.press("shift+tab", "X")
 	h.unsealWith(passphrase)
-	h.press("esc", "shift+tab", "j", "enter")
+	h.press("esc", "tab", "j", "enter")
 	h.assertShows("v=work")
 
-	h.press("tab", "j", "X")
+	h.press("shift+tab", "j", "X")
 	h.typeText("cloudflare.work")
 	h.press("enter")
 
@@ -265,7 +265,7 @@ func TestAZoneThatReusesARemovedZonesIDGetsItsOwnSerialCheck(t *testing.T) {
 		t.Fatalf("work.example row = %q, want the possibly-stale marker", row)
 	}
 
-	h.press("tab", "X")
+	h.press("shift+tab", "X")
 	h.unsealWith(passphrase)
 	h.typeText("cloudflare.work")
 	h.press("enter")
@@ -292,7 +292,7 @@ func TestAZoneThatReusesARemovedZonesIDIsNotValidated(t *testing.T) {
 	h.press("enter")
 	h.assertMarker("work.example", "✓")
 
-	h.press("esc", "tab", "X")
+	h.press("esc", "shift+tab", "X")
 	h.typeText("cloudflare.work")
 	h.press("enter")
 	h.assertShows("Removed cloudflare.work.")
@@ -317,7 +317,7 @@ func TestARefreshThatFinishesAfterItsAccountWasRemovedIsDropped(t *testing.T) {
 	refresh := h.step(h.pressHolding("enter"))
 	h.assertShows("refreshing…")
 
-	h.press("esc", "tab", "X")
+	h.press("esc", "shift+tab", "X")
 	h.typeText("cloudflare.work")
 	h.press("enter")
 	h.assertShows("Removed cloudflare.work.")
@@ -344,7 +344,7 @@ func TestRemovingAnAccountWhileItsZonesWaitForASerialCheckDropsThem(t *testing.T
 		SerialChecks: 1,
 	})
 
-	h.press("tab", "j", "X")
+	h.press("shift+tab", "j", "X")
 	h.unsealWith(passphrase)
 	h.typeText("cloudflare.work")
 

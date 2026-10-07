@@ -165,7 +165,7 @@ func TestDeletingAModifiedRecordDeletesItAsTheChangeWasBuiltFrom(t *testing.T) {
 	h.press("e", "tab", "tab")
 	h.clearText(len("20"))
 	h.typeText("99")
-	h.press("enter", "enter")
+	h.saveForm()
 	h.assertShows("~ work.example")
 
 	// The Record changes outside dnscli, and a Refresh caches it.
@@ -203,9 +203,9 @@ func TestChangingARecordsTypeKeepsTheProxyFlagOnlyWhereItApplies(t *testing.T) {
 			h.press("j", "j", "e")
 			h.assertShows("Edit Record", "‹ CNAME ›")
 
-			key, steps := "down", slices.Index(dns.EditableTypes, c.typ)-slices.Index(dns.EditableTypes, "CNAME")
+			key, steps := "right", slices.Index(dns.EditableTypes, c.typ)-slices.Index(dns.EditableTypes, "CNAME")
 			if steps < 0 {
-				key, steps = "up", -steps
+				key, steps = "left", -steps
 			}
 
 			for range steps {
@@ -216,10 +216,9 @@ func TestChangingARecordsTypeKeepsTheProxyFlagOnlyWhereItApplies(t *testing.T) {
 			if c.typ == "A" {
 				h.clearText(len("work.example"))
 				h.typeText("192.0.2.1")
-				h.press("enter") // past the Proxied field the Provider shows for an A Record
 			}
 
-			h.press("enter", "enter")
+			h.saveForm()
 			h.assertShows("~ www.work.example", "1 pending change")
 
 			h.press("p", "enter")
@@ -284,21 +283,21 @@ func TestEditingARecordKeepsItsNamesCase(t *testing.T) {
 	// Submitting the form unchanged changes nothing.
 	h.press("e")
 	h.assertShows("Edit Record", "WWW")
-	h.press("enter", "enter", "enter", "enter")
+	h.saveForm()
 	h.assertHides("Edit Record", "~ ", "pending change")
 
 	// Nor does typing the same name in another case.
 	h.press("e", "tab")
 	h.clearText(len("WWW"))
 	h.typeText("www")
-	h.press("enter", "enter", "enter")
+	h.saveForm()
 	h.assertHides("Edit Record", "~ ", "pending change")
 
 	// A real edit keeps the name as the Provider has it.
 	h.press("e", "tab", "tab")
 	h.clearText(len("1"))
 	h.typeText("2")
-	h.press("enter", "enter")
+	h.saveForm()
 	h.assertShows("~ WWW.Work.Example", "192.0.2.2")
 
 	h.press("p", "enter")

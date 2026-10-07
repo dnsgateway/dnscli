@@ -138,7 +138,7 @@ func TestAnApplyStoresTheNameserversSerialOnlyWhenItIsNewer(t *testing.T) {
 			r := &fakeResolver{soaAt: map[string]uint32{"work.example": c.cached}}
 			f := serialZones(zoneNS)
 			h, s, _ := newRefreshHarnessWith(t, f, tui.Deps{Resolver: r})
-			h.press("enter", "shift+tab")
+			h.press("enter", "tab")
 			h.buildChangeset()
 
 			r.setSOAAt("work.example", c.queried)
@@ -156,7 +156,7 @@ func TestAnApplyWhoseSerialQueryFailsKeepsTheCachedSerial(t *testing.T) {
 	r := &fakeResolver{soaAt: map[string]uint32{"work.example": 2026100700}}
 	f := serialZones(zoneNS)
 	h, s, _ := newRefreshHarnessWith(t, f, tui.Deps{Resolver: r})
-	h.press("enter", "shift+tab")
+	h.press("enter", "tab")
 	h.buildChangeset()
 
 	r.mu.Lock()

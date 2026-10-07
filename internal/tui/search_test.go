@@ -105,7 +105,7 @@ func TestSlashInRecordsFiltersByName(t *testing.T) {
 	seedCache(t, s)
 
 	h := newHarness(t, s)
-	h.press("enter", "shift+tab", "/", "w", "w", "w")
+	h.press("enter", "tab", "/", "w", "w", "w")
 
 	h.assertShows("/www", "www.example.com", "CNAME")
 	h.assertHides("192.0.2.10", "2001:db8::10")
@@ -116,7 +116,7 @@ func TestSlashInRecordsFiltersByType(t *testing.T) {
 	seedCache(t, s)
 
 	h := newHarness(t, s)
-	h.press("enter", "shift+tab", "/", "a", "a", "a", "a")
+	h.press("enter", "tab", "/", "a", "a", "a", "a")
 
 	h.assertShows("2001:db8::10")
 	h.assertHides("192.0.2.10", "www.example.com")
@@ -127,7 +127,7 @@ func TestSlashInRecordsFiltersByValue(t *testing.T) {
 	seedCache(t, s)
 
 	h := newHarness(t, s)
-	h.press("enter", "shift+tab", "/", "1", "9", "2")
+	h.press("enter", "tab", "/", "1", "9", "2")
 
 	h.assertShows("192.0.2.10")
 	h.assertHides("2001:db8::10", "www.example.com")
@@ -138,7 +138,7 @@ func TestEscClearsTheRecordsSearchAndRestoresAllRecords(t *testing.T) {
 	seedCache(t, s)
 
 	h := newHarness(t, s)
-	h.press("enter", "shift+tab", "/", "w", "w", "w", "esc")
+	h.press("enter", "tab", "/", "w", "w", "w", "esc")
 
 	h.assertShows("192.0.2.10", "2001:db8::10", "www.example.com")
 	h.assertHides("/www")
@@ -149,7 +149,7 @@ func TestOpeningAnotherZoneStartsWithAllItsRecords(t *testing.T) {
 	seedCache(t, s)
 
 	h := newHarness(t, s)
-	h.press("enter", "shift+tab", "/", "w", "w", "w", "tab", "j", "j", "enter")
+	h.press("enter", "tab", "/", "w", "w", "w", "shift+tab", "j", "j", "enter")
 
 	h.assertShows("198.51.100.7")
 	h.assertHides("/www")
@@ -163,7 +163,7 @@ func TestSearchWithoutMatchesSaysSo(t *testing.T) {
 	h.press("enter", "/", "z", "z")
 	h.assertShows("No matching Zones")
 
-	h.press("esc", "shift+tab", "/", "z", "z")
+	h.press("esc", "tab", "/", "z", "z")
 	h.assertShows("No matching Records")
 	h.assertHides("No matching Zones")
 }
@@ -173,7 +173,7 @@ func TestRecordsSearchNeedsRecordsToSearch(t *testing.T) {
 	seedCache(t, s)
 
 	h := newHarness(t, s)
-	h.press("j", "enter", "shift+tab", "/", "q")
+	h.press("j", "enter", "tab", "/", "q")
 
 	if !h.quit {
 		t.Fatal("with no Records to search, q should still quit")
@@ -204,7 +204,7 @@ func TestSearchWorksOnStaleZonesInASealedSession(t *testing.T) {
 	h.assertDimmed("two.tv")
 	h.assertHides("example.com")
 
-	h.press("enter", "tab", "tab", "/", "1", "9", "8")
+	h.press("enter", "shift+tab", "shift+tab", "/", "1", "9", "8")
 	h.assertShows("198.51.100.7")
 	h.assertDimmed("198.51.100.7")
 }

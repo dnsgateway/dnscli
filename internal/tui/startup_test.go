@@ -41,7 +41,7 @@ func TestBrowsingLeavesTheCacheUnchanged(t *testing.T) {
 	seedCache(t, s)
 
 	h := newHarness(t, s)
-	h.press("enter", "j", "j", "enter", "tab", "tab", "j", "?", "esc")
+	h.press("enter", "j", "j", "enter", "shift+tab", "shift+tab", "j", "?", "esc")
 
 	zones, err := s.Zones(context.Background())
 	if err != nil {

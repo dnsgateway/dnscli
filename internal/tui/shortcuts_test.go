@@ -58,7 +58,7 @@ func TestShortcutProfileWithAKeyBoundTwiceIsRejected(t *testing.T) {
 
 	h.press("tab")
 
-	h.assertFocused("Accounts")
+	h.assertFocused("Records")
 }
 
 func TestValidShortcutProfileIsUsed(t *testing.T) {
@@ -72,5 +72,5 @@ func TestValidShortcutProfileIsUsed(t *testing.T) {
 
 	h.press("n")
 
-	h.assertFocused("Accounts")
+	h.assertFocused("Records")
 }

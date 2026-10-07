@@ -21,7 +21,7 @@ func applyHoldingThePolls(t *testing.T, r *fakeResolver, f *fake.Provider) (*har
 	t.Helper()
 
 	h, _, _ := newRefreshHarnessWith(t, f, tui.Deps{Resolver: r})
-	h.press("enter", "shift+tab")
+	h.press("enter", "tab")
 	h.assertShows("validated this session")
 	h.buildChangeset()
 

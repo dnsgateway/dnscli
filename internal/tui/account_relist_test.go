@@ -40,7 +40,7 @@ func TestRelistingAddsNewZonesAndDropsGoneOnesKeepingTheCacheOfTheRest(t *testin
 		AddZone(dns.Zone{Name: "work.new", ProviderID: "zw3"})
 	h := newAccountHarness(t, s, f)
 
-	h.press("tab", "j", "L")
+	h.press("shift+tab", "j", "L")
 
 	// Re-listing needs the API token: the sealed session Unseals first.
 	if calls := f.Calls(); len(calls) != 0 {
@@ -88,7 +88,7 @@ func TestAFailedRelistingLeavesTheCacheAndShowsTheError(t *testing.T) {
 
 	h := newAccountHarness(t, s, f)
 
-	h.press("tab", "L")
+	h.press("shift+tab", "L")
 	h.unsealWith(passphrase)
 
 	h.assertShows("Re-listing cloudflare.work failed", "not authorized", "work.example", "work.test")
@@ -112,7 +112,7 @@ func TestRelistingNoZonesKeepsTheCacheAndHintsAtTheTokenPermission(t *testing.T)
 	// A token that may not list Zones lists none.
 	h := newAccountHarness(t, s, fake.New())
 
-	h.press("tab", "L")
+	h.press("shift+tab", "L")
 	h.unsealWith(passphrase)
 
 	h.assertShows("no Zones listed, cache kept", "Check that its API token may list Zones", "work.example", "work.test")
@@ -132,7 +132,7 @@ func TestARelistingThatFinishesAfterItsAccountWasRemovedIsDropped(t *testing.T) 
 	h := newAccountHarness(t, s, f)
 
 	// Unseal first, so the re-listing starts at once.
-	h.press("tab", "X")
+	h.press("shift+tab", "X")
 	h.unsealWith(passphrase)
 	h.press("esc")
 
@@ -160,9 +160,9 @@ func TestRelistingThatDropsTheOpenZoneClosesItsTemplateDialog(t *testing.T) {
 
 	// The re-listing is started from the Accounts pane and finishes while
 	// the Template dialog is open.
-	h.press("tab", "tab")
+	h.press("shift+tab", "shift+tab")
 	relist := h.pressHolding("L")
-	h.press("tab", "t")
+	h.press("shift+tab", "t")
 	h.assertShows("Apply a Template to work.example")
 
 	f.RemoveZone("zw1")

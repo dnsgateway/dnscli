@@ -20,8 +20,8 @@ type pane int
 
 const (
 	paneDomains pane = iota
-	paneAccounts
 	paneRecords
+	paneAccounts
 	paneCount
 )
 
@@ -382,7 +382,9 @@ func (m *Model) handle(a Action) tea.Cmd {
 		return nil
 	}
 
-	if a != ActionNone && a != ActionUp && a != ActionDown {
+	switch a {
+	case ActionNone, ActionUp, ActionDown, ActionPageUp, ActionPageDown:
+	default:
 		m.search[m.focus].typing = false // the filter stays; keys are actions again
 	}
 
@@ -393,10 +395,20 @@ func (m *Model) handle(a Action) tea.Cmd {
 		m.focus = (m.focus + 1) % paneCount
 	case ActionPrevPane:
 		m.focus = (m.focus + paneCount - 1) % paneCount
+	case ActionPaneRight:
+		m.focus = paneRecords
+	case ActionPaneLeft:
+		if m.focus == paneRecords {
+			m.focus = paneDomains
+		}
 	case ActionUp:
-		m.move(-1)
+		m.step(-1)
 	case ActionDown:
-		m.move(+1)
+		m.step(+1)
+	case ActionPageUp:
+		m.move(-m.listRows(m.focus))
+	case ActionPageDown:
+		m.move(+m.listRows(m.focus))
 	case ActionSelect:
 		return m.selectItem()
 	case ActionAllAccounts:
@@ -428,6 +440,21 @@ func (m *Model) handle(a Action) tea.Cmd {
 	}
 
 	return nil
+}
+
+// step moves the focused pane's cursor one item. Down past the last Zone
+// moves focus to the first Account below it, and Up past the first Account
+// back to the current Zone; the lists otherwise stop at their ends.
+func (m *Model) step(delta int) {
+	switch {
+	case m.focus == paneDomains && delta > 0 && m.cursor[paneDomains] >= m.itemCount(paneDomains)-1:
+		m.focus = paneAccounts
+		m.cursor[paneAccounts] = 0
+	case m.focus == paneAccounts && delta < 0 && m.cursor[paneAccounts] == 0:
+		m.focus = paneDomains
+	default:
+		m.move(delta)
+	}
 }
 
 // move moves the focused pane's cursor by delta, staying inside the list.
@@ -468,7 +495,8 @@ func (m *Model) itemCount(p pane) int {
 }
 
 // selectItem opens the highlighted item of the focused pane: a Zone shows
-// its Records, and an Account limits the Domains pane to its Zones.
+// its Records, an Account limits the Domains pane to its Zones, and a
+// Record opens in the Record form, as ActionEditRecord does.
 func (m *Model) selectItem() tea.Cmd {
 	switch m.focus {
 	case paneDomains:
@@ -477,6 +505,8 @@ func (m *Model) selectItem() tea.Cmd {
 		if len(m.accounts) > 0 {
 			m.setAccount(m.accounts[m.cursor[paneAccounts]].ID)
 		}
+	case paneRecords:
+		return m.recordAction(ActionEditRecord)
 	}
 
 	return nil

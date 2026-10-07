@@ -233,7 +233,7 @@ func TestARateLimitedRefreshShowsWhenToRetryAndIsNotRetriedOnItsOwn(t *testing.T
 	h.assertMarker("work.example", "✗")
 
 	// Moving around never retries; only the user does.
-	h.press("j", "k", "tab", "shift+tab")
+	h.press("j", "k", "shift+tab", "tab")
 
 	if n := recordsCalls(f, "zw1"); n != 1 {
 		t.Fatalf("Records calls = %d, want 1: a rate-limited Refresh must not be retried automatically", n)
@@ -389,7 +389,7 @@ func TestARefreshThatNeedsUnsealWaitsForThePromptAlreadyOpen(t *testing.T) {
 	// The Zone's cached Records load while the user asks to remove the
 	// Account, which opens the Unseal prompt first.
 	load := h.pressHolding("enter")
-	h.press("tab", "X")
+	h.press("shift+tab", "X")
 	h.assertShows("Unseal")
 	h.run(load)
 

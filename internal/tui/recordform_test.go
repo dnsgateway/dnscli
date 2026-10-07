@@ -23,11 +23,11 @@ func TestTheRecordFormShowsTheProxyFlagOnlyForTypesTheProviderProxies(t *testing
 	h.press("i")
 	h.assertShows("Add Record", "‹ A ›", "Proxied")
 
-	h.press("down", "down", "down") // MX
+	h.press("right", "right", "right") // MX
 	h.assertShows("‹ MX ›")
 	h.assertHides("Proxied")
 
-	h.press("up") // CNAME
+	h.press("left") // CNAME
 	h.assertShows("‹ CNAME ›", "Proxied")
 }
 
@@ -43,7 +43,7 @@ func TestAddingAProxiedRecord(t *testing.T) {
 	f := proxyingZones()
 	h := openValidated(t, f)
 
-	h.press("i", "down", "down") // CNAME
+	h.press("i", "right", "right") // CNAME
 	h.press("tab")
 	h.typeText("www")
 	h.press("tab")
@@ -51,9 +51,9 @@ func TestAddingAProxiedRecord(t *testing.T) {
 	h.press("tab", "tab")
 	h.assertShows("Proxied", "‹ off ›")
 
-	h.press("down")
+	h.press("right")
 	h.assertShows("‹ on ›")
-	h.press("enter")
+	h.saveForm()
 	h.assertHides("Add Record")
 
 	h.press("p", "enter")
@@ -80,9 +80,9 @@ func TestEditingARecordShowsAndChangesItsProxyFlag(t *testing.T) {
 
 	h.press("tab", "tab", "tab", "tab")
 	h.assertShows("‹ on ›")
-	h.press("up")
+	h.press("left")
 	h.assertShows("‹ off ›")
-	h.press("enter")
+	h.saveForm()
 	h.assertShows("~ www")
 
 	h.press("p", "enter")
@@ -104,7 +104,8 @@ func TestThePreviewShowsAProxyOnlyChange(t *testing.T) {
 	f.SetProxiableTypes("A", "AAAA", "CNAME")
 	h := openValidatedShowing(t, f, "www")
 
-	h.press("e", "tab", "tab", "tab", "tab", "up", "enter")
+	h.press("e", "tab", "tab", "tab", "tab", "left")
+	h.saveForm()
 	h.press("p")
 
 	h.assertShows("~ www CNAME work.example TTL 300 proxied → www CNAME work.example TTL 300 not proxied")
@@ -124,14 +125,14 @@ func TestEditingARecordTheProviderCannotProxyHasNoProxyFlag(t *testing.T) {
 	h.assertHides("Proxied")
 
 	// Submitting it unchanged changes nothing.
-	h.press("enter", "enter", "enter", "enter")
+	h.saveForm()
 	h.assertHides("Edit Record", "pending change")
 
 	// A changed TTL modifies only the TTL.
 	h.press("e", "tab", "tab", "tab")
 	h.clearText(len("300"))
 	h.typeText("600")
-	h.press("enter")
+	h.saveForm()
 	h.assertShows("1 pending change")
 
 	h.press("p", "enter")
@@ -151,8 +152,6 @@ func TestAddingARecordWithTheProxyFlagOffSendsNoFlag(t *testing.T) {
 	h := openValidated(t, f)
 
 	h.addRecord("A", "lan", "10.0.0.1", "300")
-	h.assertShows("Proxied", "‹ off ›")
-	h.press("enter")
 	h.assertHides("Add Record")
 
 	h.press("p", "enter")
@@ -175,7 +174,7 @@ func TestARecordWithoutTheProxyFlagIsTheSameAsOneWithItOff(t *testing.T) {
 	h.press("e", "tab", "tab", "tab")
 	h.clearText(len("300"))
 	h.typeText("600")
-	h.press("enter")
+	h.saveForm()
 
 	// The Provider now reports the flag, off, on the same Record.
 	off := unproxiable
@@ -189,4 +188,71 @@ func TestARecordWithoutTheProxyFlagIsTheSameAsOneWithItOff(t *testing.T) {
 	}
 
 	h.assertShows("Applied 1 change to work.example.")
+}
+
+func TestUpAndDownMoveBetweenTheRecordFormsFieldsAndLeftAndRightChangeAnOption(t *testing.T) {
+	h := openValidated(t, refreshZones())
+
+	h.press("i")
+	h.assertShows("› Type", "‹ A ›")
+
+	h.press("right", "right")
+	h.assertShows("‹ CNAME ›")
+	h.press("left")
+	h.assertShows("‹ AAAA ›")
+	h.press("left", "left") // round to the last type
+	h.assertShows("‹ URI ›")
+
+	h.press("down")
+	h.assertShows("› Name")
+	h.press("down", "down", "down")
+	h.assertShows("› [ Save ]")
+	h.press("up")
+	h.assertShows("› TTL")
+	h.press("down", "down") // round to the first field
+	h.assertShows("› Type")
+}
+
+func TestEnterOnAnOptionListsItsValuesToPickOneWithUpAndDown(t *testing.T) {
+	h := openValidated(t, refreshZones())
+
+	h.press("i", "enter")
+	h.assertShows("› Type", "AAAA", "CNAME", "MX", "SRV", "CAA", "URI")
+	h.assertPicked("A")
+
+	h.press("down", "down", "down")
+	h.assertPicked("MX")
+	h.press("up")
+	h.assertPicked("CNAME")
+
+	h.press("enter")
+	h.assertShows("Add Record", "› Type", "‹ CNAME ›")
+	h.assertHides("SRV")
+
+	// Esc closes the list and keeps the type.
+	h.press("enter", "down", "esc")
+	h.assertShows("Add Record", "‹ CNAME ›")
+	h.assertHides("SRV")
+
+	// Enter on a text field moves on; only Save stages the Record.
+	h.press("down")
+	h.typeText("www")
+	h.press("enter")
+	h.assertShows("› Value")
+	h.typeText("work.example.")
+	h.press("enter", "enter")
+	h.assertShows("Add Record", "› [ Save ]")
+
+	h.press("enter")
+	h.assertHides("Add Record")
+	h.assertShows("+ www.work.example", "1 pending change")
+}
+
+// assertPicked checks that the open picker highlights option.
+func (h *harness) assertPicked(option string) {
+	h.t.Helper()
+
+	if !h.highlighted("› " + option + " ") {
+		h.t.Fatalf("the picker does not highlight %q:\n%s", option, h.view())
+	}
 }

@@ -15,8 +15,18 @@ const (
 	ActionNone Action = iota
 	ActionNextPane
 	ActionPrevPane
+	// ActionPaneRight moves focus from the Domains or Accounts pane to the
+	// Records pane, on their right.
+	ActionPaneRight
+	// ActionPaneLeft moves focus from the Records pane to the Domains pane,
+	// on its left.
+	ActionPaneLeft
 	ActionUp
 	ActionDown
+	// ActionPageUp and ActionPageDown move the focused pane's cursor by
+	// the rows the pane shows, scrolling its list a page.
+	ActionPageUp
+	ActionPageDown
 	ActionSelect
 	ActionSearch
 	ActionHelp
@@ -89,16 +99,20 @@ func DefaultShortcutProfile() ShortcutProfile {
 		Bindings: []Binding{
 			{Action: ActionNextPane, Keys: []string{"tab"}, Help: "next pane"},
 			{Action: ActionPrevPane, Keys: []string{"shift+tab"}, Help: "previous pane"},
+			{Action: ActionPaneRight, Keys: []string{"right"}, Help: "Records pane"},
+			{Action: ActionPaneLeft, Keys: []string{"left"}, Help: "Domains pane"},
 			{Action: ActionUp, Keys: []string{"up", "k"}, Help: "move up"},
 			{Action: ActionDown, Keys: []string{"down", "j"}, Help: "move down"},
+			{Action: ActionPageUp, Keys: []string{"pgup"}, Help: "page up"},
+			{Action: ActionPageDown, Keys: []string{"pgdown"}, Help: "page down"},
 			{Action: ActionSelect, Keys: []string{"enter"}, Help: "open / select"},
 			{Action: ActionSearch, Keys: []string{"/"}, Help: "search"},
 			{Action: ActionAllAccounts, Keys: []string{"*"}, Help: "Zones of all Accounts"},
 			{Action: ActionRefresh, Keys: []string{"r"}, Help: "Refresh the open Zone (retry)"},
 			{Action: ActionDelegation, Keys: []string{"N"}, Help: "Delegation (nameservers), read-only"},
-			{Action: ActionAddRecord, Keys: []string{"i"}, Help: "insert a new Record (Records pane)"},
-			{Action: ActionEditRecord, Keys: []string{"e"}, Help: "edit the Record (Records pane)"},
-			{Action: ActionDeleteRecord, Keys: []string{"d"}, Help: "delete the Record, or undo its change (Records pane)"},
+			{Action: ActionAddRecord, Keys: []string{"i", "insert"}, Help: "insert a new Record (Records pane)"},
+			{Action: ActionEditRecord, Keys: []string{"e"}, Help: "edit the Record (Records pane; Enter too)"},
+			{Action: ActionDeleteRecord, Keys: []string{"d", "delete"}, Help: "delete the Record, or undo its change (Records pane)"},
 			{Action: ActionApplyTemplate, Keys: []string{"t"}, Help: "apply a Template, such as Google mail (Records pane)"},
 			{Action: ActionPreviewChanges, Keys: []string{"p"}, Help: "preview the pending changes, Enter applies"},
 			{Action: ActionDiscardChanges, Keys: []string{"D"}, Help: "discard the pending changes (in the preview)"},

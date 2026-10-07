@@ -369,11 +369,11 @@ func TestAZoneThatIsNotTheLiveZoneShowsNoSerialCheckVerdict(t *testing.T) {
 	}
 
 	h.press("enter")
-	h.assertStatusBarShows("no Serial Check: the resolver answers for the Live Zone")
+	h.assertStatusLineShows("no Serial Check: the resolver answers for the Live Zone")
 	h.assertHides("serial matches")
 
 	h.press("j", "enter")
-	h.assertStatusBarShows("possibly stale")
+	h.assertStatusLineShows("possibly stale")
 }
 
 func TestADelegationIsResolvedAgainOnReloadOnceItExpires(t *testing.T) {
@@ -416,7 +416,7 @@ func TestRelistingAnAccountResolvesItsZoneNamesDelegationAgain(t *testing.T) {
 	// The Delegation changed at the registrar.
 	r.ns["work.example"] = cruzDee
 
-	h.press("tab", "L")
+	h.press("shift+tab", "L")
 	h.assertShows("Re-listed cloudflare.work")
 	h.assertLive("work.example", true)
 }

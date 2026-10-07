@@ -52,7 +52,7 @@ func TestOtherKeysDoNotQuit(t *testing.T) {
 	seedCache(t, s)
 
 	h := newHarness(t, s)
-	h.press("tab", "j", "enter", "esc", "x")
+	h.press("shift+tab", "j", "enter", "esc", "x")
 
 	if h.quit || h.rootDone() {
 		t.Fatal("app quit on a non-quit key")

@@ -3,6 +3,7 @@ package tui_test
 import (
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -51,17 +52,7 @@ func (h *harness) openTemplate(n int) {
 	h.assertShows("Apply a Template")
 
 	for range n {
-		h.press("down")
-	}
-}
-
-// enter presses Enter n times: in the Template dialog, it moves to the
-// next field, and on the last field it submits.
-func (h *harness) enter(n int) {
-	h.t.Helper()
-
-	for range n {
-		h.press("enter")
+		h.press("right")
 	}
 }
 
@@ -82,7 +73,7 @@ func TestParkedDomainTemplateBuildsAChangesetThatIsPreviewedAndApplied(t *testin
 
 	h.openTemplate(parkedDomain)
 	h.assertShows("‹ Parked domain ›", "null MX")
-	h.enter(parkedFields)
+	h.saveForm()
 
 	h.assertHides("Apply a Template")
 	h.assertShows("4 pending changes", "v=spf1 -all")
@@ -127,7 +118,7 @@ func TestGoogleMailTemplateReplacesSPFAndDMARCInsteadOfAddingThem(t *testing.T) 
 	h.assertShows("‹ Google mail ›", "DMARC policy", "DKIM selector", "google", "DKIM key")
 	h.press("tab", "tab")
 	h.typeText("dmarc@work.example")
-	h.enter(googleFields - 2)
+	h.saveForm()
 
 	h.assertShows("3 pending changes")
 	h.press("p", "enter")
@@ -163,7 +154,7 @@ func TestGoogleMailTemplateReplacesSPFAndDMARCInsteadOfAddingThem(t *testing.T) 
 
 	// Applying the Template again finds nothing to change.
 	h.openTemplate(googleMail)
-	h.enter(googleFields)
+	h.saveForm()
 	h.assertShows("work.example already has the Records of Google mail")
 	h.assertHides("Apply a Template", "pending change")
 }
@@ -179,7 +170,7 @@ func TestGoogleMailTemplateTakesADMARCPolicyAndADKIMKey(t *testing.T) {
 	h.typeText("dmarc@work.example")
 	h.press("tab", "tab")
 	h.typeText("MIIBIjANBgkq")
-	h.press("enter")
+	h.saveForm()
 
 	h.assertShows("4 pending changes")
 	h.press("p", "enter")
@@ -203,7 +194,7 @@ func TestATemplateParameterErrorKeepsTheDialogOpen(t *testing.T) {
 	h.openTemplate(googleMail)
 	h.press("tab", "tab")
 	h.typeText("not an address")
-	h.enter(googleFields - 2)
+	h.saveForm()
 
 	h.assertShows("Apply a Template", "is not an email address")
 	h.assertHides("pending change")
@@ -214,9 +205,9 @@ func TestTheTemplateDialogFitsASmallTerminal(t *testing.T) {
 	h.send(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	h.openTemplate(protonMail)
-	h.enter(protonFields)
+	h.saveForm()
 
-	h.assertShows("Enter the Verification token", "Esc cancel")
+	h.assertShows("Enter the Verification token", "[ Save ]", "Esc cancel")
 	h.assertDialogFits("Apply a Template to work.example")
 }
 
@@ -228,7 +219,7 @@ func TestProtonMailTemplateAsksForItsTokenAndDKIMTargets(t *testing.T) {
 	h.assertShows("‹ Proton mail ›", "Verification token", "DKIM target 1")
 
 	// Every parameter but the DMARC ones is required.
-	h.enter(protonFields)
+	h.saveForm()
 	h.assertShows("Apply a Template", "Enter the Verification token")
 	h.assertHides("pending change")
 
@@ -239,7 +230,7 @@ func TestProtonMailTemplateAsksForItsTokenAndDKIMTargets(t *testing.T) {
 	h.typeText("protonmail2.domainkey.dx.domains.proton.ch")
 	h.press("tab")
 	h.typeText("protonmail3.domainkey.dx.domains.proton.ch")
-	h.enter(protonFields - 4) // from DKIM target 3, past the DMARC fields
+	h.saveForm()
 
 	h.assertHides("Apply a Template")
 	h.press("p", "enter")
@@ -269,11 +260,11 @@ func TestATemplateDoesNotOverwriteAChangeTheUserStaged(t *testing.T) {
 	h.press("down", "down", "down", "down", "e", "tab", "tab")
 	h.clearText(len("-all"))
 	h.typeText("~all")
-	h.press("enter", "enter")
+	h.saveForm()
 	h.assertShows("1 pending change", "v=spf1 mx ~all")
 
 	h.openTemplate(parkedDomain)
-	h.enter(parkedFields)
+	h.saveForm()
 
 	h.assertShows("Apply a Template", "Nothing was staged", "Parked domain would change", "@ TXT v=spf1 mx ~all TTL 3600")
 	h.press("esc")
@@ -283,7 +274,7 @@ func TestATemplateDoesNotOverwriteAChangeTheUserStaged(t *testing.T) {
 	h.press("p", "D")
 	h.assertShows("Discarded 1 pending change", "v=spf1 mx -all")
 	h.openTemplate(parkedDomain)
-	h.enter(parkedFields)
+	h.saveForm()
 	h.assertHides("Apply a Template")
 	h.assertShows("4 pending changes", "v=spf1 -all")
 }
@@ -297,7 +288,7 @@ func TestATemplateKeepsAChangeTheUserStagedThatItAgreesWith(t *testing.T) {
 	h.assertShows("1 pending change")
 
 	h.openTemplate(parkedDomain)
-	h.enter(parkedFields)
+	h.saveForm()
 	h.assertHides("Apply a Template")
 	h.press("p", "enter")
 
@@ -329,7 +320,7 @@ func TestATemplateDoesNotModifyARecordIntoOneStagedForDeletion(t *testing.T) {
 	h.press("esc")
 
 	h.openTemplate(parkedDomain)
-	h.enter(parkedFields)
+	h.saveForm()
 
 	h.assertShows("Apply a Template", "Nothing was staged", "@ TXT v=spf1 -all TTL 3600 (pending deletion)")
 	h.press("esc")
@@ -342,7 +333,7 @@ func TestATemplateDoesNotChangeARecordWithoutAProviderID(t *testing.T) {
 	h := openValidatedShowing(t, f, "v=spf1 mx -all")
 
 	h.openTemplate(parkedDomain)
-	h.enter(parkedFields)
+	h.saveForm()
 
 	h.assertShows("Apply a Template", "Nothing was staged", "no Provider ID")
 	h.assertHides("pending change")
@@ -363,7 +354,7 @@ func TestTheNoProviderIDErrorListsNoConflicts(t *testing.T) {
 	h.press("esc")
 
 	h.openTemplate(parkedDomain)
-	h.enter(parkedFields)
+	h.saveForm()
 
 	h.assertShows("Apply a Template", "Nothing was staged", "no Provider ID")
 	h.assertHides("(pending deletion)")
@@ -374,7 +365,7 @@ func TestTheWriteGateRefusesTemplatesOnAStaleZone(t *testing.T) {
 	h, _, _ := newRefreshHarness(t, f)
 
 	f.Fail(fake.OpRecords, errors.New("connection reset by peer"))
-	h.press("enter", "shift+tab")
+	h.press("enter", "tab")
 	h.assertShows("Refresh failed")
 
 	h.press("t")
@@ -389,7 +380,7 @@ func TestTheWriteGateRefusesTemplatesInASealedSession(t *testing.T) {
 	h := newAccountHarness(t, s, f)
 
 	h.press("enter")
-	h.press("esc", "shift+tab")
+	h.press("esc", "tab")
 
 	h.press("t")
 
@@ -406,7 +397,7 @@ func TestAMailTemplateKeepsTheZonesDMARCUnlessItIsEdited(t *testing.T) {
 
 	h.openTemplate(googleMail)
 	h.assertShows("DMARC policy      quarantine", "mailto:a@work.example")
-	h.enter(googleFields)
+	h.saveForm()
 
 	h.assertShows("2 pending changes")
 	h.press("p", "enter")
@@ -422,16 +413,16 @@ func TestAMailTemplateKeepsTheZonesDMARCUnlessItIsEdited(t *testing.T) {
 	}
 }
 
-func TestAWeakerDMARCPolicyNeedsASecondEnter(t *testing.T) {
+func TestAWeakerDMARCPolicyNeedsASecondSave(t *testing.T) {
 	f := mailZones()
 	h := openValidatedShowing(t, f, "v=spf1 mx -all")
 
 	h.openTemplate(googleMail)
-	h.press("tab", "down") // DMARC policy: reject → none
+	h.press("tab", "right") // DMARC policy: reject → none
 	h.assertShows("‹ none ›")
-	h.enter(googleFields - 1)
+	h.saveForm()
 
-	h.assertShows("Apply a Template", "The DMARC policy of work.example is reject: none is", "Press Enter again")
+	h.assertShows("Apply a Template", "The DMARC policy of work.example is reject: none is", "Save again")
 	h.assertHides("pending change")
 
 	h.press("enter")
@@ -455,15 +446,108 @@ func TestEditingAfterTheWeakerPolicyWarningAsksAgain(t *testing.T) {
 	h := openValidatedShowing(t, mailZones(), "v=spf1 mx -all")
 
 	h.openTemplate(googleMail)
-	h.press("tab", "down", "down") // DMARC policy: reject → none → quarantine
-	h.enter(googleFields - 1)
+	h.press("tab", "right", "right") // DMARC policy: reject → none → quarantine
+	h.saveForm()
 	h.assertShows("is reject: quarantine")
 
 	// Changing the policy, even back to the one warned of, warns again
 	// before anything is staged.
-	h.press("shift+tab", "shift+tab", "shift+tab", "up", "down")
+	h.press("up", "up", "up", "up", "left", "right") // from Save to the DMARC policy
 	h.assertShows("‹ quarantine ›")
-	h.enter(googleFields - 1)
+	h.saveForm()
 	h.assertShows("Apply a Template", "is reject: quarantine")
 	h.assertHides("pending change")
+}
+
+func TestTheTemplateDialogTakesTheSameKeysAsTheRecordForm(t *testing.T) {
+	h := openValidatedShowing(t, mailZones(), "v=spf1 mx -all")
+
+	h.press("t")
+	h.assertShows("› Template", "‹ Google mail ›")
+
+	// Left and Right change the Template, round from the first to the last.
+	h.press("left")
+	h.assertShows("‹ Parked domain ›")
+	h.press("right")
+	h.assertShows("‹ Google mail ›")
+
+	// Enter lists every Template; Up and Down pick one.
+	h.press("enter")
+	h.assertPicked("Google mail")
+	h.press("down")
+	h.assertPicked("Proton mail")
+	h.press("enter")
+	h.assertShows("› Template", "‹ Proton mail ›")
+
+	// Up and Down move between the fields, round from the first to Save.
+	h.press("up")
+	h.assertShows("› [ Save ]")
+	h.press("up", "up") // the DMARC policy, prefilled from the Zone's DMARC
+	h.assertShows("‹ reject ›")
+
+	// A choice parameter has a picker too.
+	h.press("enter", "up", "enter")
+	h.assertShows("‹ quarantine ›")
+
+	// Esc in a picker keeps the value, and Esc in the dialog closes it.
+	h.press("enter", "down", "esc")
+	h.assertShows("Apply a Template", "‹ quarantine ›")
+	h.press("esc")
+	h.assertHides("Apply a Template")
+}
+
+// dialogSize is the width and height of the dialog box titled title.
+func (h *harness) dialogSize(title string) (w, ht int) {
+	h.t.Helper()
+
+	lines := strings.Split(h.view(), "\n")
+	for i, l := range lines {
+		r := []rune(l)
+
+		col := slices.Index(r, '┏')
+		if col < 0 || !strings.HasPrefix(string(r[col:]), "┏━ "+title) {
+			continue
+		}
+
+		w = slices.Index(r[col:], '┓') + 1
+
+		for j := i + 1; j < len(lines); j++ {
+			if rj := []rune(lines[j]); col < len(rj) && rj[col] == '┗' {
+				return w, j - i + 1
+			}
+		}
+	}
+
+	h.t.Fatalf("no dialog %q:\n%s", title, h.view())
+
+	return 0, 0
+}
+
+func TestTheTemplateDialogKeepsOneSize(t *testing.T) {
+	h := openValidatedShowing(t, mailZones(), "v=spf1 mx -all")
+	h.send(tea.WindowSizeMsg{Width: 160, Height: 40})
+
+	const title = "Apply a Template to work.example"
+
+	h.press("t")
+	w, ht := h.dialogSize(title)
+
+	assertSize := func(step string) {
+		t.Helper()
+
+		if gw, gh := h.dialogSize(title); gw != w || gh != ht {
+			t.Fatalf("after %s the dialog is %dx%d, want %dx%d:\n%s", step, gw, gh, w, ht, h.view())
+		}
+	}
+
+	h.press("right")
+	assertSize("picking Proton mail")
+	h.press("down")
+	assertSize("moving to a parameter with a hint")
+	h.typeText(strings.Repeat("x", 60))
+	assertSize("typing a long value")
+	h.press("right")
+	assertSize("picking Parked domain")
+	h.press("down")
+	assertSize("moving to Save")
 }

@@ -23,23 +23,52 @@ var (
 	addedStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
 	modifiedStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
 	deletedStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Strikethrough(true)
+	// cursorStyle marks the highlighted item of a popup, such as a picker.
+	cursorStyle = lipgloss.NewStyle().Reverse(true)
 	// staleStyle dims cached data that has not been confirmed in this session.
 	staleStyle = lipgloss.NewStyle().Faint(true)
 )
 
-// View renders the three panes and the status bar.
-func (m *Model) View() string {
-	// Panes keep their minimum sizes while the terminal has room for them,
-	// and shrink to fit it when it does not.
+// layout is the size of each pane, borders included.
+type layout struct {
+	leftW, rightW, bodyH, domainsH, accountsH int
+}
+
+// layout sizes the panes to the terminal. Panes keep their minimum sizes
+// while the terminal has room for them, and shrink to fit it when it does not.
+func (m *Model) layout() layout {
 	leftW := max(m.width/4, 24)
 	if m.width < leftW+20 {
 		leftW = m.width / 2
 	}
 
-	rightW := m.width - leftW
-	bodyH := max(m.height-2, 0) // the status bar takes two rows
+	bodyH := max(m.height-2, 0) // the Zone Status bar and the status line take a row each
 	domainsH := min(max(bodyH*2/3, 3), bodyH)
-	accountsH := bodyH - domainsH
+
+	return layout{leftW: leftW, rightW: m.width - leftW, bodyH: bodyH, domainsH: domainsH, accountsH: bodyH - domainsH}
+}
+
+// listRows is how many list items a pane shows at once: its height less
+// its borders, its search input and, in the Records pane, the header.
+func (m *Model) listRows(p pane) int {
+	l := m.layout()
+
+	switch p {
+	case paneDomains:
+		return max(l.domainsH-2-len(m.searchLines(paneDomains, l.leftW-2)), 1)
+	case paneAccounts:
+		return max(l.accountsH-2, 1)
+	case paneRecords:
+		return max(l.bodyH-2-len(m.searchLines(paneRecords, l.rightW-2))-1, 1)
+	}
+
+	return 1
+}
+
+// View renders the Zone Status bar, the three panes and the status line.
+func (m *Model) View() string {
+	l := m.layout()
+	leftW, rightW, bodyH, domainsH, accountsH := l.leftW, l.rightW, l.bodyH, l.domainsH, l.accountsH
 
 	left := lipgloss.JoinVertical(lipgloss.Left,
 		box("Domains", m.domainLines(leftW-2, domainsH-2), leftW, domainsH, m.focus == paneDomains),
@@ -48,8 +77,9 @@ func (m *Model) View() string {
 	right := box("Records", m.recordLines(rightW-2, bodyH-2), rightW, bodyH, m.focus == paneRecords)
 
 	view := lipgloss.JoinVertical(lipgloss.Left,
+		m.zoneStatusRow(),
 		lipgloss.JoinHorizontal(lipgloss.Top, left, right),
-		m.statusBar(),
+		m.statusLineRow(),
 	)
 
 	switch {
@@ -65,8 +95,14 @@ func (m *Model) View() string {
 		view = overlay(view, m.removeAccountView(), m.width, m.height)
 	case m.recordForm != nil:
 		view = overlay(view, m.recordFormView(), m.width, m.height)
+		if m.recordForm.picker != nil {
+			view = overlay(view, m.recordForm.picker.view(m.height), m.width, m.height)
+		}
 	case m.templateForm != nil:
 		view = overlay(view, m.templateFormView(), m.width, m.height)
+		if m.templateForm.picker != nil {
+			view = overlay(view, m.templateForm.picker.view(m.height), m.width, m.height)
+		}
 	case m.preview != nil:
 		view = overlay(view, m.previewView(), m.width, m.height)
 	case m.delegationOf != "":
@@ -281,36 +317,64 @@ func window(n, cursor, h int) (start, end int) {
 	return start, start + h
 }
 
-// statusBar renders the status bar: the open Zone's Zone Status row, then
-// the status line with the session state at its right edge. A terminal
-// too narrow for both keeps the status line.
-func (m *Model) statusBar() string {
-	return m.zoneStatusRow() + "\n" + m.statusLineRow()
-}
-
-// zoneStatusRow is the open Zone's Zone Status; blank when no Zone is open.
+// zoneStatusRow is the Zone Status bar at the top of the view: the open
+// Zone's Zone Status, with the session state at its right edge.
 func (m *Model) zoneStatusRow() string {
-	if !m.loaded || m.open == nil {
-		return ""
-	}
-
-	return ansi.Truncate(" "+renderZoneStatus(m.zoneStatusItems(*m.open)), m.width, "…")
-}
-
-func (m *Model) statusLineRow() string {
 	tag := sealedStyle.Render("sealed · read-only ")
 	if !m.sealed() {
 		tag = statusStyle.Render("unsealed ")
 	}
 
-	room := m.width - lipgloss.Width(tag) - 1
-	if room < 20 {
-		return ansi.Truncate(m.statusLine(), m.width, "…")
+	left := ""
+	if m.loaded && m.open != nil {
+		left = " " + renderZoneStatus(m.zoneStatusItems(*m.open))
 	}
 
-	left := ansi.Truncate(m.statusLine(), room, "…")
+	return spread(left, tag, m.width)
+}
 
-	return left + strings.Repeat(" ", m.width-lipgloss.Width(left)-lipgloss.Width(tag)) + tag
+// statusLineRow is the status line at the bottom of the view, with the
+// key hints at its right edge. A form's keys keep their place and cut the
+// status line short; otherwise the status line, which may be an error,
+// keeps its place and the help and quit keys give way.
+func (m *Model) statusLineRow() string {
+	left, right := m.statusLine(), hintStyle.Render(m.keyHints()+" ")
+
+	form := m.recordForm != nil || m.templateForm != nil
+
+	switch {
+	case !form && lipgloss.Width(left)+1+lipgloss.Width(right) > m.width:
+		return ansi.Truncate(left, m.width, "…")
+	case form && m.width-lipgloss.Width(right)-1 < 20:
+		right = ansi.TruncateLeft(right, max(lipgloss.Width(right)-m.width, 0), "…")
+
+		return strings.Repeat(" ", m.width-lipgloss.Width(right)) + right
+	}
+
+	return spread(left, right, m.width)
+}
+
+// keyHints are the keys of the open form, or the keys for help and quit.
+func (m *Model) keyHints() string {
+	if m.recordForm != nil || m.templateForm != nil {
+		return m.formKeysHint()
+	}
+
+	return fmt.Sprintf("%s help · %s quit", m.keys.keysFor(ActionHelp), m.keys.keysFor(ActionQuit))
+}
+
+// spread lays out a row w columns wide: left at its start and right at its
+// end. When both do not fit, left is cut short; a row too narrow to keep
+// 20 columns of left drops right.
+func spread(left, right string, w int) string {
+	room := w - lipgloss.Width(right) - 1
+	if room < 20 {
+		return ansi.Truncate(left, w, "…")
+	}
+
+	left = ansi.Truncate(left, room, "…")
+
+	return left + strings.Repeat(" ", w-lipgloss.Width(left)-lipgloss.Width(right)) + right
 }
 
 func (m *Model) statusLine() string {
@@ -331,7 +395,7 @@ func (m *Model) statusLine() string {
 		return statusStyle.Render(" " + m.zoneStatus(*m.open))
 	}
 
-	return hintStyle.Render(fmt.Sprintf(" %s help · %s quit", m.keys.keysFor(ActionHelp), m.keys.keysFor(ActionQuit)))
+	return ""
 }
 
 func (m *Model) zoneStatus(z dns.Zone) string {

@@ -341,7 +341,7 @@ func normalValue(typ, value string) string {
 
 	switch typ {
 	case "TXT":
-		return unquote(value)
+		return Unquote(value)
 	case "MX", "CNAME", "NS":
 		f := strings.Fields(value)
 		for i, x := range f {
@@ -356,10 +356,10 @@ func normalValue(typ, value string) string {
 	return value
 }
 
-// unquote joins the quoted character-strings of TXT text in zone-file
+// Unquote joins the quoted character-strings of TXT text in zone-file
 // form, such as "v=spf1 " "-all", into the text they hold. Text that is
 // not quoted is returned as it is.
-func unquote(s string) string {
+func Unquote(s string) string {
 	if !strings.HasPrefix(s, `"`) {
 		return s
 	}
@@ -444,7 +444,7 @@ func existingDMARC(zone string, current []dns.Record) ([]string, bool) {
 func dmarcTags(value string) ([]string, bool) {
 	var tags []string
 
-	for _, tag := range strings.Split(unquote(strings.TrimSpace(value)), ";") {
+	for _, tag := range strings.Split(Unquote(strings.TrimSpace(value)), ";") {
 		if tag = strings.TrimSpace(tag); tag != "" {
 			tags = append(tags, tag)
 		}
@@ -675,7 +675,7 @@ var base64RE = regexp.MustCompile(`^[A-Za-z0-9+/]+={0,2}$`)
 // checkDKIMKey takes a DKIM public key, either bare, in base64, or as the
 // whole DKIM TXT value, quoted or not, and returns the TXT value.
 func checkDKIMKey(v string) (string, error) {
-	v = unquote(v)
+	v = Unquote(v)
 
 	if len(v) >= 7 && strings.EqualFold(v[:7], "v=DKIM1") {
 		tags := strings.Split(v, ";")

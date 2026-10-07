@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
@@ -26,7 +27,7 @@ func openValidatedShowing(t *testing.T, f *fake.Provider, text string) *harness 
 	t.Helper()
 
 	h, _, _ := newRefreshHarness(t, f)
-	h.press("enter", "shift+tab")
+	h.press("enter", "tab")
 	h.assertShows("validated this session", text)
 
 	return h
@@ -37,7 +38,7 @@ func TestTheWriteGateRefusesEditsOnAStaleZone(t *testing.T) {
 	h, _, _ := newRefreshHarness(t, f)
 
 	f.Fail(fake.OpRecords, errors.New("connection reset by peer"))
-	h.press("enter", "shift+tab")
+	h.press("enter", "tab")
 	h.assertShows("Refresh failed")
 
 	for _, key := range []string{"i", "e", "d"} {
@@ -59,7 +60,7 @@ func TestTheWriteGateRefusesEditsInASealedSessionAndOffersUnseal(t *testing.T) {
 	// Opening the Zone asks to Unseal for its Refresh; the user declines.
 	h.press("enter")
 	h.assertShows("Unseal", "Passphrase")
-	h.press("esc", "shift+tab")
+	h.press("esc", "tab")
 
 	h.press("i")
 
@@ -98,7 +99,7 @@ func (h *harness) addRecord(typ, name, value, ttl string) {
 	h.assertShows("Add Record")
 
 	for range slices.Index(dns.EditableTypes, typ) {
-		h.press("down")
+		h.press("right")
 	}
 
 	h.press("tab")
@@ -108,7 +109,24 @@ func (h *harness) addRecord(typ, name, value, ttl string) {
 	h.press("tab")
 	h.clearText(len("300"))
 	h.typeText(ttl)
-	h.press("enter")
+	h.saveForm()
+}
+
+// saveForm moves to the Record form's Save button and presses it.
+func (h *harness) saveForm() {
+	h.t.Helper()
+
+	for range 16 {
+		if strings.Contains(h.view(), "› [ Save ]") {
+			h.press("enter")
+
+			return
+		}
+
+		h.press("tab")
+	}
+
+	h.t.Fatalf("the form has no Save button:\n%s", h.view())
 }
 
 func TestAddingARecordBuildsAPendingAdditionMarkedInTheRecordsPane(t *testing.T) {
@@ -193,7 +211,7 @@ func TestEditingARecordPrefillsTheFormAndMarksItModified(t *testing.T) {
 	h.press("tab", "tab")
 	h.clearText(len("20"))
 	h.typeText("99")
-	h.press("enter", "enter")
+	h.saveForm()
 
 	h.assertHides("Edit Record", "203.0.113.20")
 	h.assertShows("~ work.example", "203.0.113.99", "1 pending change")
@@ -202,7 +220,7 @@ func TestEditingARecordPrefillsTheFormAndMarksItModified(t *testing.T) {
 	h.press("e", "tab", "tab")
 	h.clearText(len("99"))
 	h.typeText("20")
-	h.press("enter", "enter")
+	h.saveForm()
 
 	h.assertShows("203.0.113.20")
 	h.assertHides("~ work.example", "pending change")
@@ -238,7 +256,7 @@ func (h *harness) buildChangeset() {
 	h.press("e", "tab", "tab")
 	h.clearText(len("20"))
 	h.typeText("99")
-	h.press("enter", "enter")
+	h.saveForm()
 	h.press("j", "d")
 	h.assertShows("3 pending changes")
 }
@@ -362,4 +380,24 @@ func applyCalls(f *fake.Provider) []dns.Changeset {
 	}
 
 	return out
+}
+
+func TestEnterDeleteAndInsertInTheRecordsPaneEditDeleteAndAddRecords(t *testing.T) {
+	h := openValidated(t, refreshZones())
+
+	// Enter edits the highlighted Record, like e.
+	h.press("enter")
+	h.assertShows("Edit Record", "203.0.113.20")
+	h.press("esc")
+	h.assertHides("Edit Record")
+
+	// Delete marks it for deletion, like d, and takes the change back.
+	h.press("j", "delete")
+	h.assertShows("- work.example", "1 pending change")
+	h.press("delete")
+	h.assertHides("- work.example", "pending change")
+
+	// Insert adds a Record, like i.
+	h.press("insert")
+	h.assertShows("Add Record")
 }

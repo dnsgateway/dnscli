@@ -57,8 +57,14 @@ func TestMovementStopsAtTheEndsOfTheList(t *testing.T) {
 	h.press("k", "enter")
 	h.assertShows("192.0.2.10")
 
-	h.press("j", "j", "j", "j", "enter")
+	// Down past the last Zone moves on to the Accounts pane, whose last
+	// Account is as far as Down goes.
+	h.press("j", "j", "enter")
 	h.assertShows("198.51.100.7")
+
+	h.press("j", "j", "j", "j")
+	h.assertFocused("Accounts")
+	h.assertHighlighted("cloudflare.work")
 }
 
 func TestZoneWithoutCachedRecordsSaysSo(t *testing.T) {
@@ -89,7 +95,7 @@ func TestMovingWithinRecordsPaneHighlightsTheRecord(t *testing.T) {
 	seedCache(t, s)
 
 	h := newHarness(t, s)
-	h.press("enter", "tab", "tab")
+	h.press("enter", "shift+tab", "shift+tab")
 
 	if !h.highlighted("192.0.2.10") || h.highlighted("2001:db8::10") {
 		t.Fatalf("first Record should be highlighted:\n%q", h.rawView())
@@ -139,7 +145,7 @@ func TestMovingInOnePaneLeavesOthersAlone(t *testing.T) {
 	seedCache(t, s)
 
 	h := newHarness(t, s)
-	h.press("tab", "j", "shift+tab", "enter")
+	h.press("shift+tab", "j", "tab", "enter")
 
 	h.assertShows("192.0.2.10")
 }
