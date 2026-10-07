@@ -1,7 +1,8 @@
 // Package resolver asks the system DNS resolver, the servers listed in
 // /etc/resolv.conf, for the answers dnscli uses as freshness hints.
 //
-// It is verified by hand, not by the automated suite.
+// Its DNS queries are verified by hand, not by the automated suite; only
+// reading resolv.conf has tests.
 package resolver
 
 import (
@@ -9,8 +10,10 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"strings"
 	"sync"
+	"time"
 
 	mdns "github.com/miekg/dns"
 )
@@ -20,14 +23,38 @@ const ResolvConf = "/etc/resolv.conf"
 
 // System queries the nameservers from a resolv.conf file. The standard
 // library's net.Resolver cannot look up SOA records, so it speaks DNS itself.
-// The zero value reads ResolvConf on first use.
+// The zero value reads ResolvConf on first use, and reads it again when
+// the file changes, as when the Mac joins another network.
 type System struct {
 	// Path is the resolv.conf file to read; ResolvConf when empty.
 	Path string
 
-	once   sync.Once
+	mu     sync.Mutex
+	read   bool      // config and err hold a read of the file
+	stamp  fileStamp // the file as it was when read
+	readAt time.Time
 	config *mdns.ClientConfig
 	err    error
+}
+
+// errorRetry is how soon a failed read is tried again although the file
+// looks unchanged, so a transient failure does not stick.
+const errorRetry = 5 * time.Second
+
+// fileStamp identifies one version of a file without reading it.
+type fileStamp struct {
+	exists  bool
+	modTime time.Time
+	size    int64
+}
+
+func stampOf(path string) fileStamp {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return fileStamp{}
+	}
+
+	return fileStamp{exists: true, modTime: fi.ModTime(), size: fi.Size()}
 }
 
 // SOA returns the SOA serial the system resolver gives for zone.
@@ -100,13 +127,24 @@ func exchangeWith(ctx context.Context, network, addr string, q *mdns.Msg) (*mdns
 	return r, err
 }
 
+// load returns the resolver configuration. It reads the file only when it
+// has changed since the last read (a stat per query), or, after a failed
+// read, once errorRetry has passed.
 func (s *System) load() (*mdns.ClientConfig, error) {
-	s.once.Do(func() {
-		s.config, s.err = mdns.ClientConfigFromFile(s.path())
-		if s.err != nil {
-			s.err = fmt.Errorf("read the system resolver configuration: %w", s.err)
-		}
-	})
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	stamp := stampOf(s.path())
+	if s.read && stamp == s.stamp && (s.err == nil || time.Since(s.readAt) < errorRetry) {
+		return s.config, s.err
+	}
+
+	s.read, s.stamp, s.readAt = true, stamp, time.Now()
+
+	s.config, s.err = mdns.ClientConfigFromFile(s.path())
+	if s.err != nil {
+		s.config, s.err = nil, fmt.Errorf("read the system resolver configuration: %w", s.err)
+	}
 
 	return s.config, s.err
 }
