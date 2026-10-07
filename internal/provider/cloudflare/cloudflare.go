@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	cfdns "github.com/cloudflare/cloudflare-go/v7/dns"
 	"github.com/cloudflare/cloudflare-go/v7/option"
@@ -35,8 +36,31 @@ const recordsPerPage = 1000
 type Config struct {
 	// BaseURL is the API base URL; empty means DefaultBaseURL.
 	BaseURL string
-	// HTTPClient sends the requests; nil means a default client.
+	// HTTPClient sends the requests; nil means a client with connection
+	// timeouts, so a stalled connection cannot hang a call.
 	HTTPClient *http.Client
+	// RequestTimeout bounds each HTTP request, including reading its
+	// response; zero means DefaultRequestTimeout.
+	RequestTimeout time.Duration
+}
+
+// DefaultRequestTimeout bounds each request to the Cloudflare API. A
+// failed request may be retried, each try with its own timeout.
+const DefaultRequestTimeout = 30 * time.Second
+
+// defaultHTTPClient is http.DefaultTransport with the timeouts
+// cloudflare-go's own default client sets, which building the services
+// from bare options leaves out.
+func defaultHTTPClient() *http.Client {
+	t, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return &http.Client{}
+	}
+
+	t = t.Clone()
+	t.ResponseHeaderTimeout = DefaultRequestTimeout
+
+	return &http.Client{Transport: t}
 }
 
 // New is the provider.Constructor for Cloudflare. The token is a
@@ -54,13 +78,22 @@ func (c Config) New(_ dns.Account, token string) (provider.Provider, error) {
 		baseURL = DefaultBaseURL
 	}
 
+	client := c.HTTPClient
+	if client == nil {
+		client = defaultHTTPClient()
+	}
+
+	timeout := c.RequestTimeout
+	if timeout <= 0 {
+		timeout = DefaultRequestTimeout
+	}
+
 	opts := []option.RequestOption{
 		option.WithBaseURL(baseURL),
 		option.WithAPIToken(token),
 		option.WithMiddleware(reportRateLimits),
-	}
-	if c.HTTPClient != nil {
-		opts = append(opts, option.WithHTTPClient(c.HTTPClient))
+		option.WithHTTPClient(client),
+		option.WithRequestTimeout(timeout),
 	}
 
 	return &Provider{

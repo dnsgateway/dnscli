@@ -341,6 +341,42 @@ func TestErrorResponsesAreTypedErrors(t *testing.T) {
 	}
 }
 
+func TestAStalledConnectionTimesOut(t *testing.T) {
+	stalled := make(chan struct{})
+	t.Cleanup(func() { close(stalled) })
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Answer nothing, as a stalled connection does.
+		select {
+		case <-r.Context().Done():
+		case <-stalled:
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	p, err := cloudflare.Config{BaseURL: srv.URL + "/client/v4/", RequestTimeout: 50 * time.Millisecond}.New(
+		dns.Account{ID: 1, Provider: "cloudflare", Name: "work"}, testToken)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	done := make(chan error, 1)
+
+	go func() {
+		_, err := p.Zones(context.Background())
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("Zones succeeded against a stalled server")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Zones still waits on a stalled connection")
+	}
+}
+
 func TestErrorsAreNotPrintedToTheTerminal(t *testing.T) {
 	api := &cfAPI{fail: func(w http.ResponseWriter, _ *http.Request) {
 		writeErrors(w, http.StatusForbidden, 9109, "Unauthorized to access requested resource")
