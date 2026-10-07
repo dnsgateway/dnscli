@@ -236,7 +236,15 @@ func discover(ctx context.Context, s *store.Store, key *vault.Key, newProvider p
 	return len(zones), sync, nil
 }
 
+// zonesDiscovered reports a discovery or re-listing. The result for an
+// Account removed meanwhile is dropped.
 func (m *Model) zonesDiscovered(msg zonesDiscoveredMsg) tea.Cmd {
+	if errors.Is(msg.err, store.ErrAccountNotFound) {
+		delete(m.relisting, msg.account.ID)
+
+		return nil
+	}
+
 	if msg.relist {
 		return m.zonesRelisted(msg)
 	}

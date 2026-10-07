@@ -14,6 +14,10 @@ import (
 // ErrAccountExists means an Account with the same label is already stored.
 var ErrAccountExists = errors.New("the Account already exists")
 
+// ErrAccountNotFound means the Account is not stored, for example because it
+// was removed while background work for it was running.
+var ErrAccountNotFound = errors.New("the Account no longer exists")
+
 // addAccountError wraps an error from inserting an Account, reporting a
 // duplicate label as ErrAccountExists.
 func addAccountError(a dns.Account, err error) error {

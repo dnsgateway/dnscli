@@ -59,7 +59,8 @@ type ZoneSync struct {
 // its Provider, in one transaction. Each listed Zone is stored as PutZone
 // stores it, so a Zone that was already cached keeps its ID, serial, last
 // Refresh time and Records. A cached Zone the list does not have is
-// deleted with its Records.
+// deleted with its Records. It returns ErrAccountNotFound when the Account
+// was removed meanwhile.
 func (s *Store) SyncAccountZones(ctx context.Context, accountID int64, zones []dns.Zone) (ZoneSync, error) {
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
@@ -70,6 +71,15 @@ func (s *Store) SyncAccountZones(ctx context.Context, accountID int64, zones []d
 	var res ZoneSync
 
 	err = writeLocked(ctx, conn, func() error {
+		var found bool
+		if err := conn.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM accounts WHERE id = ?)`, accountID).Scan(&found); err != nil {
+			return err
+		}
+
+		if !found {
+			return ErrAccountNotFound
+		}
+
 		cached, err := accountZones(ctx, conn, accountID)
 		if err != nil {
 			return err

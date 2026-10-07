@@ -125,6 +125,34 @@ func TestRelistingNoZonesKeepsTheCacheAndHintsAtTheTokenPermission(t *testing.T)
 	}
 }
 
+func TestARelistingThatFinishesAfterItsAccountWasRemovedIsDropped(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	f := fake.New().AddZone(dns.Zone{Name: "work.new", ProviderID: "zw3"})
+	h := newAccountHarness(t, s, f)
+
+	// Unseal first, so the re-listing starts at once.
+	h.press("tab", "X")
+	h.unsealWith(passphrase)
+	h.press("esc")
+
+	relist := h.pressHolding("L")
+	h.assertShows("Re-listing the Zones of cloudflare.work…")
+
+	h.press("X")
+	h.typeText("cloudflare.work")
+	h.press("enter")
+	h.assertShows("Removed cloudflare.work.")
+
+	h.run(relist)
+
+	h.assertShows("Removed cloudflare.work.")
+	h.assertHides("failed", "FOREIGN KEY", "work.new")
+
+	if names := zoneNames(t, s); len(names) != 0 {
+		t.Fatalf("the late re-listing brought back Zones: %v", names)
+	}
+}
+
 func TestRelistingNeedsTheAccountsPane(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
 	f := workZones()

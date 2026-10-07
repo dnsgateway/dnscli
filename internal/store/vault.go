@@ -27,9 +27,15 @@ func (s *Store) AddAccountWithSecret(ctx context.Context, a dns.Account, sealed 
 }
 
 // AccountSecret returns an Account's sealed API token; nil when it has none.
+// It returns ErrAccountNotFound when the Account is not stored.
 func (s *Store) AccountSecret(ctx context.Context, accountID int64) ([]byte, error) {
 	var sealed []byte
-	if err := s.db.QueryRowContext(ctx, `SELECT secret FROM accounts WHERE id = ?`, accountID).Scan(&sealed); err != nil {
+	err := s.db.QueryRowContext(ctx, `SELECT secret FROM accounts WHERE id = ?`, accountID).Scan(&sealed)
+	if errors.Is(err, sql.ErrNoRows) {
+		err = ErrAccountNotFound
+	}
+
+	if err != nil {
 		return nil, fmt.Errorf("read account secret: %w", err)
 	}
 

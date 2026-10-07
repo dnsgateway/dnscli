@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -126,6 +127,28 @@ func TestPutZoneWithoutRefreshMetadataKeepsTheCachedSerialAndRefreshTime(t *test
 	z := zones[0]
 	if z.ProviderID != "z1-new" || z.Serial != 2026100701 || !z.RefreshedAt.Equal(refreshed) {
 		t.Fatalf("zone after relist = %+v, want provider ID z1-new, serial 2026100701, refreshed %v", z, refreshed)
+	}
+}
+
+func TestAZoneListOfARemovedAccountIsRefused(t *testing.T) {
+	ctx := context.Background()
+	s := open(t, filepath.Join(t.TempDir(), "dnscli.db"))
+
+	a, err := s.AddAccount(ctx, dns.Account{Provider: "cloudflare", Name: "work"})
+	if err != nil {
+		t.Fatalf("add account: %v", err)
+	}
+
+	if err := s.RemoveAccount(ctx, a.ID); err != nil {
+		t.Fatalf("remove account: %v", err)
+	}
+
+	if _, err := s.SyncAccountZones(ctx, a.ID, []dns.Zone{{Name: "example.com", ProviderID: "z1"}}); !errors.Is(err, store.ErrAccountNotFound) {
+		t.Fatalf("sync zones of a removed Account: %v, want ErrAccountNotFound", err)
+	}
+
+	if _, err := s.AccountSecret(ctx, a.ID); !errors.Is(err, store.ErrAccountNotFound) {
+		t.Fatalf("secret of a removed Account: %v, want ErrAccountNotFound", err)
 	}
 }
 
