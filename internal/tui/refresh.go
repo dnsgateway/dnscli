@@ -45,6 +45,19 @@ type providerCaps struct {
 	proxiable []string
 }
 
+// ttlRange is the TTLs the Provider takes: dns.DefaultTTLRange when it
+// did not say, and TTL dns.TTLAuto only where it is automatic.
+func (c providerCaps) ttlRange() dns.TTLRange {
+	r := c.ttl
+	if r.Min == 0 && r.Max == 0 {
+		r = dns.DefaultTTLRange
+	}
+
+	r.Auto = c.autoTTL
+
+	return r
+}
+
 func capsOf(p provider.Provider) providerCaps {
 	return providerCaps{ttl: provider.TTLRangeOf(p), autoTTL: provider.AutoTTLOf(p), proxiable: provider.ProxiableTypesOf(p)}
 }

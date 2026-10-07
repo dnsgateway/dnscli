@@ -115,13 +115,15 @@ func TestTTLRangeCheck(t *testing.T) {
 		ttl uint32
 		ok  bool
 	}{
-		{dns.DefaultTTLRange, dns.TTLAuto, true},
+		{dns.DefaultTTLRange, dns.TTLAuto, false},
 		{dns.DefaultTTLRange, 30, true},
 		{dns.DefaultTTLRange, 86400, true},
 		{dns.DefaultTTLRange, 0, false},
 		{dns.DefaultTTLRange, 29, false},
 		{dns.DefaultTTLRange, 86401, false},
-		{dns.TTLRange{Min: 60, Max: 86400}, 1, true},
+		{dns.TTLRange{Min: 60, Max: 86400}, 1, false},
+		{dns.TTLRange{Min: 60, Max: 86400, Auto: true}, 1, true},
+		{dns.TTLRange{Min: 60, Max: 86400, Auto: true}, 30, false},
 		{dns.TTLRange{Min: 60, Max: 86400}, 30, false},
 		{dns.TTLRange{Min: 60, Max: 86400}, 60, true},
 	}

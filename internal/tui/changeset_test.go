@@ -144,9 +144,10 @@ func TestTheRecordFormRejectsBadInput(t *testing.T) {
 		{"CAA", "@", "issue letsencrypt.org", "300", "A CAA value is flags"},
 		{"URI", "_ftp._tcp", "10 1 ftp://example.com/", "300", "A URI value is a priority"},
 		{"TXT", "@", "", "300", "Enter a value"},
-		{"A", "www", "192.0.2.1", "0", "The TTL must be 1 (automatic)"},
-		{"A", "www", "192.0.2.1", "86401", "The TTL must be 1"},
-		{"A", "www", "192.0.2.1", "ten", "The TTL must be 1"},
+		{"A", "www", "192.0.2.1", "0", "The TTL must be between 30 and 86400 seconds."},
+		{"A", "www", "192.0.2.1", "86401", "The TTL must be between 30 and 86400 seconds."},
+		{"A", "www", "192.0.2.1", "ten", "The TTL must be between 30 and 86400 seconds."},
+		{"A", "www", "192.0.2.1", "1", "no automatic TTL"},
 		{"A", "www.other.example.", "192.0.2.1", "300", "not inside the Zone"},
 		{"A", "bad name", "192.0.2.1", "300", "The name bad name"},
 	}
@@ -166,7 +167,7 @@ func TestTheRecordFormRejectsBadInput(t *testing.T) {
 func TestTheRecordFormTakesEveryEditableTypeWithRelativeOrAbsoluteNames(t *testing.T) {
 	h := openValidated(t, refreshZones())
 
-	h.addRecord("A", "api.work.example.", "192.0.2.1", "1")
+	h.addRecord("A", "api.work.example.", "192.0.2.1", "60")
 	h.addRecord("AAAA", "v6", "2001:db8::1", "300")
 	h.addRecord("CNAME", "www.work.example", "work.example", "300")
 	h.addRecord("MX", "@", "0 .", "300")

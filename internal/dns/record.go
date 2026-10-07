@@ -29,7 +29,8 @@ func Editable(typ string) bool {
 	return slices.Contains(EditableTypes, typ)
 }
 
-// TTLAuto is Cloudflare's "automatic" TTL. Any other TTL must be in the
+// TTLAuto is the "automatic" TTL of a Provider that has one, such as
+// Cloudflare; to any other it is one second. Any other TTL must be in the
 // Provider's TTLRange, by default between MinTTL and MaxTTL seconds.
 const (
 	TTLAuto = 1
@@ -37,21 +38,29 @@ const (
 	MaxTTL  = 86400
 )
 
-// TTLRange is the shortest and the longest TTL a Provider takes, in seconds.
+// TTLRange is the shortest and the longest TTL a Provider takes, in
+// seconds, and whether it takes TTLAuto as automatic.
 type TTLRange struct {
 	Min, Max uint32
+	Auto     bool
 }
 
 // DefaultTTLRange is the TTLRange of a Provider that does not say.
 var DefaultTTLRange = TTLRange{Min: MinTTL, Max: MaxTTL}
 
-// Check reports whether a TTL is TTLAuto or in range.
+// Check reports whether a TTL is in range, or TTLAuto where the range
+// takes it.
 func (r TTLRange) Check(ttl uint32) error {
-	if ttl == TTLAuto || (ttl >= r.Min && ttl <= r.Max) {
+	switch {
+	case r.Auto && ttl == TTLAuto, ttl >= r.Min && ttl <= r.Max:
 		return nil
+	case r.Auto:
+		return fmt.Errorf("the TTL must be %d (automatic) or between %d and %d seconds", TTLAuto, r.Min, r.Max)
+	case ttl == TTLAuto:
+		return fmt.Errorf("the TTL must be between %d and %d seconds: the Provider has no automatic TTL", r.Min, r.Max)
 	}
 
-	return fmt.Errorf("the TTL must be %d (automatic) or between %d and %d seconds", TTLAuto, r.Min, r.Max)
+	return fmt.Errorf("the TTL must be between %d and %d seconds", r.Min, r.Max)
 }
 
 // QualifyName turns a Record name typed for a Zone into the absolute name

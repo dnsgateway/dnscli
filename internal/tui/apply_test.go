@@ -243,12 +243,35 @@ func TestTheRecordFormChecksTheTTLAgainstTheProvidersLimits(t *testing.T) {
 
 	for _, ttl := range []string{"30", "7200"} {
 		h.addRecord("TXT", "@", "hello", ttl)
-		h.assertShows("Add Record", "The TTL must be 1 (automatic)", "between 60 and 3600")
+		h.assertShows("Add Record", "The TTL must be between 60 and 3600 seconds.")
+		h.press("esc")
+	}
+
+	// The Provider has no automatic TTL: to it, TTL 1 is one second.
+	for _, ttl := range []string{"1", "auto"} {
+		h.addRecord("TXT", "@", "hello", ttl)
+		h.assertShows("Add Record", "The TTL must be between 60 and 3600 seconds", "no automatic TTL")
+		h.assertHides("1 (automatic)", "TTL 1 is automatic")
 		h.press("esc")
 	}
 
 	h.addRecord("TXT", "@", "hello", "60")
-	h.addRecord("TXT", "@", "auto", "1")
+	h.assertHides("Add Record")
+	h.assertShows("1 pending change")
+}
+
+func TestTheRecordFormTakesAnAutomaticTTLWhereTheProviderHasOne(t *testing.T) {
+	f := refreshZones()
+	f.SetTTLRange(60, 3600)
+	f.SetAutoTTL(true)
+	h := openValidated(t, f)
+
+	h.addRecord("TXT", "@", "hello", "30")
+	h.assertShows("Add Record", "The TTL must be 1 (automatic) or between 60 and 3600", "TTL 1 is automatic")
+	h.press("esc")
+
+	h.addRecord("TXT", "@", "one", "1")
+	h.addRecord("TXT", "@", "two", "auto")
 	h.assertHides("Add Record")
 	h.assertShows("2 pending changes")
 }

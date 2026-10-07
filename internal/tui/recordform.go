@@ -130,12 +130,7 @@ func (m *Model) submitRecordForm() tea.Cmd {
 	f := m.recordForm
 	f.err = ""
 
-	caps := m.refreshOf(f.zone.ID).caps
-	if caps.ttl == (dns.TTLRange{}) {
-		caps.ttl = dns.DefaultTTLRange
-	}
-
-	r, field, err := f.record(caps)
+	r, field, err := f.record(m.refreshOf(f.zone.ID).caps)
 	if err != "" {
 		f.err, f.field = err, field
 
@@ -166,7 +161,7 @@ func (m *Model) submitRecordForm() tea.Cmd {
 // Provider's range and its proxy flag, or says what is wrong with it and
 // in which field.
 func (f *recordForm) record(caps providerCaps) (dns.Record, int, string) {
-	ttlRange := caps.ttl
+	ttlRange := caps.ttlRange()
 
 	typ := dns.EditableTypes[f.typ]
 
@@ -189,13 +184,13 @@ func (f *recordForm) record(caps providerCaps) (dns.Record, int, string) {
 	ttl := uint64(dns.TTLAuto)
 	if s := strings.TrimSpace(f.ttl); s != "auto" {
 		ttl, err = strconv.ParseUint(s, 10, 32)
-		if err == nil {
-			err = ttlRange.Check(uint32(ttl))
-		}
-
 		if err != nil {
 			return dns.Record{}, recordFieldTTL, capitalise(ttlRange.Check(0).Error()) + "."
 		}
+	}
+
+	if err := ttlRange.Check(uint32(ttl)); err != nil {
+		return dns.Record{}, recordFieldTTL, capitalise(err.Error()) + "."
 	}
 
 	r := dns.Record{Type: typ, Name: name, Value: value, TTL: uint32(ttl)}
@@ -286,8 +281,12 @@ func (m *Model) recordFormView() string {
 		fields = append(fields, dialogField{label: "Proxied", value: v, choice: true})
 	}
 
-	notes := wrapNote(hintStyle, "Zone "+f.zone.Name+": a name is relative to it, or absolute with a trailing dot; @ is the apex. "+
-		"TTL 1 is automatic.", noteWidth)
+	hint := "Zone " + f.zone.Name + ": a name is relative to it, or absolute with a trailing dot; @ is the apex."
+	if m.refreshOf(f.zone.ID).caps.autoTTL {
+		hint += " TTL 1 is automatic."
+	}
+
+	notes := wrapNote(hintStyle, hint, noteWidth)
 
 	if f.err != "" {
 		notes = append(notes, "")

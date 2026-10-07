@@ -27,7 +27,8 @@ type Provider interface {
 }
 
 // TTLLimits is implemented by a Provider whose Record TTLs have other
-// limits than dns.DefaultTTLRange. TTL dns.TTLAuto stays allowed.
+// limits than dns.DefaultTTLRange. TTL dns.TTLAuto is allowed only where
+// the Provider implements AutoTTL.
 type TTLLimits interface {
 	// TTLRange is the shortest and the longest TTL, in seconds.
 	TTLRange() (minTTL, maxTTL uint32)
