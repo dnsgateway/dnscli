@@ -327,6 +327,13 @@ func (p *Provider) applyChange(ctx context.Context, zone dns.Zone, c dns.Change)
 			return dns.Record{}, err
 		}
 
+		// A PATCH keeps what it does not send: a Record that loses its
+		// proxy flag, as it changes to a type that cannot have one, has
+		// it turned off.
+		if _, had := c.Before.Extras[proxiedExtra]; had && wb.Proxied == nil && c.Kind == dns.ChangeModify {
+			wb.Proxied = new(bool)
+		}
+
 		body, err := json.Marshal(wb)
 		if err != nil {
 			return dns.Record{}, fmt.Errorf("cloudflare: encode record: %w", err)

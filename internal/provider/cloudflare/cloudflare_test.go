@@ -462,6 +462,33 @@ func TestApplyUpdatesARecordInPlaceAndTurnsTheProxyOff(t *testing.T) {
 	}
 }
 
+func TestApplyTurnsTheProxyOffWhenARecordChangesToATypeThatCannotHaveIt(t *testing.T) {
+	// A PATCH keeps what it does not send, so a proxied CNAME patched into
+	// a TXT Record would stay proxied, which Cloudflare refuses.
+	api := &cfAPI{
+		records: map[string][]map[string]any{"z1": {cfRecord("r1", "CNAME", "www.example.com", "example.com", 1, true, true)}},
+		reject: func(_ string, body map[string]any) string {
+			if body["type"] == "TXT" && body["proxied"] != false {
+				return "TXT records cannot be proxied."
+			}
+
+			return ""
+		},
+	}
+	p := newProvider(t, api)
+
+	before := dns.Record{ProviderID: "r1", Type: "CNAME", Name: "www.example.com", Value: "example.com", TTL: 1, Extras: map[string]string{"proxied": "true"}}
+	after := dns.Record{ProviderID: "r1", Type: "TXT", Name: "www.example.com", Value: "\"hi\"", TTL: 1}
+	modify := dns.Change{Kind: dns.ChangeModify, Before: before, After: after}
+
+	res, err := p.Apply(context.Background(), dns.Changeset{Zone: dns.Zone{Name: "example.com", ProviderID: "z1"}, Changes: []dns.Change{modify}})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	assertResults(t, res, []provider.ChangeResult{{Change: modify, Record: after}})
+}
+
 func TestApplyDeletesARecord(t *testing.T) {
 	api := &cfAPI{records: map[string][]map[string]any{"z1": {cfRecord("r1", "TXT", "example.com", "\"old\"", 300, false, false)}}}
 	p := newProvider(t, api)
