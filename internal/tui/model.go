@@ -67,11 +67,11 @@ type Model struct {
 	// fresh is each Zone's freshness this session, by Zone ID.
 	fresh map[int64]*zoneFreshness
 	// checks schedules the Serial Checks.
-	checks checkQueue
+	checks zoneQueue
 	// refreshes is each Zone's Refresh state this session, by Zone ID.
 	refreshes map[int64]*zoneRefresh
 	// refreshQueue schedules the Refreshes.
-	refreshQueue checkQueue
+	refreshQueue zoneQueue
 
 	// addForm is the add-Account dialog; nil when closed.
 	addForm *addAccountForm
