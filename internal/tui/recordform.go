@@ -9,20 +9,22 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
+	"github.com/sergelogvinov/dnscli/internal/provider"
 )
 
-// Fields of the Record form.
+// Fields of the Record form. The proxy flag is last, and shown only for
+// the types the Zone's Provider can proxy.
 const (
 	recordFieldType = iota
 	recordFieldName
 	recordFieldValue
 	recordFieldTTL
-	recordFieldCount
+	recordFieldProxied
 )
 
 // proxiedExtra is the Record extra holding Cloudflare's proxy flag, which
 // only proxiableTypes take: changing a Record to another type drops it.
-const proxiedExtra = "proxied"
+const proxiedExtra = provider.ProxiedExtra
 
 var proxiableTypes = []string{"A", "AAAA", "CNAME"}
 
@@ -38,7 +40,9 @@ type recordForm struct {
 	name  string
 	value string
 	ttl   string
-	err   string
+	// proxied is the proxy flag, for the types the Provider can proxy.
+	proxied bool
+	err     string
 	// edit is the row being edited; nil when adding.
 	edit *recordRow
 }
@@ -54,6 +58,7 @@ func newRecordForm(z dns.Zone, edit *recordRow) *recordForm {
 		f.name = dns.RelativeName(z.Name, r.Name)
 		f.value = r.Value
 		f.ttl = strconv.FormatUint(uint64(r.TTL), 10)
+		f.proxied = r.Extras[proxiedExtra] == "true"
 	}
 
 	return f
@@ -63,6 +68,8 @@ func newRecordForm(z dns.Zone, edit *recordRow) *recordForm {
 func (m *Model) recordFormKey(msg tea.KeyMsg) tea.Cmd {
 	f := m.recordForm
 	a := m.keys.action(msg.String())
+	fields := m.recordFormFields()
+	f.field = min(f.field, fields-1)
 
 	if quitsDialog(a, msg) {
 		return m.handle(ActionQuit)
@@ -87,10 +94,14 @@ func (m *Model) recordFormKey(msg tea.KeyMsg) tea.Cmd {
 	case ActionClose:
 		m.recordForm = nil
 	case ActionNextPane:
-		f.field = (f.field + 1) % recordFieldCount
+		f.field = (f.field + 1) % fields
 	case ActionPrevPane:
-		f.field = (f.field + recordFieldCount - 1) % recordFieldCount
+		f.field = (f.field + fields - 1) % fields
 	case ActionUp, ActionDown:
+		if f.field == recordFieldProxied {
+			f.proxied = !f.proxied
+		}
+
 		if f.field == recordFieldType {
 			n := len(dns.EditableTypes)
 			step := 1
@@ -101,7 +112,7 @@ func (m *Model) recordFormKey(msg tea.KeyMsg) tea.Cmd {
 			f.typ = (f.typ + step) % n
 		}
 	case ActionSelect:
-		if f.field < recordFieldCount-1 {
+		if f.field < fields-1 {
 			f.field++
 
 			return nil
@@ -120,12 +131,12 @@ func (m *Model) submitRecordForm() tea.Cmd {
 	f := m.recordForm
 	f.err = ""
 
-	ttl := m.refreshOf(f.zone.ID).ttl
-	if ttl == (dns.TTLRange{}) {
-		ttl = dns.DefaultTTLRange
+	caps := m.refreshOf(f.zone.ID).caps
+	if caps.ttl == (dns.TTLRange{}) {
+		caps.ttl = dns.DefaultTTLRange
 	}
 
-	r, field, err := f.record(ttl)
+	r, field, err := f.record(caps)
 	if err != "" {
 		f.err, f.field = err, field
 
@@ -153,8 +164,11 @@ func (m *Model) submitRecordForm() tea.Cmd {
 }
 
 // record builds the Record the form describes, with a TTL in the Zone's
-// Provider's range, or says what is wrong with it and in which field.
-func (f *recordForm) record(ttlRange dns.TTLRange) (dns.Record, int, string) {
+// Provider's range and its proxy flag, or says what is wrong with it and
+// in which field.
+func (f *recordForm) record(caps providerCaps) (dns.Record, int, string) {
+	ttlRange := caps.ttl
+
 	typ := dns.EditableTypes[f.typ]
 
 	name, err := dns.QualifyName(f.zone.Name, f.name)
@@ -198,7 +212,26 @@ func (f *recordForm) record(ttlRange dns.TTLRange) (dns.Record, int, string) {
 		}
 	}
 
+	if slices.Contains(caps.proxiable, typ) {
+		if r.Extras == nil {
+			r.Extras = map[string]string{}
+		}
+
+		r.Extras[proxiedExtra] = strconv.FormatBool(f.proxied)
+	}
+
 	return r, 0, ""
+}
+
+// recordFormFields is how many fields the Record form shows: the proxy
+// flag only for a type the Zone's Provider can proxy.
+func (m *Model) recordFormFields() int {
+	f := m.recordForm
+	if slices.Contains(m.refreshOf(f.zone.ID).caps.proxiable, dns.EditableTypes[f.typ]) {
+		return recordFieldProxied + 1
+	}
+
+	return recordFieldProxied
 }
 
 func capitalise(s string) string {
@@ -222,6 +255,15 @@ func (m *Model) recordFormView() string {
 		{label: "Name", value: f.name},
 		{label: "Value", value: f.value},
 		{label: "TTL", value: f.ttl},
+	}
+
+	if m.recordFormFields() > recordFieldProxied {
+		v := "off"
+		if f.proxied {
+			v = "on"
+		}
+
+		fields = append(fields, dialogField{label: "Proxied", value: v, choice: true})
 	}
 
 	notes := wrapNote(hintStyle, "Zone "+f.zone.Name+": a name is relative to it, or absolute with a trailing dot; @ is the apex. "+

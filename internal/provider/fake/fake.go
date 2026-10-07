@@ -51,6 +51,7 @@ type Provider struct {
 	failChange  func(dns.Change) error
 	withhold    bool
 	ttlRange    []uint32 // min, max; nil when not scripted
+	proxiable   []string // nil when not scripted
 	calls       []Call
 	nextID      int
 }
@@ -95,17 +96,39 @@ func (p *Provider) SetTTLRange(minTTL, maxTTL uint32) {
 	p.ttlRange = []uint32{minTTL, maxTTL}
 }
 
-// withTTLRange is the fake with its scripted TTL range.
-type withTTLRange struct {
-	*Provider
-}
-
-// TTLRange implements provider.TTLLimits.
-func (p withTTLRange) TTLRange() (minTTL, maxTTL uint32) {
+// SetProxiableTypes makes the Providers New builds proxy Records of these
+// types, through provider.ProxyFlag. Unscripted, they do not implement it.
+func (p *Provider) SetProxiableTypes(types ...string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	p.proxiable = slices.Clone(types)
+}
+
+// withOptions is the fake with its scripted optional interfaces.
+type withOptions struct {
+	*Provider
+}
+
+// TTLRange implements provider.TTLLimits; the default range when not
+// scripted.
+func (p withOptions) TTLRange() (minTTL, maxTTL uint32) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.ttlRange == nil {
+		return dns.DefaultTTLRange.Min, dns.DefaultTTLRange.Max
+	}
+
 	return p.ttlRange[0], p.ttlRange[1]
+}
+
+// ProxiableTypes implements provider.ProxyFlag.
+func (p withOptions) ProxiableTypes() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	return slices.Clone(p.proxiable)
 }
 
 // SetZoneStatus scripts a Zone's Zone Status.
@@ -174,8 +197,8 @@ func (p *Provider) New(account dns.Account, token string) (provider.Provider, er
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if p.ttlRange != nil {
-		return withTTLRange{p}, nil
+	if p.ttlRange != nil || p.proxiable != nil {
+		return withOptions{p}, nil
 	}
 
 	return p, nil
