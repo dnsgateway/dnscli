@@ -168,6 +168,17 @@ func TestRecordsSearchNeedsRecordsToSearch(t *testing.T) {
 	}
 }
 
+func TestDomainsSearchNeedsZonesToSearch(t *testing.T) {
+	s, _ := openStore(t)
+
+	h := newHarness(t, s)
+	h.press("/", "q")
+
+	if !h.quit {
+		t.Fatal("with no Zones to search, q should still quit")
+	}
+}
+
 // The harness enrols no Unseal Method, so its session is sealed, and no Zone
 // has been Refreshed in it, so every Zone is a Stale Zone.
 func TestSearchWorksOnStaleZonesInASealedSession(t *testing.T) {

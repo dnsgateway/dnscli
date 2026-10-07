@@ -14,16 +14,27 @@ type search struct {
 	query  string
 }
 
-// startSearch opens the search input in the focused pane, if it has one.
+// startSearch opens the search input in the focused pane, if it has one and
+// there is something to search.
 func (m *Model) startSearch() {
-	switch {
-	case m.focus == paneDomains:
-	case m.focus == paneRecords && len(m.records) > 0:
-	default:
+	if m.searchable(m.focus) == 0 {
 		return
 	}
 
 	m.search[m.focus].typing = true
+}
+
+// searchable returns how many items a pane's search looks through: all of
+// its items before any filter. Panes without a search have none.
+func (m *Model) searchable(p pane) int {
+	switch p {
+	case paneDomains:
+		return len(m.zones)
+	case paneRecords:
+		return len(m.records)
+	}
+
+	return 0
 }
 
 // clearSearch clears the focused pane's search filter and leaves search. It
