@@ -17,6 +17,7 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/sergelogvinov/dnscli/internal/provider"
+	"github.com/sergelogvinov/dnscli/internal/resolver"
 	"github.com/sergelogvinov/dnscli/internal/store"
 	"github.com/sergelogvinov/dnscli/internal/tui"
 	"github.com/sergelogvinov/dnscli/internal/vault"
@@ -61,8 +62,9 @@ func runMain(args []string, getenv func(string) string, goos string, stderr io.W
 }
 
 type options struct {
-	dbPath string
-	unseal vault.Method
+	dbPath       string
+	unseal       vault.Method
+	serialChecks int
 }
 
 // parseOptions reads the command line and the environment. When they are
@@ -75,6 +77,7 @@ func parseOptions(args []string, getenv func(string) string, goos string, stderr
 	}
 
 	dbPath := fs.String("db", defaultDBPath(), "path to the dnscli database (not a disposable cache: it holds your Accounts)")
+	serialChecks := fs.Int("serial-checks", tui.DefaultSerialChecks, "how many Serial Checks may ask the system DNS resolver at once")
 	unseal := fs.String("unseal", "", fmt.Sprintf("Unseal Method for this session: %s (default $%s, else %s)",
 		strings.Join(methodNames(), ", "), unsealEnv, defaultUnsealMethod(goos)))
 
@@ -85,6 +88,10 @@ func parseOptions(args []string, getenv func(string) string, goos string, stderr
 
 		if fs.NArg() > 0 {
 			return options{}, fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
+		}
+
+		if *serialChecks < 1 {
+			return options{}, fmt.Errorf("--serial-checks must be at least 1, got %d", *serialChecks)
 		}
 
 		name := *unseal
@@ -101,7 +108,7 @@ func parseOptions(args []string, getenv func(string) string, goos string, stderr
 			return options{}, fmt.Errorf("unknown Unseal Method %q (available: %s)", name, strings.Join(methodNames(), ", "))
 		}
 
-		return options{dbPath: *dbPath, unseal: m}, nil
+		return options{dbPath: *dbPath, unseal: m, serialChecks: *serialChecks}, nil
 	}()
 
 	// pflag has already printed the usage for --help.
@@ -142,11 +149,12 @@ func run(opts options) error {
 	}
 	defer s.Close()
 
-	// The resolver is wired here as it lands.
 	model := tui.New(ctx, tui.Deps{
 		Store:        s,
 		Clock:        time.Now,
 		Providers:    providers,
+		Resolver:     &resolver.System{},
+		SerialChecks: opts.serialChecks,
 		UnsealMethod: opts.unseal,
 	})
 
