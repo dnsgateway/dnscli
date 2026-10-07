@@ -331,3 +331,29 @@ func TestARefreshThatFinishesAfterItsAccountWasRemovedIsDropped(t *testing.T) {
 		t.Fatalf("the late Refresh brought back Zones: %v", names)
 	}
 }
+
+func TestRemovingAnAccountWhileItsZonesWaitForASerialCheckDropsThem(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	withPersonalAccount(t, s)
+
+	// One check at a time: personal.example runs, the work Zones wait.
+	h, checks := newHarnessHoldingStartup(t, s, tui.Deps{
+		Providers:    provider.Registry{"cloudflare": fake.New().New},
+		UnsealMethod: fastPassphrase(),
+		Resolver:     &fakeResolver{serials: map[string]uint32{"personal.example": 7, "work.example": 5, "work.test": 5}},
+		SerialChecks: 1,
+	})
+
+	h.press("tab", "j", "X")
+	h.unsealWith(passphrase)
+	h.typeText("cloudflare.work")
+
+	// The check finishes after the removal, before the cache reloads.
+	reload := h.step(h.pressHolding("enter"))
+	h.run(checks)
+	h.run(reload)
+
+	h.assertShows("Removed cloudflare.work.", "personal.example")
+	h.assertHides("work.example", "work.test")
+	h.assertMarker("personal.example", "≈")
+}

@@ -108,12 +108,14 @@ func (m *Model) startSerialChecks() tea.Cmd {
 		id := m.checks.queue[0]
 		m.checks.queue = m.checks.queue[1:]
 
-		z, ok := m.zoneByID[id]
-		if !ok {
-			continue // removed from the cache meanwhile
+		z, cached := m.zoneByID[id]
+		f, ok := m.fresh[id]
+
+		if !cached || !ok {
+			continue // removed from the cache, or forgotten, meanwhile
 		}
 
-		m.fresh[id].check = freshChecking
+		f.check = freshChecking
 		m.checks.running++
 		cmds = append(cmds, m.serialCheck(z))
 	}

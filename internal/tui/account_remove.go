@@ -130,6 +130,7 @@ func (m *Model) accountRemoved(msg accountRemovedMsg) tea.Cmd {
 func (m *Model) forgetZones(ids []int64) {
 	for _, id := range ids {
 		delete(m.fresh, id)
+		m.checks.drop(id)
 		delete(m.refreshes, id)
 		m.refreshQueue.drop(id)
 
