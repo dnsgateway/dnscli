@@ -375,3 +375,114 @@ func TestTemplateParametersAreChecked(t *testing.T) {
 		})
 	}
 }
+
+func TestMailTemplatesKeepTheTagsOfAnExistingDMARC(t *testing.T) {
+	const hardened = "v=DMARC1; p=quarantine; sp=reject; rua=mailto:a@example.com; adkim=s; pct=50; ruf=mailto:f@example.com; fo=1"
+
+	cases := []struct {
+		name     string
+		existing string
+		// prefill is what the dialog starts with for the DMARC parameters.
+		prefill template.Values
+		// edits are made to the prefilled values.
+		edits template.Values
+		// want is the new DMARC value; empty when the DMARC is untouched.
+		want string
+		// weaker is whether the dialog warns of a weaker policy.
+		weaker bool
+	}{
+		{
+			name:     "without edits a hardened DMARC is untouched",
+			existing: hardened,
+			prefill:  template.Values{"dmarc_policy": "quarantine", "dmarc_rua": "mailto:a@example.com"},
+		},
+		{
+			name:     "without edits a DMARC in another layout and quoted is untouched",
+			existing: `"v=DMARC1;p=Reject;rua=mailto:a@example.com,mailto:b@example.net!10m"`,
+			prefill:  template.Values{"dmarc_policy": "reject", "dmarc_rua": "mailto:a@example.com,mailto:b@example.net!10m"},
+		},
+		{
+			name:     "a stronger policy and another report address keep the other tags",
+			existing: hardened,
+			prefill:  template.Values{"dmarc_policy": "quarantine", "dmarc_rua": "mailto:a@example.com"},
+			edits:    template.Values{"dmarc_policy": "reject", "dmarc_rua": "b@example.com"},
+			want:     "v=DMARC1; p=reject; sp=reject; rua=mailto:b@example.com; adkim=s; pct=50; ruf=mailto:f@example.com; fo=1",
+		},
+		{
+			name:     "clearing the report address drops rua only",
+			existing: hardened,
+			prefill:  template.Values{"dmarc_policy": "quarantine", "dmarc_rua": "mailto:a@example.com"},
+			edits:    template.Values{"dmarc_rua": ""},
+			want:     "v=DMARC1; p=quarantine; sp=reject; adkim=s; pct=50; ruf=mailto:f@example.com; fo=1",
+		},
+		{
+			name:     "a report address is added after the policy",
+			existing: "v=DMARC1; p=reject; adkim=s",
+			prefill:  template.Values{"dmarc_policy": "reject", "dmarc_rua": ""},
+			edits:    template.Values{"dmarc_rua": "r@example.com"},
+			want:     "v=DMARC1; p=reject; rua=mailto:r@example.com; adkim=s",
+		},
+		{
+			name:     "a weaker policy is warned of",
+			existing: hardened,
+			prefill:  template.Values{"dmarc_policy": "quarantine", "dmarc_rua": "mailto:a@example.com"},
+			edits:    template.Values{"dmarc_policy": "none"},
+			want:     "v=DMARC1; p=none; sp=reject; rua=mailto:a@example.com; adkim=s; pct=50; ruf=mailto:f@example.com; fo=1",
+			weaker:   true,
+		},
+		{
+			name:    "without a DMARC the defaults are used",
+			prefill: template.Values{"dmarc_policy": "none", "dmarc_rua": ""},
+			want:    "v=DMARC1; p=none",
+		},
+	}
+
+	for _, tc := range cases {
+		for _, name := range []string{"Google mail", "Proton mail"} {
+			t.Run(name+" "+tc.name, func(t *testing.T) {
+				tpl := byName(t, name)
+
+				current := []dns.Record{googleMX}
+				if tc.existing != "" {
+					current = append(current, rec("dm", "TXT", "_dmarc.example.com", tc.existing, 300))
+				}
+
+				values := tpl.Prefill(zone, current)
+				for k, v := range tc.prefill {
+					if values[k] != v {
+						t.Fatalf("prefilled %s = %q, want %q", k, values[k], v)
+					}
+				}
+
+				for k, v := range tc.edits {
+					values[k] = v
+				}
+
+				if name == "Proton mail" {
+					values["verification"], values["dkim1"], values["dkim2"], values["dkim3"] = "t", "a.example", "b.example", "c.example"
+				}
+
+				changes, err := tpl.Changes(zone, current, values, 3600)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				var got string
+
+				for _, c := range changes {
+					if c.Kind != dns.ChangeDelete && c.After.Name == "_dmarc.example.com" {
+						got = c.After.Value
+					}
+				}
+
+				if got != tc.want {
+					t.Fatalf("DMARC value = %q, want %q (changes %+v)", got, tc.want, changes)
+				}
+
+				if warn := tpl.Warning(zone, current, values); (warn != "") != tc.weaker {
+					t.Fatalf("Warning = %q, want a warning %v", warn, tc.weaker)
+				}
+			})
+		}
+	}
+}

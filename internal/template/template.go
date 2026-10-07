@@ -118,6 +118,9 @@ type recordSet struct {
 	// such as *._domainkey, covers, as well as at the wildcard itself.
 	wildcard bool
 	want     []want
+	// merge, when set, makes the value the set wants from the value of
+	// the single Record of the wanted type it owns, if it takes it.
+	merge func(old string) (string, bool)
 }
 
 // owns reports whether a Record, named absolutely, belongs to the set.
@@ -166,6 +169,14 @@ func (t Template) Changes(zone string, current []dns.Record, v Values, ttl uint3
 			return nil, err
 		}
 
+		if s.merge != nil {
+			if old, ok := s.single(name, current); ok && old.Type == s.want[0].typ {
+				if value, ok := s.merge(old.Value); ok {
+					s.want = []want{{old.Type, value}}
+				}
+			}
+		}
+
 		for _, w := range s.want {
 			if err := dns.CheckValue(w.typ, w.value); err != nil {
 				return nil, err
@@ -176,6 +187,81 @@ func (t Template) Changes(zone string, current []dns.Record, v Values, ttl uint3
 	}
 
 	return out, nil
+}
+
+// single returns the one Record of current the set owns at name; false
+// when it owns none or several.
+func (s recordSet) single(name string, current []dns.Record) (dns.Record, bool) {
+	var (
+		out dns.Record
+		n   int
+	)
+
+	for _, r := range current {
+		if s.owns(name, r) {
+			out = r
+			n++
+		}
+	}
+
+	return out, n == 1
+}
+
+// Prefill returns the parameter values the Template starts with for a
+// Zone holding current: the defaults, but for a mail Template the DMARC
+// policy and report addresses of the Zone's DMARC Record, if it has one.
+func (t Template) Prefill(zone string, current []dns.Record) Values {
+	v := Values{}
+	for _, p := range t.Params {
+		v[p.Name] = p.Default
+	}
+
+	if _, ok := v["dmarc_policy"]; !ok {
+		return v
+	}
+
+	tags, ok := existingDMARC(zone, current)
+	if !ok {
+		return v
+	}
+
+	if p, ok := tagValue(tags, "p"); ok && slices.Contains(dmarcPolicies, strings.ToLower(p)) {
+		v["dmarc_policy"] = strings.ToLower(p)
+	}
+
+	rua, _ := tagValue(tags, "rua")
+	v["dmarc_rua"] = normalRUA(rua)
+
+	return v
+}
+
+// Warning says what the Template's values would weaken in a Zone holding
+// current, such as its DMARC policy; empty when nothing.
+func (t Template) Warning(zone string, current []dns.Record, given Values) string {
+	v, err := t.resolve(given)
+	if err != nil {
+		return ""
+	}
+
+	policy, ok := v["dmarc_policy"]
+	if !ok {
+		return ""
+	}
+
+	tags, ok := existingDMARC(zone, current)
+	if !ok {
+		return ""
+	}
+
+	old, _ := tagValue(tags, "p")
+	old = strings.ToLower(old)
+
+	if slices.Index(dmarcPolicies, policy) >= slices.Index(dmarcPolicies, old) {
+		return ""
+	}
+
+	return fmt.Sprintf("The DMARC policy of %s is %s: %s is weaker, and receivers will act less on mail that fails DMARC.",
+		strings.TrimSuffix(zone, "."), old, policy)
 }
 
 // changes replaces the Records of current that the set owns at name with
@@ -317,7 +403,7 @@ func dmarcParams() []Param {
 		},
 		{
 			Name: "dmarc_rua", Label: "DMARC reports to", check: checkMailto,
-			Hint: "An address for the aggregate reports; optional.",
+			Hint: "An address for the aggregate reports, or several separated by commas; optional.",
 		},
 	}
 }
@@ -329,7 +415,127 @@ func dmarcRecord(v Values) recordSet {
 		value += "; rua=" + v["dmarc_rua"]
 	}
 
-	return dmarc(value)
+	s := dmarc(value)
+	s.merge = func(old string) (string, bool) {
+		return mergeDMARC(old, v["dmarc_policy"], v["dmarc_rua"])
+	}
+
+	return s
+}
+
+// existingDMARC returns the tags of a Zone's DMARC Record: the single
+// TXT or CNAME Record at _dmarc, if it is a DMARC TXT Record.
+func existingDMARC(zone string, current []dns.Record) ([]string, bool) {
+	name, err := dns.QualifyName(zone, "_dmarc")
+	if err != nil {
+		return nil, false
+	}
+
+	r, ok := dmarc("").single(name, current)
+	if !ok || r.Type != "TXT" {
+		return nil, false
+	}
+
+	return dmarcTags(r.Value)
+}
+
+// dmarcTags splits a DMARC value into its tags, trimmed; false when it is
+// not a DMARC value.
+func dmarcTags(value string) ([]string, bool) {
+	var tags []string
+
+	for _, tag := range strings.Split(unquote(strings.TrimSpace(value)), ";") {
+		if tag = strings.TrimSpace(tag); tag != "" {
+			tags = append(tags, tag)
+		}
+	}
+
+	return tags, len(tags) > 0 && tagKey(tags[0]) == "v" && strings.EqualFold(tagOf(tags[0]), "DMARC1")
+}
+
+// tagKey is the key of a tag, such as p in p=reject, in lower case.
+func tagKey(tag string) string {
+	k, _, _ := strings.Cut(tag, "=")
+
+	return strings.ToLower(strings.TrimSpace(k))
+}
+
+// tagOf is the value of a tag, such as reject in p=reject.
+func tagOf(tag string) string {
+	_, v, _ := strings.Cut(tag, "=")
+
+	return strings.TrimSpace(v)
+}
+
+// tagValue returns the value of the tag with the key.
+func tagValue(tags []string, key string) (string, bool) {
+	for _, tag := range tags {
+		if tagKey(tag) == key {
+			return tagOf(tag), true
+		}
+	}
+
+	return "", false
+}
+
+// normalRUA is a DMARC report URI list in the form checkMailto returns it.
+func normalRUA(rua string) string {
+	if c, err := checkMailto(rua); err == nil {
+		return c
+	}
+
+	return rua
+}
+
+// mergeDMARC sets the policy and report addresses of an existing DMARC
+// value and keeps its other tags, such as sp, adkim or pct. A value that
+// already has them is returned as it is; false when old is not a DMARC
+// value.
+func mergeDMARC(old, policy, rua string) (string, bool) {
+	tags, ok := dmarcTags(old)
+	if !ok {
+		return "", false
+	}
+
+	p, _ := tagValue(tags, "p")
+	r, _ := tagValue(tags, "rua")
+
+	if strings.EqualFold(p, policy) && normalRUA(r) == rua {
+		return old, true
+	}
+
+	var (
+		out          []string
+		hasP, hasRUA bool
+	)
+
+	for _, tag := range tags {
+		switch tagKey(tag) {
+		case "p":
+			tag, hasP = "p="+policy, true
+		case "rua":
+			hasRUA = true
+
+			if rua == "" {
+				continue
+			}
+
+			tag = "rua=" + rua
+		}
+
+		out = append(out, tag)
+	}
+
+	if !hasP {
+		out = slices.Insert(out, 1, "p="+policy)
+	}
+
+	if !hasRUA && rua != "" {
+		i := slices.IndexFunc(out, func(tag string) bool { return tagKey(tag) == "p" })
+		out = slices.Insert(out, i+1, "rua="+rua)
+	}
+
+	return strings.Join(out, "; "), true
 }
 
 func google() Template {
@@ -424,21 +630,34 @@ func checkHost(v string) (string, error) {
 	return v, nil
 }
 
-// checkMailto takes an email address, with or without "mailto:", and
-// returns it as a DMARC report URI.
+// checkMailto takes email addresses, separated by commas, each with or
+// without "mailto:" and a size limit such as !10m, and returns them as
+// DMARC report URIs.
 func checkMailto(v string) (string, error) {
-	addr := v
-	if len(addr) > len("mailto:") && strings.EqualFold(addr[:len("mailto:")], "mailto:") {
-		addr = addr[len("mailto:"):]
+	uris := strings.Split(v, ",")
+
+	for i, u := range uris {
+		addr := strings.TrimSpace(u)
+		if len(addr) > len("mailto:") && strings.EqualFold(addr[:len("mailto:")], "mailto:") {
+			addr = addr[len("mailto:"):]
+		}
+
+		limit := sizeLimitRE.FindString(addr)
+		addr = strings.TrimSuffix(addr, limit)
+
+		a, err := mail.ParseAddress(addr)
+		if err != nil || a.Address != addr || strings.ContainsAny(addr, ";,! ") {
+			return "", fmt.Errorf("%q is not an email address", v)
+		}
+
+		uris[i] = "mailto:" + addr + limit
 	}
 
-	a, err := mail.ParseAddress(addr)
-	if err != nil || a.Address != addr || strings.ContainsAny(addr, ";,! ") {
-		return "", fmt.Errorf("%q is not an email address", v)
-	}
-
-	return "mailto:" + addr, nil
+	return strings.Join(uris, ","), nil
 }
+
+// sizeLimitRE is the size limit a DMARC report URI may end with.
+var sizeLimitRE = regexp.MustCompile(`![0-9]+[kmgtKMGT]?$`)
 
 var selectorRE = regexp.MustCompile(`^[A-Za-z0-9_-]{1,63}(\.[A-Za-z0-9_-]{1,63})*$`)
 
