@@ -23,7 +23,7 @@
 
 ### Manual Mac verification
 
-1. `go build -o dnscli .`. Use a fresh DB, e.g. `--db /tmp/dnscli-mac.db`.
+1. `go build -o dnscli ./cmd/dnscli`. Use a fresh DB, e.g. `--db /tmp/dnscli-mac.db`.
 2. **Unsigned build is refused.** Run `./dnscli --unseal passphrase --db /tmp/dnscli-mac.db`. Add an Account and choose a passphrase. Press `K`, enter the passphrase, then press Enter.
    - Expect "Touch ID protection is unavailable: this dnscli build is not signed with a keychain entitlement".
    - Expect "The Keychain is not enrolled: keep using the passphrase".
