@@ -62,10 +62,17 @@ func (m *Model) syncDomainsQuery() {
 }
 
 // typeIntoSearch sends a typed key to the focused pane's search input, and
-// reports whether it did. Keys that are not text still reach actions.
+// reports whether it did. Keys that are not text still reach actions, and so
+// do Alt+key and the keys that leave the search: Close, Select, NextPane and
+// PrevPane act even when bound to a printable key.
 func (m *Model) typeIntoSearch(msg tea.KeyMsg) bool {
 	s := &m.search[m.focus]
-	if m.help || !s.typing {
+	if m.help || !s.typing || msg.Alt {
+		return false
+	}
+
+	switch m.keys.action(msg.String()) {
+	case ActionClose, ActionSelect, ActionNextPane, ActionPrevPane:
 		return false
 	}
 

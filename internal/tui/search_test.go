@@ -226,6 +226,61 @@ func TestControlKeysAreNotTypedIntoSearch(t *testing.T) {
 	h.assertHides("ctrl", "example.com")
 }
 
+// While the user types a search, printable keys are text, except keys the
+// Shortcut Profile binds to Close, Select, NextPane or PrevPane: those still
+// act, so a search can always be left. Alt+key is never text.
+
+func TestPrintableCloseKeyStillClosesTheSearch(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	profile := profileWith(tui.ActionClose, "~")
+
+	h := newHarnessWith(t, s, tui.Deps{Shortcuts: &profile})
+	h.press("/", "t", "w", "o", "~")
+
+	h.assertShows("example.com", "example.org", "two.tv")
+	h.assertHides("/two")
+}
+
+func TestPrintableSelectKeyStillOpensTheMatch(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	profile := profileWith(tui.ActionSelect, "+")
+
+	h := newHarnessWith(t, s, tui.Deps{Shortcuts: &profile})
+	h.press("/", "o", "r", "g", "+")
+
+	h.assertShows("No cached Records for example.org", "/org")
+	h.assertHides("/org+")
+}
+
+func TestPrintableNextPaneKeyStillLeavesTheSearch(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	profile := profileWith(tui.ActionNextPane, ">")
+
+	h := newHarnessWith(t, s, tui.Deps{Shortcuts: &profile})
+	h.press("/", "t", "w", "o", ">", "q")
+
+	if !h.quit {
+		t.Fatal("after leaving the search for the next pane, q should quit")
+	}
+}
+
+func TestAltKeysAreNotTypedIntoSearch(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	h := newHarness(t, s)
+	h.press("/", "t", "alt+x", "w", "o")
+
+	h.assertShows("/two", "two.tv")
+	h.assertHides("example.com")
+}
+
 func TestHelpOverlayListsTheSearchKey(t *testing.T) {
 	s, _ := openStore(t)
 	seedCache(t, s)
