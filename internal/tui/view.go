@@ -56,6 +56,8 @@ func (m *Model) View() string {
 		view = overlay(view, m.unsealView(), m.width, m.height)
 	case m.addForm != nil:
 		view = overlay(view, m.addAccountView(), m.width, m.height)
+	case m.keychain != nil:
+		view = overlay(view, m.keychainView(), m.width, m.height)
 	}
 
 	// Terminals too small to draw the panes in get a clipped view.

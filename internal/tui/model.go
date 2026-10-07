@@ -75,6 +75,8 @@ type Model struct {
 	unseal *unsealPrompt
 	// afterUnseal is the action waiting for the Unseal prompt.
 	afterUnseal func() tea.Cmd
+	// keychain asks to enroll the Keychain; nil when closed.
+	keychain *keychainConfirm
 }
 
 // notice is a message for the status bar.
@@ -192,6 +194,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case unsealedMsg:
 		return m, m.unsealed(msg)
+	case keychainEnrolledMsg:
+		m.keychainEnrolled(msg)
 	case accountAddedMsg:
 		return m, m.accountAdded(msg)
 	case zonesDiscoveredMsg:
@@ -213,6 +217,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.addForm != nil {
 			return m, m.addAccountKey(msg)
+		}
+
+		if m.keychain != nil {
+			return m, m.keychainKey(msg)
 		}
 
 		if m.typeIntoSearch(msg) {
@@ -270,6 +278,8 @@ func (m *Model) handle(a Action) tea.Cmd {
 		m.clearSearch()
 	case ActionAddAccount:
 		m.openAddAccount()
+	case ActionEnrollKeychain:
+		return m.enrollKeychain()
 	}
 
 	return nil

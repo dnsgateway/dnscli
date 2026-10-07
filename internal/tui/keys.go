@@ -27,6 +27,9 @@ const (
 	ActionAllAccounts
 	// ActionAddAccount opens the add-Account dialog.
 	ActionAddAccount
+	// ActionEnrollKeychain enrolls the Keychain with Touch ID as another
+	// Unseal Method, after Unseal.
+	ActionEnrollKeychain
 )
 
 // Binding maps one Action to its keys.
@@ -57,6 +60,7 @@ func DefaultShortcutProfile() ShortcutProfile {
 			{Action: ActionSearch, Keys: []string{"/"}, Help: "search"},
 			{Action: ActionAllAccounts, Keys: []string{"*"}, Help: "Zones of all Accounts"},
 			{Action: ActionAddAccount, Keys: []string{"a"}, Help: "add Account"},
+			{Action: ActionEnrollKeychain, Keys: []string{"K"}, Help: "enroll the Keychain (Touch ID)"},
 			{Action: ActionHelp, Keys: []string{"?"}, Help: "toggle help"},
 			{Action: ActionClose, Keys: []string{"esc"}, Help: "close"},
 			{Action: ActionQuit, Keys: []string{"q", "ctrl+c"}, Help: "quit"},

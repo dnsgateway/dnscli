@@ -28,6 +28,14 @@ type Deps struct {
 	// UnsealMethod is the session's Unseal Method. Defaults to the
 	// passphrase method with the default argon2id cost.
 	UnsealMethod vault.Method
+	// Passphrase is the passphrase Unseal Method, used when the session's
+	// method asks for no secret, such as the Keychain: it enrolls the
+	// first data key, for recovery, and Unseals when the Keychain cannot.
+	// Defaults to the passphrase method with the default argon2id cost.
+	Passphrase vault.Method
+	// Keychain is the Keychain Unseal Method that an unsealed session can
+	// enroll; nil where the platform has none.
+	Keychain vault.Method
 }
 
 // Resolver is the system DNS resolver used for Serial Checks. Not built yet.
@@ -39,6 +47,19 @@ func (d Deps) unsealMethod() vault.Method {
 	}
 
 	return d.UnsealMethod
+}
+
+// passphrase returns the method the Unseal prompt types a secret into: the
+// session's method when it asks for one, else the passphrase method.
+func (d Deps) passphrase() vault.Method {
+	switch {
+	case vault.AsksForSecret(d.unsealMethod()):
+		return d.unsealMethod()
+	case d.Passphrase != nil:
+		return d.Passphrase
+	}
+
+	return vault.Passphrase{}
 }
 
 // shortcuts returns the Shortcut Profile to use. An invalid injected profile
