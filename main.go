@@ -17,6 +17,7 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/sergelogvinov/dnscli/internal/provider"
+	"github.com/sergelogvinov/dnscli/internal/provider/cloudflare"
 	"github.com/sergelogvinov/dnscli/internal/store"
 	"github.com/sergelogvinov/dnscli/internal/tui"
 	"github.com/sergelogvinov/dnscli/internal/vault"
@@ -26,9 +27,10 @@ import (
 const unsealEnv = "DNSCLI_UNSEAL"
 
 // providers maps each Provider type this build supports to its constructor.
-// Cloudflare lands with its adapter; a build with the fakeprovider tag adds
-// an in-memory fake for trying the UI.
-var providers = provider.Registry{}
+// A build with the fakeprovider tag adds an in-memory fake for trying the UI.
+var providers = provider.Registry{
+	"cloudflare": cloudflare.Config{}.New,
+}
 
 // unsealMethods are the Unseal Methods this build supports, by name.
 var unsealMethods = map[string]vault.Method{
