@@ -80,6 +80,15 @@ func (p *Provider) AddZone(z dns.Zone, records ...dns.Record) *Provider {
 	return p
 }
 
+// RemoveZone drops a scripted Zone, as if it was deleted outside dnscli.
+func (p *Provider) RemoveZone(zoneProviderID string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.zones = slices.DeleteFunc(p.zones, func(z dns.Zone) bool { return z.ProviderID == zoneProviderID })
+	delete(p.records, zoneProviderID)
+}
+
 // SetRecords replaces a scripted Zone's Records, as if they were changed
 // outside dnscli.
 func (p *Provider) SetRecords(zoneProviderID string, records ...dns.Record) {

@@ -154,6 +154,24 @@ func TestARelistingThatFinishesAfterItsAccountWasRemovedIsDropped(t *testing.T) 
 	}
 }
 
+func TestRelistingThatDropsTheOpenZoneClosesItsTemplateDialog(t *testing.T) {
+	f := refreshZones()
+	h := openValidated(t, f)
+
+	// The re-listing is started from the Accounts pane and finishes while
+	// the Template dialog is open.
+	h.press("tab", "tab")
+	relist := h.pressHolding("L")
+	h.press("tab", "t")
+	h.assertShows("Apply a Template to work.example")
+
+	f.RemoveZone("zw1")
+	h.run(relist)
+
+	h.assertShows("1 dropped")
+	h.assertHides("Apply a Template")
+}
+
 func TestRelistingNeedsTheAccountsPane(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
 	f := workZones()
