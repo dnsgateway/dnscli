@@ -171,9 +171,8 @@ func (p *Provider) Zones(ctx context.Context) ([]dns.Zone, error) {
 }
 
 // wireHost is one host of a getHosts answer. Its name is relative to the
-// domain, "@" for the apex.
+// domain, "@" for the apex. Its HostId is not read (see withID).
 type wireHost struct {
-	HostID  string `xml:"HostId,attr"`
 	Name    string `xml:"Name,attr"`
 	Type    string `xml:"Type,attr"`
 	Address string `xml:"Address,attr"`
@@ -214,11 +213,11 @@ func (p *Provider) getHosts(ctx context.Context, zone dns.Zone) (getHostsResult,
 }
 
 // toRecord turns a host into a Record of a Zone, with an absolute name, its
-// HostId as the Provider ID, and its Value in presentation form: the MX and
-// SRV priority first, and host names without the trailing dot. A Namecheap-only
-// type, such as URL or MXE, keeps its type name and address.
+// content as the Provider ID (withID), and its Value in presentation form:
+// the MX and SRV priority first, and host names without the trailing dot.
+// A Namecheap-only type, such as URL or MXE, keeps its type name and address.
 func toRecord(zone string, h wireHost) dns.Record {
-	rec := dns.Record{ProviderID: h.HostID, Type: h.Type, Name: provider.AbsoluteName(zone, h.Name), Value: h.Address, TTL: h.TTL}
+	rec := dns.Record{Type: h.Type, Name: provider.AbsoluteName(zone, h.Name), Value: h.Address, TTL: h.TTL}
 	pref := strconv.FormatUint(uint64(h.MXPref), 10)
 
 	switch h.Type {
@@ -235,7 +234,17 @@ func toRecord(zone string, h wireHost) dns.Record {
 		}
 	}
 
-	return rec
+	return withID(rec)
+}
+
+// withID gives a Record its Provider ID: its type, lower-cased name, TTL
+// and Value, as GoDaddy's are. Namecheap's HostIds are not used: every
+// setHosts gives every host a new one, so the HostIds dnscli cached would
+// go stale on each Apply, even for the hosts it did not change.
+func withID(r dns.Record) dns.Record {
+	r.ProviderID = fmt.Sprintf("%s %s %d %s", r.Type, strings.ToLower(r.Name), r.TTL, r.Value)
+
+	return r
 }
 
 // target is a host name target without its trailing dot. The root, ".",

@@ -481,7 +481,7 @@ func removesOnly(g *rrGroup) int {
 
 // rrsetOf names the RRset a Record of a Zone belongs to.
 func rrsetOf(zone string, r dns.Record) rrset {
-	name := relative(zone, r.Name)
+	name := provider.RelativeName(zone, r.Name)
 	if r.Type == "SRV" {
 		_, _, name = splitSRVName(name)
 	}
@@ -614,7 +614,7 @@ func toWire(zone string, r dns.Record) (putRecord, error) {
 			return w, bad
 		}
 
-		service, protocol, _ := splitSRVName(relative(zone, r.Name))
+		service, protocol, _ := splitSRVName(provider.RelativeName(zone, r.Name))
 		if service == "" {
 			return w, fmt.Errorf("godaddy: SRV name %s does not start with _service._protocol", r.Name)
 		}
@@ -626,23 +626,6 @@ func toWire(zone string, r dns.Record) (putRecord, error) {
 	}
 
 	return w, nil
-}
-
-// relative turns an absolute name in a Zone into GoDaddy's relative one,
-// "@" for the apex.
-func relative(zone, name string) string {
-	name = strings.TrimSuffix(name, ".")
-
-	lower, z := strings.ToLower(name), strings.ToLower(strings.TrimSuffix(zone, "."))
-
-	switch {
-	case lower == z:
-		return "@"
-	case strings.HasSuffix(lower, "."+z):
-		return name[:len(name)-len(z)-1]
-	}
-
-	return name
 }
 
 // splitSRVName splits a relative SRV name into its service, protocol and

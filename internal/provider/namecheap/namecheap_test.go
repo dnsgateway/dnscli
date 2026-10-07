@@ -547,7 +547,7 @@ func TestRecordsAddressTheDomainBySLDAndTLD(t *testing.T) {
 	}
 }
 
-func TestRecordsHaveAbsoluteNamesThePriorityFirstAndTheHostID(t *testing.T) {
+func TestRecordsHaveAbsoluteNamesThePriorityFirstAndTheirContentAsID(t *testing.T) {
 	api := &ncAPI{hosts: map[string][]ncHost{"example.com": {
 		{ID: "11", Name: "@", Type: "A", Address: "192.0.2.1", TTL: 1799},
 		{ID: "12", Name: "www", Type: "CNAME", Address: "example.com.", TTL: 1800},
@@ -561,6 +561,7 @@ func TestRecordsHaveAbsoluteNamesThePriorityFirstAndTheHostID(t *testing.T) {
 		{ID: "20", Name: "frame", Type: "FRAME", Address: "https://example.org/", TTL: 1800},
 		{ID: "21", Name: "alias", Type: "ALIAS", Address: "target.example.net.", TTL: 300},
 		{ID: "22", Name: "@", Type: "MXE", Address: "192.0.2.25", TTL: 1800},
+		{ID: "23", Name: "Shop", Type: "A", Address: "192.0.2.3", TTL: 300},
 	}}}
 
 	set, err := newProvider(t, api).Records(context.Background(), example)
@@ -569,18 +570,19 @@ func TestRecordsHaveAbsoluteNamesThePriorityFirstAndTheHostID(t *testing.T) {
 	}
 
 	want := []dns.Record{
-		{ProviderID: "11", Type: "A", Name: "example.com", Value: "192.0.2.1", TTL: 1799},
-		{ProviderID: "12", Type: "CNAME", Name: "www.example.com", Value: "example.com", TTL: 1800},
-		{ProviderID: "13", Type: "MX", Name: "example.com", Value: "10 mx1.example.net", TTL: 3600},
-		{ProviderID: "14", Type: "TXT", Name: "example.com", Value: "v=spf1 include:_spf.example.net ~all", TTL: 1799},
-		{ProviderID: "15", Type: "NS", Name: "sub.example.com", Value: "ns1.example.net", TTL: 1800},
-		{ProviderID: "16", Type: "CAA", Name: "example.com", Value: `0 issue "letsencrypt.org"`, TTL: 1800},
-		{ProviderID: "17", Type: "AAAA", Name: "*.dev.example.com", Value: "2001:db8::1", TTL: 60},
-		{ProviderID: "18", Type: "URL", Name: "go.example.com", Value: "https://example.org/", TTL: 1800},
-		{ProviderID: "19", Type: "URL301", Name: "old.example.com", Value: "https://example.org/new", TTL: 1800},
-		{ProviderID: "20", Type: "FRAME", Name: "frame.example.com", Value: "https://example.org/", TTL: 1800},
-		{ProviderID: "21", Type: "ALIAS", Name: "alias.example.com", Value: "target.example.net", TTL: 300},
-		{ProviderID: "22", Type: "MXE", Name: "example.com", Value: "192.0.2.25", TTL: 1800},
+		{ProviderID: "A example.com 1799 192.0.2.1", Type: "A", Name: "example.com", Value: "192.0.2.1", TTL: 1799},
+		{ProviderID: "CNAME www.example.com 1800 example.com", Type: "CNAME", Name: "www.example.com", Value: "example.com", TTL: 1800},
+		{ProviderID: "MX example.com 3600 10 mx1.example.net", Type: "MX", Name: "example.com", Value: "10 mx1.example.net", TTL: 3600},
+		{ProviderID: "TXT example.com 1799 v=spf1 include:_spf.example.net ~all", Type: "TXT", Name: "example.com", Value: "v=spf1 include:_spf.example.net ~all", TTL: 1799},
+		{ProviderID: "NS sub.example.com 1800 ns1.example.net", Type: "NS", Name: "sub.example.com", Value: "ns1.example.net", TTL: 1800},
+		{ProviderID: `CAA example.com 1800 0 issue "letsencrypt.org"`, Type: "CAA", Name: "example.com", Value: `0 issue "letsencrypt.org"`, TTL: 1800},
+		{ProviderID: "AAAA *.dev.example.com 60 2001:db8::1", Type: "AAAA", Name: "*.dev.example.com", Value: "2001:db8::1", TTL: 60},
+		{ProviderID: "URL go.example.com 1800 https://example.org/", Type: "URL", Name: "go.example.com", Value: "https://example.org/", TTL: 1800},
+		{ProviderID: "URL301 old.example.com 1800 https://example.org/new", Type: "URL301", Name: "old.example.com", Value: "https://example.org/new", TTL: 1800},
+		{ProviderID: "FRAME frame.example.com 1800 https://example.org/", Type: "FRAME", Name: "frame.example.com", Value: "https://example.org/", TTL: 1800},
+		{ProviderID: "ALIAS alias.example.com 300 target.example.net", Type: "ALIAS", Name: "alias.example.com", Value: "target.example.net", TTL: 300},
+		{ProviderID: "MXE example.com 1800 192.0.2.25", Type: "MXE", Name: "example.com", Value: "192.0.2.25", TTL: 1800},
+		{ProviderID: "A shop.example.com 300 192.0.2.3", Type: "A", Name: "Shop.example.com", Value: "192.0.2.3", TTL: 300},
 	}
 	if !reflect.DeepEqual(set.Records, want) {
 		t.Errorf("Records =\n%v\nwant\n%v", set.Records, want)
@@ -627,9 +629,9 @@ func TestSRVRecordsPutTheMXPrefPriorityFirst(t *testing.T) {
 	}
 
 	want := []dns.Record{
-		{ProviderID: "41", Type: "SRV", Name: "_sip._tcp.example.com", Value: "10 5 5060 sip.example.net", TTL: 1800},
-		{ProviderID: "42", Type: "SRV", Name: "_xmpp._tcp.chat.example.com", Value: "20 0 5222 xmpp.example.net", TTL: 1800},
-		{ProviderID: "43", Type: "SRV", Name: "_none._tcp.example.com", Value: "0 0 0 .", TTL: 1800},
+		{ProviderID: "SRV _sip._tcp.example.com 1800 10 5 5060 sip.example.net", Type: "SRV", Name: "_sip._tcp.example.com", Value: "10 5 5060 sip.example.net", TTL: 1800},
+		{ProviderID: "SRV _xmpp._tcp.chat.example.com 1800 20 0 5222 xmpp.example.net", Type: "SRV", Name: "_xmpp._tcp.chat.example.com", Value: "20 0 5222 xmpp.example.net", TTL: 1800},
+		{ProviderID: "SRV _none._tcp.example.com 1800 0 0 0 .", Type: "SRV", Name: "_none._tcp.example.com", Value: "0 0 0 .", TTL: 1800},
 	}
 	if !reflect.DeepEqual(set.Records, want) {
 		t.Errorf("Records =\n%v\nwant\n%v", set.Records, want)

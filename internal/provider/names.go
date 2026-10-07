@@ -15,3 +15,21 @@ func AbsoluteName(zone, name string) string {
 
 	return name + "." + zone
 }
+
+// RelativeName is AbsoluteName undone for GoDaddy and Namecheap: an
+// absolute name in a Zone becomes relative to it, "@" for the apex, keeping
+// the name's own case. A name outside the Zone is returned as given,
+// without a trailing dot.
+func RelativeName(zone, name string) string {
+	name = strings.TrimSuffix(name, ".")
+	lower, z := strings.ToLower(name), strings.ToLower(strings.TrimSuffix(zone, "."))
+
+	switch {
+	case lower == z:
+		return "@"
+	case strings.HasSuffix(lower, "."+z):
+		return name[:len(name)-len(z)-1]
+	}
+
+	return name
+}

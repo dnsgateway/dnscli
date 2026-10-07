@@ -12,4 +12,7 @@
 - [ ] The "Automatic" TTL comes back as 1799
 - [ ] An applied Changeset keeps the untouched hosts (including a URL redirect) and the email setting
 - [ ] Namecheap's setHosts form shape for SRV is confirmed; if it works, open a follow-up ticket to allow SRV writes
+- [ ] Namecheap's setHosts form shape for CAA is confirmed (how `0 issue "letsencrypt.org"` is sent in `Address`, and whether flags and tag need fields of their own) and reads back unchanged; if it works, open a follow-up ticket to allow CAA writes (refused since ticket 02's review)
+- [ ] Check whether setHosts accepts a Changeset that deletes every host (an empty host list), and what the domain looks like afterwards
+- [ ] Check that an MX Record written with the "Custom MX" mail setting is served, and that Apply refuses MX writes under another setting (e.g. Email Forwarding) with its "Custom MX" message
 - [ ] Note whether PremiumDNS or FreeDNS Zones use other nameservers than `*.registrar-servers.com`. If so, their Live Zone marker reads as not live, because `Nameservers` returns only the BasicDNS pair; open a follow-up ticket to read them per domain (`namecheap.domains.getInfo`) in `Nameservers`
