@@ -237,35 +237,68 @@ func (h *harness) highlighted(text string) bool {
 	return styledWith(h.rawView(), text, "7")
 }
 
-// styledWith reports whether the last SGR sequence before text on its line
-// includes the given parameter (e.g. "2" for faint, "7" for reverse).
-func styledWith(raw, text, param string) bool {
+// styledWith reports whether text, on the first line that contains it, is
+// drawn with the given SGR attribute (e.g. "2" for faint, "7" for reverse).
+func styledWith(raw, text, attr string) bool {
 	for _, line := range strings.Split(raw, "\n") {
 		i := strings.Index(line, text)
 		if i < 0 {
 			continue
 		}
 
-		start := strings.LastIndex(line[:i], "\x1b[")
-		if start < 0 {
-			return false
-		}
-
-		end := strings.IndexByte(line[start:], 'm')
-		if end < 0 {
-			return false
-		}
-
-		for _, p := range strings.Split(line[start+2:start+end], ";") {
-			if p == param {
-				return true
-			}
-		}
-
-		return false
+		return sgrAttrs(line[:i])[attr]
 	}
 
 	return false
+}
+
+// sgrAttrs returns the SGR attributes in effect at the end of s. Colour
+// arguments, such as the 5;7 in 38;5;7, are skipped rather than read as
+// attributes.
+func sgrAttrs(s string) map[string]bool {
+	attrs := map[string]bool{}
+
+	for {
+		start := strings.Index(s, "\x1b[")
+		if start < 0 {
+			return attrs
+		}
+
+		s = s[start+2:]
+
+		end := strings.IndexFunc(s, func(r rune) bool { return r >= 0x40 && r <= 0x7e })
+		if end < 0 {
+			return attrs
+		}
+
+		params, final := s[:end], s[end]
+		s = s[end+1:]
+
+		if final != 'm' {
+			continue // not SGR
+		}
+
+		ps := strings.Split(params, ";")
+		for j := 0; j < len(ps); j++ {
+			switch p := ps[j]; p {
+			case "", "0":
+				clear(attrs)
+			case "38", "48", "58": // extended colour: 5;n or 2;r;g;b
+				if j+1 < len(ps) && ps[j+1] == "5" {
+					j += 2
+				} else if j+1 < len(ps) && ps[j+1] == "2" {
+					j += 4
+				}
+			case "22":
+				delete(attrs, "1")
+				delete(attrs, "2")
+			case "27":
+				delete(attrs, "7")
+			default:
+				attrs[p] = true
+			}
+		}
+	}
 }
 
 func (h *harness) assertHides(texts ...string) {
