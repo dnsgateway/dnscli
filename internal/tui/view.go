@@ -179,6 +179,8 @@ func (m *Model) statusLine() string {
 		return errorStyle.Render(" " + m.err.Error())
 	case m.recordsErr != nil:
 		return errorStyle.Render(" " + m.recordsErr.Error())
+	case m.profileErr != nil:
+		return errorStyle.Render(" " + m.profileErr.Error())
 	case !m.loaded:
 		return statusStyle.Render(" loading cache…")
 	case m.open != nil:

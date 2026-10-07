@@ -1,6 +1,10 @@
 package tui
 
-import "strings"
+import (
+	"errors"
+	"fmt"
+	"strings"
+)
 
 // Action is something the user can do. Action handling is keyed by Action,
 // never by key; keys reach actions only through a Shortcut Profile.
@@ -49,6 +53,30 @@ func DefaultShortcutProfile() ShortcutProfile {
 			{Action: ActionQuit, Keys: []string{"q", "ctrl+c"}, Help: "quit"},
 		},
 	}
+}
+
+// Validate reports whether the profile is usable: every key maps to one
+// Action, and at least one key quits.
+func (p ShortcutProfile) Validate() error {
+	seen := map[string]bool{}
+	canQuit := false
+
+	for _, b := range p.Bindings {
+		for _, k := range b.Keys {
+			if seen[k] {
+				return fmt.Errorf("key %q is bound more than once", k)
+			}
+
+			seen[k] = true
+			canQuit = canQuit || b.Action == ActionQuit
+		}
+	}
+
+	if !canQuit {
+		return errors.New("no quit key")
+	}
+
+	return nil
 }
 
 // keymap resolves keys to actions for a Shortcut Profile.

@@ -24,8 +24,9 @@ const (
 
 // Model is the top-level Bubble Tea model.
 type Model struct {
-	deps Deps
-	keys keymap
+	deps       Deps
+	keys       keymap
+	profileErr error // the injected Shortcut Profile was invalid
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -51,14 +52,16 @@ type Model struct {
 // and quitting cancels it.
 func New(ctx context.Context, deps Deps) *Model {
 	ctx, cancel := context.WithCancel(ctx)
+	profile, profileErr := deps.shortcuts()
 
 	return &Model{
-		deps:   deps,
-		keys:   newKeymap(deps.shortcuts()),
-		ctx:    ctx,
-		cancel: cancel,
-		width:  80,
-		height: 24,
+		deps:       deps,
+		keys:       newKeymap(profile),
+		profileErr: profileErr,
+		ctx:        ctx,
+		cancel:     cancel,
+		width:      80,
+		height:     24,
 	}
 }
 

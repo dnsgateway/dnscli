@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/sergelogvinov/dnscli/internal/store"
@@ -13,7 +14,8 @@ type Deps struct {
 	Store *store.Store
 	// Clock returns the current time. Defaults to time.Now.
 	Clock func() time.Time
-	// Shortcuts maps keys to actions. Defaults to DefaultShortcutProfile.
+	// Shortcuts maps keys to actions. Defaults to DefaultShortcutProfile,
+	// which also replaces a profile that fails Validate.
 	Shortcuts *ShortcutProfile
 
 	// Providers builds a Provider for an Account's Provider type.
@@ -36,12 +38,18 @@ type Resolver interface{}
 // UnsealMethod is one way of performing Unseal. Not built yet.
 type UnsealMethod interface{}
 
-func (d Deps) shortcuts() ShortcutProfile {
+// shortcuts returns the Shortcut Profile to use. An invalid injected profile
+// is replaced by the default, and the error says why.
+func (d Deps) shortcuts() (ShortcutProfile, error) {
 	if d.Shortcuts == nil {
-		return DefaultShortcutProfile()
+		return DefaultShortcutProfile(), nil
 	}
 
-	return *d.Shortcuts
+	if err := d.Shortcuts.Validate(); err != nil {
+		return DefaultShortcutProfile(), fmt.Errorf("Shortcut Profile %s: %w; using the default", d.Shortcuts.Name, err)
+	}
+
+	return *d.Shortcuts, nil
 }
 
 func (d Deps) now() time.Time {
