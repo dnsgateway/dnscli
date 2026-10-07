@@ -197,8 +197,9 @@ func (s *Store) ReplaceRecords(ctx context.Context, zoneID int64, records []dns.
 var ErrZoneNotCached = errors.New("the Zone is no longer cached")
 
 // SaveRefresh stores the result of a Refresh in one transaction: it
-// replaces the Zone's cached Records and sets its SOA serial (zero when the
-// Provider did not report one) and its last Refresh time.
+// replaces the Zone's cached Records and sets its SOA serial and its last
+// Refresh time. A zero serial, when the Provider did not report one, keeps
+// the cached serial, as PutZone does.
 func (s *Store) SaveRefresh(ctx context.Context, zoneID int64, records []dns.Record, serial uint32, at time.Time) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -206,7 +207,7 @@ func (s *Store) SaveRefresh(ctx context.Context, zoneID int64, records []dns.Rec
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	res, err := tx.ExecContext(ctx, `UPDATE zones SET soa_serial = ?, refreshed_at = ? WHERE id = ?`,
+	res, err := tx.ExecContext(ctx, `UPDATE zones SET soa_serial = IIF(?1 = 0, soa_serial, ?1), refreshed_at = ?2 WHERE id = ?3`,
 		serial, unixOrZero(at), zoneID)
 	if err != nil {
 		return fmt.Errorf("save refresh: %w", err)

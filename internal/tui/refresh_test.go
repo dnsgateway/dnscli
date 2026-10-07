@@ -271,6 +271,23 @@ func TestARateLimitedZoneIsNotRefreshedUntilTheProviderSaid(t *testing.T) {
 	}
 }
 
+func TestARefreshWithoutASerialKeepsTheCachedOne(t *testing.T) {
+	f := refreshZones()
+	h, s, _ := newRefreshHarness(t, f)
+
+	// work.test has a cached serial, but its Provider reports none.
+	workTest := cachedZone(t, s, "work.test")
+	workTest.Serial = 2026100702
+	mustZone(t, s, workTest)
+
+	h.press("j", "enter")
+	h.assertShows("validated this session")
+
+	if z := cachedZone(t, s, "work.test"); z.Serial != 2026100702 || !z.RefreshedAt.Equal(testNow) {
+		t.Fatalf("cached zone = %+v, want serial 2026100702 kept, refreshed at %v", z, testNow)
+	}
+}
+
 func TestRetryingAZoneThatCannotBeRefreshedSaysWhy(t *testing.T) {
 	f := refreshZones()
 	h, _, _ := newRefreshHarness(t, f)
