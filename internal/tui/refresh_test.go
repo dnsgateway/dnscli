@@ -2,13 +2,17 @@ package tui_test
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
+	"github.com/sergelogvinov/dnscli/internal/provider"
 	"github.com/sergelogvinov/dnscli/internal/provider/fake"
 	"github.com/sergelogvinov/dnscli/internal/store"
 )
@@ -169,5 +173,57 @@ func TestSelectingAZoneRefreshesItInTheBackgroundAndValidatesIt(t *testing.T) {
 
 	if n := recordsCalls(f, "zw1"); n != 1 {
 		t.Fatalf("Records calls = %d, want 1", n)
+	}
+}
+
+func TestAFailedRefreshKeepsTheCacheAndTheRetryKeyRefreshesAgain(t *testing.T) {
+	f := refreshZones()
+	h, s, _ := newRefreshHarness(t, f)
+
+	f.Fail(fake.OpRecords, errors.New("connection reset by peer"))
+	h.press("enter")
+
+	h.assertShows("203.0.113.9", "Refresh failed (r retries): connection reset by peer")
+	h.assertHides("validated this session", "refreshing…")
+	h.assertMarker("work.example", "✗")
+	h.assertDimmed("work.example")
+	h.assertDimmed("203.0.113.9")
+
+	if got := cachedRecordValues(t, s, "work.example"); !slices.Equal(got, []string{"203.0.113.9"}) {
+		t.Fatalf("cached records = %q, want the old cache kept", got)
+	}
+
+	if z := cachedZone(t, s, "work.example"); z.Serial != 0 || !z.RefreshedAt.IsZero() {
+		t.Fatalf("cached zone = %+v, want no serial and no Refresh time", z)
+	}
+
+	f.Fail(fake.OpRecords, nil)
+	h.press("r")
+
+	h.assertShows("203.0.113.20", "validated this session")
+	h.assertHides("Refresh failed")
+	h.assertMarker("work.example", "✓")
+
+	if n := recordsCalls(f, "zw1"); n != 2 {
+		t.Fatalf("Records calls = %d, want 2", n)
+	}
+}
+
+func TestARateLimitedRefreshShowsWhenToRetryAndIsNotRetriedOnItsOwn(t *testing.T) {
+	f := refreshZones()
+	h, _, _ := newRefreshHarness(t, f)
+
+	f.Fail(fake.OpRecords, &provider.APIError{Provider: "cloudflare", StatusCode: http.StatusTooManyRequests, RetryAfter: 90 * time.Second})
+	h.press("enter")
+
+	retryAt := testNow.Add(90 * time.Second).Local().Format(time.TimeOnly)
+	h.assertShows("rate limited", "retry at "+retryAt, "203.0.113.9")
+	h.assertMarker("work.example", "✗")
+
+	// Moving around never retries; only the user does.
+	h.press("j", "k", "tab", "shift+tab")
+
+	if n := recordsCalls(f, "zw1"); n != 1 {
+		t.Fatalf("Records calls = %d, want 1: a rate-limited Refresh must not be retried automatically", n)
 	}
 }

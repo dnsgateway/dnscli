@@ -198,7 +198,8 @@ func (m *Model) zoneRefreshed(msg zoneRefreshedMsg) tea.Cmd {
 }
 
 // describe explains a Zone's Refresh state in the status bar; empty when
-// it has none.
+// it has none. A failure leads with how to retry, so a long error cut at
+// the edge of the terminal keeps it.
 func (r zoneRefresh) describe(retry string) string {
 	switch {
 	case r.pending:
@@ -206,9 +207,9 @@ func (r zoneRefresh) describe(retry string) string {
 	case r.validated:
 		return "validated this session"
 	case r.err != nil && !r.retryAt.IsZero():
-		return fmt.Sprintf("Refresh failed: %v; you can retry at %s (%s)", r.err, r.retryAt.Local().Format(time.TimeOnly), retry)
+		return fmt.Sprintf("Refresh failed, retry at %s (%s): %v", r.retryAt.Local().Format(time.TimeOnly), retry, r.err)
 	case r.err != nil:
-		return fmt.Sprintf("Refresh failed: %v (%s retries)", r.err, retry)
+		return fmt.Sprintf("Refresh failed (%s retries): %v", retry, r.err)
 	}
 
 	return ""
