@@ -178,4 +178,3 @@ func TestAResolverFailureLeavesTheLiveZoneUnknownWithoutAnError(t *testing.T) {
 	h.assertHides("i/o timeout")
 	h.assertShows("? help")
 }
-
