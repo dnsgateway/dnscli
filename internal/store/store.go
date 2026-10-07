@@ -8,6 +8,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/url"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite driver
 )
@@ -19,7 +20,9 @@ type Store struct {
 
 // Open opens (creating if needed) the database at path and applies pending migrations.
 func Open(ctx context.Context, path string) (*Store, error) {
-	dsn := "file:" + path + "?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
+	// Escape the path so '#', '?' and '%' in it are not read as URI syntax.
+	dsn := "file:" + (&url.URL{Path: path}).EscapedPath() +
+		"?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
 
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
