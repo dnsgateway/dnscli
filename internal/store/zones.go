@@ -266,6 +266,60 @@ func (s *Store) SaveRefresh(ctx context.Context, z dns.Zone, records []dns.Recor
 	return z, nil
 }
 
+// SaveApply updates a Zone's cached Records with the changes its Provider
+// confirmed applying, in one transaction. Each change's After is the
+// Record as the Provider stored it: an addition inserts it, a modification
+// replaces the cached Record with its Before's Provider record ID, and a
+// deletion removes that Record. A modification whose Record is no longer
+// cached inserts it. The rest of the cache is left alone.
+//
+// Like SaveRefresh, it returns ErrZoneNotCached unless the cache still has
+// that very Zone: the same ID, Account, zone name and Provider zone ID.
+func (s *Store) SaveApply(ctx context.Context, z dns.Zone, applied []dns.Change) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("save apply: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	var found bool
+
+	err = tx.QueryRowContext(ctx, `
+		SELECT EXISTS (SELECT 1 FROM zones WHERE id = ? AND account_id = ? AND name = ? AND provider_zone_id = ?)`,
+		z.ID, z.AccountID, z.Name, z.ProviderID,
+	).Scan(&found)
+	if err == nil && !found {
+		err = ErrZoneNotCached
+	}
+
+	if err != nil {
+		return fmt.Errorf("save apply: %w", err)
+	}
+
+	for _, c := range applied {
+		if c.Kind != dns.ChangeAdd {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM records WHERE zone_id = ? AND provider_record_id = ?`,
+				z.ID, c.Before.ProviderID); err != nil {
+				return fmt.Errorf("save apply: %w", err)
+			}
+		}
+
+		if c.Kind == dns.ChangeDelete {
+			continue
+		}
+
+		if err := insertRecord(ctx, tx, z.ID, c.After); err != nil {
+			return fmt.Errorf("save apply: %w", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("save apply: %w", err)
+	}
+
+	return nil
+}
+
 // replaceRecords replaces a Zone's cached Records inside tx.
 func replaceRecords(ctx context.Context, tx *sql.Tx, zoneID int64, records []dns.Record) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM records WHERE zone_id = ?`, zoneID); err != nil {
@@ -273,21 +327,28 @@ func replaceRecords(ctx context.Context, tx *sql.Tx, zoneID int64, records []dns
 	}
 
 	for _, r := range records {
-		extras, err := json.Marshal(nonNil(r.Extras))
-		if err != nil {
-			return err
-		}
-
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO records (zone_id, provider_record_id, type, name, value, ttl, extras)
-			VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			zoneID, r.ProviderID, r.Type, r.Name, r.Value, r.TTL, string(extras),
-		); err != nil {
+		if err := insertRecord(ctx, tx, zoneID, r); err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+// insertRecord caches one Record of a Zone inside tx.
+func insertRecord(ctx context.Context, tx *sql.Tx, zoneID int64, r dns.Record) error {
+	extras, err := json.Marshal(nonNil(r.Extras))
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO records (zone_id, provider_record_id, type, name, value, ttl, extras)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		zoneID, r.ProviderID, r.Type, r.Name, r.Value, r.TTL, string(extras),
+	)
+
+	return err
 }
 
 // Records returns a Zone's cached Records, ordered by name and type.
