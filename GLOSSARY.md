@@ -7,7 +7,7 @@ A terminal application for browsing and editing DNS records across several DNS h
 ### Hosting
 
 **Provider**:
-A DNS hosting service whose API dnscli talks to, such as Cloudflare.
+A DNS hosting service whose API dnscli talks to, such as Cloudflare or GoDaddy.
 _Avoid_: backend, service
 
 **Account**:

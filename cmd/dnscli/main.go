@@ -19,6 +19,7 @@ import (
 	"github.com/sergelogvinov/dnscli/internal/keychain"
 	"github.com/sergelogvinov/dnscli/internal/provider"
 	"github.com/sergelogvinov/dnscli/internal/provider/cloudflare"
+	"github.com/sergelogvinov/dnscli/internal/provider/godaddy"
 	"github.com/sergelogvinov/dnscli/internal/resolver"
 	"github.com/sergelogvinov/dnscli/internal/store"
 	"github.com/sergelogvinov/dnscli/internal/tui"
@@ -32,6 +33,7 @@ const unsealEnv = "DNSCLI_UNSEAL"
 // A build with the fakeprovider tag adds an in-memory fake for trying the UI.
 var providers = provider.Registry{
 	"cloudflare": cloudflare.Config{}.New,
+	"godaddy":    godaddy.Config{}.New,
 }
 
 // unsealMethods are the Unseal Methods a build supports, by name: the
