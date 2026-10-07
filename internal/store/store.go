@@ -10,8 +10,13 @@ import (
 	"fmt"
 	"net/url"
 
+	"time"
+
 	_ "modernc.org/sqlite" // pure-Go SQLite driver
 )
+
+// busyTimeout is how long a connection waits for another one's lock.
+const busyTimeout = 5 * time.Second
 
 // Store is the local SQLite database.
 type Store struct {
@@ -21,8 +26,10 @@ type Store struct {
 // Open opens (creating if needed) the database at path and applies pending migrations.
 func Open(ctx context.Context, path string) (*Store, error) {
 	// Escape the path so '#', '?' and '%' in it are not read as URI syntax.
+	// WAL is enabled by migrate: switching to it on connect can fail with
+	// SQLITE_BUSY while another process creates the database.
 	dsn := "file:" + (&url.URL{Path: path}).EscapedPath() +
-		"?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
+		fmt.Sprintf("?_pragma=foreign_keys(1)&_pragma=busy_timeout(%d)", busyTimeout.Milliseconds())
 
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {

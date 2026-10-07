@@ -3,7 +3,12 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"time"
+
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 // migrations are applied in order; the schema version is stored in PRAGMA user_version.
@@ -67,7 +72,33 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		return fmt.Errorf("migrate: %w", err)
 	}
 
+	if err := enableWAL(ctx, conn); err != nil {
+		return fmt.Errorf("enable WAL: %w", err)
+	}
+
 	return nil
+}
+
+// enableWAL switches the database to WAL. The switch needs an exclusive lock
+// and SQLite does not run the busy handler for it, so retry while another
+// connection holds a lock, for as long as busy_timeout would wait.
+func enableWAL(ctx context.Context, conn *sql.Conn) error {
+	deadline := time.Now().Add(busyTimeout)
+
+	for {
+		_, err := conn.ExecContext(ctx, "PRAGMA journal_mode = WAL")
+
+		var se *sqlite.Error
+		if err == nil || !errors.As(err, &se) || se.Code()&0xff != sqlite3.SQLITE_BUSY || time.Now().After(deadline) {
+			return err
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
 }
 
 func migrateLocked(ctx context.Context, conn *sql.Conn) error {
