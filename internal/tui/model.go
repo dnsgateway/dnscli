@@ -61,8 +61,11 @@ type Model struct {
 	recordsLoading bool
 	recordsErr     error // reading the open Zone's Records failed
 	records        []dns.Record
-	// visibleRecords are the Records the Records pane lists, after its search.
-	visibleRecords []dns.Record
+	// rows are the open Zone's Records with its pending Changeset laid
+	// over them, as the Records pane lists them before its search.
+	rows []recordRow
+	// visibleRecords are the rows the Records pane lists, after its search.
+	visibleRecords []recordRow
 
 	// fresh is each Zone's freshness this session, by Zone ID.
 	fresh map[int64]*zoneFreshness
@@ -97,6 +100,16 @@ type Model struct {
 	keychain *keychainConfirm
 	// remove asks to remove an Account; nil when closed.
 	remove *removeConfirm
+	// changesets are the pending Changesets, by Zone ID. They are held in
+	// memory only, for this session.
+	changesets map[int64]*dns.Changeset
+	// applying holds the IDs of the Zones whose Changeset is being applied.
+	applying map[int64]bool
+	// recordForm adds or edits a Record; nil when closed.
+	recordForm *recordForm
+	// preview shows a pending Changeset; nil when closed.
+	preview *changesetPreview
+
 	// relisting holds the IDs of the Accounts whose Zones are being re-listed.
 	relisting map[int64]bool
 }
@@ -266,6 +279,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.zonesDiscovered(msg)
 	case accountRemovedMsg:
 		return m, m.accountRemoved(msg)
+	case changesAppliedMsg:
+		return m, m.changesApplied(msg)
 	case recordsLoadedMsg:
 		if m.open == nil || m.open.ID != msg.zoneID {
 			return m, nil // the user has moved on to another Zone
@@ -300,6 +315,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.remove != nil {
 			return m, m.removeAccountKey(msg)
+		}
+
+		if m.recordForm != nil {
+			return m, m.recordFormKey(msg)
+		}
+
+		if m.preview != nil {
+			return m, m.previewKey(msg)
 		}
 
 		if m.typeIntoSearch(msg) {
@@ -379,6 +402,10 @@ func (m *Model) handle(a Action) tea.Cmd {
 		if len(m.visible) > 0 {
 			m.delegationOf = m.visible[m.cursor[paneDomains]].Name
 		}
+	case ActionAddRecord, ActionEditRecord, ActionDeleteRecord:
+		return m.recordAction(a)
+	case ActionPreviewChanges:
+		return m.previewChanges()
 	}
 
 	return nil
@@ -455,7 +482,8 @@ func (m *Model) refilter(p pane) {
 	case paneDomains:
 		m.visible = filterZones(m.zones, zoneFilter{account: m.accountFilter, query: m.search[paneDomains].query})
 	case paneRecords:
-		m.visibleRecords = filterRecords(m.records, m.search[paneRecords].query)
+		m.rows = m.recordRows()
+		m.visibleRecords = filterRecords(m.rows, m.search[paneRecords].query)
 	}
 }
 

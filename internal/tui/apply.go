@@ -1,0 +1,346 @@
+package tui
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"slices"
+
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/sergelogvinov/dnscli/internal/dns"
+	"github.com/sergelogvinov/dnscli/internal/provider"
+	"github.com/sergelogvinov/dnscli/internal/store"
+	"github.com/sergelogvinov/dnscli/internal/vault"
+)
+
+// changesetPreview shows a Zone's pending Changeset, from which the user
+// applies or discards it.
+type changesetPreview struct {
+	zoneID int64
+	err    string
+	busy   bool // the Changeset is being applied
+}
+
+// changesApplied reports the result of applying a Changeset.
+type changesAppliedMsg struct {
+	zoneID int64
+	// sent is the Changeset sent to the Provider.
+	sent dns.Changeset
+	// failed holds, for each change of sent, why the Provider did not
+	// apply it; nil for a change it confirmed.
+	failed []error
+	// err is why nothing was applied, or why the confirmed changes could
+	// not be saved to the cache.
+	err error
+	// saved is false when the Provider confirmed changes that the cache
+	// could not take.
+	saved bool
+}
+
+// maxPreviewLines bounds how many changes the preview lists.
+const maxPreviewLines = 12
+
+// previewChanges opens the preview of the open Zone's pending Changeset.
+func (m *Model) previewChanges() tea.Cmd {
+	if m.open == nil {
+		m.notice = notice{text: "Open a Zone first.", err: true}
+
+		return nil
+	}
+
+	if m.pendingOf(m.open.ID) == nil {
+		m.notice = notice{text: "No pending changes for " + m.open.Name + "."}
+
+		return nil
+	}
+
+	m.preview = &changesetPreview{zoneID: m.open.ID}
+
+	return nil
+}
+
+// previewKey handles a key while the Changeset preview is open.
+func (m *Model) previewKey(msg tea.KeyMsg) tea.Cmd {
+	p := m.preview
+	a := m.keys.action(msg.String())
+
+	if quitsDialog(a, msg) {
+		return m.handle(ActionQuit)
+	}
+
+	if p.busy {
+		return nil
+	}
+
+	switch a {
+	case ActionClose:
+		m.preview = nil
+	case ActionDiscardChanges:
+		n := len(m.changesets[p.zoneID].Changes)
+		delete(m.changesets, p.zoneID)
+		m.preview = nil
+		m.refilter(paneRecords)
+		m.notice = notice{text: fmt.Sprintf("Discarded %s for %s.", pendingCount(n), m.zoneByID[p.zoneID].Name)}
+	case ActionSelect:
+		return m.applyChanges()
+	}
+
+	return nil
+}
+
+// applyChanges sends the previewed Changeset to the Provider, past the
+// write gate.
+func (m *Model) applyChanges() tea.Cmd {
+	p := m.preview
+	p.err = ""
+
+	z, cmd, ok := m.writeGate()
+	if !ok || z.ID != p.zoneID {
+		p.err = m.notice.text
+
+		return cmd
+	}
+
+	pending := m.pendingOf(z.ID)
+	a, found := m.account(z.AccountID)
+
+	if pending == nil || !found {
+		m.preview = nil
+
+		return nil
+	}
+
+	cs := dns.Changeset{Zone: z, Changes: slices.Clone(pending.Changes)}
+
+	if m.applying == nil {
+		m.applying = map[int64]bool{}
+	}
+
+	m.applying[z.ID] = true
+	p.busy = true
+
+	ctx, s, key, newProvider := m.ctx, m.deps.Store, m.key, m.deps.Providers[a.Provider]
+
+	return func() tea.Msg {
+		return apply(ctx, s, key, newProvider, a, cs)
+	}
+}
+
+// apply sends a Changeset to the Provider and saves the changes it
+// confirmed to the cache, from the Records it returned.
+func apply(ctx context.Context, s *store.Store, key *vault.Key, newProvider provider.Constructor, a dns.Account, cs dns.Changeset) changesAppliedMsg {
+	msg := changesAppliedMsg{zoneID: cs.Zone.ID, sent: cs}
+
+	p, err := accountProvider(ctx, s, key, newProvider, a)
+	if err != nil {
+		msg.err = err
+
+		return msg
+	}
+
+	res, err := p.Apply(ctx, cs)
+	if err == nil && len(res.Results) != len(cs.Changes) {
+		err = fmt.Errorf("the Provider reported %d results for %d changes", len(res.Results), len(cs.Changes))
+	}
+
+	if err != nil {
+		msg.err = err
+
+		return msg
+	}
+
+	msg.failed = make([]error, len(cs.Changes))
+
+	var confirmed []dns.Change
+
+	for i, r := range res.Results {
+		if r.Err != nil {
+			msg.failed[i] = r.Err
+
+			continue
+		}
+
+		c := cs.Changes[i]
+		if c.Kind != dns.ChangeDelete {
+			c.After = storedRecord(c, r.Record)
+		}
+
+		confirmed = append(confirmed, c)
+	}
+
+	if err := s.SaveApply(ctx, cs.Zone, confirmed); err != nil {
+		msg.err = err
+
+		return msg
+	}
+
+	msg.saved = true
+
+	return msg
+}
+
+// storedRecord is the Record as the Provider stored it for a confirmed
+// addition or modification. A Provider that returned no Record stored the
+// one sent, under its old ID for a modification.
+func storedRecord(c dns.Change, stored dns.Record) dns.Record {
+	if stored.Type != "" {
+		return stored
+	}
+
+	r := c.After
+	if c.Kind == dns.ChangeModify {
+		r.ProviderID = c.Before.ProviderID
+	}
+
+	return r
+}
+
+// changesApplied takes the confirmed changes out of the pending
+// Changeset, keeping the ones that failed, and shows the cache as updated.
+// When the cache could not take what the Provider confirmed, the Zone is
+// no longer validated: it must be Refreshed before the next edit.
+func (m *Model) changesApplied(msg changesAppliedMsg) tea.Cmd {
+	delete(m.applying, msg.zoneID)
+
+	z, known := m.zoneByID[msg.zoneID]
+	if !known {
+		return nil // forgotten meanwhile, such as with its Account
+	}
+
+	p := m.preview
+	if p != nil && p.zoneID == msg.zoneID {
+		p.busy = false
+	}
+
+	if msg.failed == nil {
+		text := "Could not apply the changes to " + z.Name + ": " + msg.err.Error()
+		m.notice = notice{text: text, err: true}
+
+		if p != nil && p.zoneID == msg.zoneID {
+			p.err = text
+		}
+
+		return nil
+	}
+
+	var cmds []tea.Cmd
+
+	if m.open != nil && m.open.ID == msg.zoneID {
+		cmds = append(cmds, m.reloadRecords(msg.zoneID))
+	}
+
+	if r, ok := m.refreshes[msg.zoneID]; ok {
+		switch {
+		case msg.saved:
+			// The cache holds what the Provider confirmed: still validated.
+			r.validated = true
+		case !errors.Is(msg.err, store.ErrZoneNotCached):
+			*r = zoneRefresh{err: fmt.Errorf("the applied changes could not be cached: %w", msg.err)}
+		}
+	}
+
+	m.dropApplied(msg)
+
+	failed := 0
+
+	var first error
+
+	for _, err := range msg.failed {
+		if err != nil {
+			failed++
+
+			if first == nil {
+				first = err
+			}
+		}
+	}
+
+	applied := len(msg.sent.Changes) - failed
+
+	switch {
+	case failed > 0:
+		m.notice = notice{text: fmt.Sprintf("Applied %d of %d changes to %s; %d failed and are still pending: %v",
+			applied, len(msg.sent.Changes), z.Name, failed, first), err: true}
+	case !msg.saved:
+		m.notice = notice{text: fmt.Sprintf("Applied %s to %s, but could not cache them: %v. Refresh the Zone (%s).",
+			changeCount(applied), z.Name, msg.err, m.keys.keysFor(ActionRefresh)), err: true}
+	default:
+		m.notice = notice{text: fmt.Sprintf("Applied %s to %s.", changeCount(applied), z.Name)}
+	}
+
+	if p != nil && p.zoneID == msg.zoneID && m.pendingOf(msg.zoneID) == nil {
+		m.preview = nil
+	}
+
+	if p != nil && m.preview != nil && failed > 0 {
+		p.err = m.notice.text
+	}
+
+	return tea.Batch(cmds...)
+}
+
+// dropApplied takes the changes the Provider confirmed out of the pending
+// Changeset. Edits are refused while an Apply is in flight, so the pending
+// Changeset still starts with the changes that were sent.
+func (m *Model) dropApplied(msg changesAppliedMsg) {
+	cs := m.changesets[msg.zoneID]
+	if cs == nil {
+		return
+	}
+
+	var kept []dns.Change
+
+	for i, c := range cs.Changes {
+		if i >= len(msg.failed) || msg.failed[i] != nil {
+			kept = append(kept, c)
+		}
+	}
+
+	cs.Changes = kept
+	m.refilter(paneRecords)
+}
+
+// changeCount says how many changes: "1 change", "3 changes".
+func changeCount(n int) string {
+	if n == 1 {
+		return "1 change"
+	}
+
+	return fmt.Sprintf("%d changes", n)
+}
+
+func (m *Model) previewView() string {
+	p := m.preview
+	z := m.zoneByID[p.zoneID]
+
+	var lines []string
+
+	if cs := m.pendingOf(p.zoneID); cs != nil {
+		for i, c := range cs.Changes {
+			if i == maxPreviewLines {
+				lines = append(lines, hintStyle.Render(fmt.Sprintf("… and %d more", len(cs.Changes)-i)))
+
+				break
+			}
+
+			lines = append(lines, changeStyle(c.Kind).Render(describeChange(z.Name, c)))
+		}
+
+		lines = append([]string{"Applying sends " + pendingCount(len(cs.Changes)) + " to the Provider:", ""}, lines...)
+	}
+
+	if p.err != "" {
+		lines = append(lines, "")
+		lines = append(lines, wrapNote(errorStyle, p.err, noteWidth)...)
+	}
+
+	if p.busy {
+		lines = append(lines, "", hintStyle.Render("applying…"))
+	}
+
+	lines = append(lines, "", hintStyle.Render(m.keys.keysFor(ActionSelect)+" apply · "+
+		m.keys.keysFor(ActionDiscardChanges)+" discard · "+m.keys.keysFor(ActionClose)+" close"))
+
+	return dialogView("Changes to "+z.Name, nil, -1, false, lines)
+}

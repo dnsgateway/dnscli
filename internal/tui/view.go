@@ -20,6 +20,9 @@ var (
 	errorStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 	statusStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("7"))
 	sealedStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
+	addedStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
+	modifiedStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
+	deletedStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Strikethrough(true)
 	// staleStyle dims cached data that has not been confirmed in this session.
 	staleStyle = lipgloss.NewStyle().Faint(true)
 )
@@ -60,6 +63,10 @@ func (m *Model) View() string {
 		view = overlay(view, m.keychainView(), m.width, m.height)
 	case m.remove != nil:
 		view = overlay(view, m.removeAccountView(), m.width, m.height)
+	case m.recordForm != nil:
+		view = overlay(view, m.recordFormView(), m.width, m.height)
+	case m.preview != nil:
+		view = overlay(view, m.previewView(), m.width, m.height)
 	case m.delegationOf != "":
 		view = overlay(view, m.delegationView(), m.width, m.height)
 	}
@@ -185,12 +192,12 @@ func (m *Model) recordLines(w, h int) []string {
 		return []string{"", hintStyle.Render("  loading…")}
 	case m.recordsErr != nil:
 		return []string{"", errorStyle.Render("  Could not read Records for " + m.open.Name + ".")}
-	case len(m.records) == 0:
+	case len(m.rows) == 0:
 		return []string{"", "  No cached Records for " + m.open.Name + "."}
 	}
 
 	cols := recordColumns(w)
-	header := headerStyle.Render(cols.format("Name", "Type", "Content", "TTL"))
+	header := headerStyle.Render(cols.format(" ", "Name", "Type", "Content", "TTL"))
 
 	lines := append(m.searchLines(paneRecords, w), header)
 
@@ -198,8 +205,13 @@ func (m *Model) recordLines(w, h int) []string {
 	start, end := window(len(records), m.cursor[paneRecords], h-len(lines))
 
 	for i := start; i < end; i++ {
-		r := records[i]
-		lines = append(lines, m.row(paneRecords, i, cols.format(r.Name, r.Type, r.Value, strconv.FormatUint(uint64(r.TTL), 10)), w, m.zoneStyle(m.open.ID)))
+		r := records[i].rec
+		style := m.zoneStyle(m.open.ID)
+		if k := records[i].kind; k != 0 {
+			style = changeStyle(k)
+		}
+
+		lines = append(lines, m.row(paneRecords, i, cols.format(changeMark(records[i].kind), r.Name, r.Type, r.Value, strconv.FormatUint(uint64(r.TTL), 10)), w, style))
 	}
 
 	if len(records) == 0 {
@@ -235,15 +247,17 @@ type columns struct{ name, typ, ttl, content int }
 
 func recordColumns(w int) columns {
 	c := columns{typ: 6, ttl: 6}
-	rest := max(w-1-c.typ-c.ttl-3, 10)
+	rest := max(w-3-c.typ-c.ttl-3, 10)
 	c.name = rest * 2 / 5
 	c.content = rest - c.name
 
 	return c
 }
 
-func (c columns) format(name, typ, content, ttl string) string {
-	return " " + fit(name, c.name) + " " + fit(typ, c.typ) + " " + fit(content, c.content) + " " + fit(ttl, c.ttl)
+// format lays out a Records pane row. mark is the one-column mark of a
+// pending change.
+func (c columns) format(mark, name, typ, content, ttl string) string {
+	return " " + mark + " " + fit(name, c.name) + " " + fit(typ, c.typ) + " " + fit(content, c.content) + " " + fit(ttl, c.ttl)
 }
 
 // window returns the range [start, end) of n list items that fits in h rows
@@ -328,6 +342,10 @@ func (m *Model) zoneStatus(z dns.Zone) string {
 		parts = append(parts, hint)
 	}
 
+	if cs := m.pendingOf(z.ID); cs != nil {
+		parts = append(parts, fmt.Sprintf("%s (%s preview)", pendingCount(len(cs.Changes)), m.keys.keysFor(ActionPreviewChanges)))
+	}
+
 	if z.RefreshedAt.IsZero() {
 		parts = append(parts, "cached, never Refreshed")
 	} else {
@@ -383,4 +401,18 @@ func box(title string, lines []string, w, h int, focused bool) string {
 	sb.WriteString("\n" + style.Render(b.BottomLeft+strings.Repeat(b.Bottom, innerW)+b.BottomRight))
 
 	return sb.String()
+}
+
+// changeStyle colours a Record with a pending change: added, modified or deleted.
+func changeStyle(k dns.ChangeKind) lipgloss.Style {
+	switch k {
+	case dns.ChangeAdd:
+		return addedStyle
+	case dns.ChangeModify:
+		return modifiedStyle
+	case dns.ChangeDelete:
+		return deletedStyle
+	}
+
+	return lipgloss.NewStyle()
 }

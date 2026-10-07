@@ -42,6 +42,21 @@ const (
 	// ActionDelegation shows the highlighted Zone's Delegation next to the
 	// nameservers its Account expects, read-only (ADR-0004).
 	ActionDelegation
+	// ActionAddRecord opens the Record form to add a Record to the open
+	// Zone's pending Changeset. Like editing and deleting, it obeys the
+	// write gate.
+	ActionAddRecord
+	// ActionEditRecord opens the Record form, prefilled, for the Record
+	// highlighted in the Records pane.
+	ActionEditRecord
+	// ActionDeleteRecord marks the highlighted Record for deletion, or
+	// takes back its pending change.
+	ActionDeleteRecord
+	// ActionPreviewChanges shows the open Zone's pending Changeset, from
+	// which it is applied or discarded.
+	ActionPreviewChanges
+	// ActionDiscardChanges discards the pending Changeset shown in the preview.
+	ActionDiscardChanges
 )
 
 // Binding maps one Action to its keys.
@@ -73,6 +88,11 @@ func DefaultShortcutProfile() ShortcutProfile {
 			{Action: ActionAllAccounts, Keys: []string{"*"}, Help: "Zones of all Accounts"},
 			{Action: ActionRefresh, Keys: []string{"r"}, Help: "Refresh the open Zone (retry)"},
 			{Action: ActionDelegation, Keys: []string{"N"}, Help: "Delegation (nameservers), read-only"},
+			{Action: ActionAddRecord, Keys: []string{"i"}, Help: "insert a new Record (Records pane)"},
+			{Action: ActionEditRecord, Keys: []string{"e"}, Help: "edit the Record (Records pane)"},
+			{Action: ActionDeleteRecord, Keys: []string{"d"}, Help: "delete the Record, or undo its change (Records pane)"},
+			{Action: ActionPreviewChanges, Keys: []string{"p"}, Help: "preview the pending changes, Enter applies"},
+			{Action: ActionDiscardChanges, Keys: []string{"D"}, Help: "discard the pending changes (in the preview)"},
 			{Action: ActionAddAccount, Keys: []string{"a"}, Help: "add Account"},
 			{Action: ActionRemoveAccount, Keys: []string{"X"}, Help: "remove Account"},
 			{Action: ActionRelistZones, Keys: []string{"L"}, Help: "re-list the Account's Zones"},

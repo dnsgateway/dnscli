@@ -35,19 +35,19 @@ func filterZones(zones []dns.Zone, f zoneFilter) []dns.Zone {
 	return out
 }
 
-// filterRecords returns the Records whose name, type or value contains
-// query, ignoring case, in their original order. An empty query matches
-// every Record.
-func filterRecords(records []dns.Record, query string) []dns.Record {
+// filterRecords returns the rows whose Record's name, type or value
+// contains query, ignoring case, in their original order. An empty query
+// matches every row.
+func filterRecords(records []recordRow, query string) []recordRow {
 	q := strings.ToLower(query)
 	if q == "" {
 		return records
 	}
 
-	var out []dns.Record
+	var out []recordRow
 
 	for _, r := range records {
-		for _, field := range []string{r.Name, r.Type, r.Value} {
+		for _, field := range []string{r.rec.Name, r.rec.Type, r.rec.Value} {
 			if strings.Contains(strings.ToLower(field), q) {
 				out = append(out, r)
 

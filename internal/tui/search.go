@@ -27,7 +27,7 @@ func (m *Model) searchable(p pane) int {
 	case paneDomains:
 		return len(m.zones)
 	case paneRecords:
-		return len(m.records)
+		return len(m.rows)
 	}
 
 	return 0

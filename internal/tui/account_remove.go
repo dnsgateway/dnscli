@@ -133,6 +133,16 @@ func (m *Model) forgetZones(ids []int64) {
 		m.checks.drop(id)
 		delete(m.refreshes, id)
 		m.refreshQueue.drop(id)
+		delete(m.changesets, id)
+		delete(m.applying, id)
+
+		if m.preview != nil && m.preview.zoneID == id {
+			m.preview = nil
+		}
+
+		if m.recordForm != nil && m.recordForm.zone.ID == id {
+			m.recordForm = nil
+		}
 
 		if m.open != nil && m.open.ID == id {
 			m.open = nil

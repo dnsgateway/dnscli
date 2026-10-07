@@ -127,7 +127,7 @@ func CheckValue(typ, value string) error {
 		}
 	case "CNAME", "NS":
 		if len(f) != 1 || checkHostname(value, false) != nil {
-			return fmt.Errorf("a %s value is a host name, such as host.example.com, not %q", typ, value)
+			return fmt.Errorf("%s %s value is a host name, such as host.example.com, not %q", map[string]string{"CNAME": "a", "NS": "an"}[typ], typ, value)
 		}
 	case "MX":
 		if len(f) != 2 || !isUint16(f[0]) || (f[1] != "." && checkHostname(f[1], false) != nil) {
