@@ -61,6 +61,9 @@ type changesAppliedMsg struct {
 	// conflicts are the Records the Changeset was built from that changed
 	// at the Provider since: nothing was sent.
 	conflicts []conflict
+	// serial is the Zone's SOA serial saved with the applied changes;
+	// zero when the cached one was kept.
+	serial uint32
 }
 
 // conflict is a Record a Changeset was built from that changed at the
@@ -258,11 +261,13 @@ func apply(ctx context.Context, s *store.Store, key *vault.Key, newProvider prov
 		confirmed = append(confirmed, c)
 	}
 
-	if err := s.SaveApply(ctx, cs.Zone, confirmed); err != nil {
+	if err := s.SaveApply(ctx, cs.Zone, confirmed, res.Serial); err != nil {
 		msg.err = err
 
 		return msg
 	}
+
+	msg.serial = res.Serial
 
 	msg.saved, msg.applied = true, confirmed
 
@@ -321,6 +326,11 @@ func (m *Model) changesApplied(msg changesAppliedMsg) tea.Cmd {
 	// in the same step that takes the changes out of the Changeset.
 	if m.open != nil && m.open.ID == msg.zoneID {
 		m.records = applyToRecords(m.records, msg.applied)
+	}
+
+	if msg.saved && msg.serial != 0 {
+		z.Serial = msg.serial
+		m.updateZone(z)
 	}
 
 	if r, ok := m.refreshes[msg.zoneID]; ok {

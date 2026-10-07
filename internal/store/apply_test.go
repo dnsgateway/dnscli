@@ -46,7 +46,7 @@ func TestSaveApplyRefusesAChangeWithoutAProviderRecordID(t *testing.T) {
 
 			ok := dns.Change{Kind: dns.ChangeAdd, After: dns.Record{ProviderID: "r9", Type: "A", Name: "www.example.com", Value: "192.0.2.9", TTL: 300}}
 
-			if err := s.SaveApply(ctx, z, []dns.Change{ok, c}); err == nil {
+			if err := s.SaveApply(ctx, z, []dns.Change{ok, c}, 0); err == nil {
 				t.Fatal("SaveApply took a change without a Provider record ID")
 			}
 

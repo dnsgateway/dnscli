@@ -106,6 +106,19 @@ func TestAPartialApplyShowsTheOutcomeOfEachChange(t *testing.T) {
 	h.assertHides("The Provider applied", "✓ +", "✗ -")
 }
 
+func TestAnApplyStoresTheSerialTheProviderReports(t *testing.T) {
+	f := refreshZones()
+	h := openValidated(t, f)
+	h.buildChangeset()
+
+	h.press("p", "enter")
+
+	// The fake Provider bumps the serial once per Apply.
+	if z := cachedZone(t, h.store, "work.example"); z.Serial != liveSerial+1 {
+		t.Fatalf("cached serial = %d, want %d", z.Serial, liveSerial+1)
+	}
+}
+
 func TestAnApplyWhoseReCheckFailsIsNotSent(t *testing.T) {
 	f := refreshZones()
 	h := openValidated(t, f)

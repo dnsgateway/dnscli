@@ -275,13 +275,14 @@ var ErrNoRecordID = errors.New("the Record has no Provider record ID")
 // Record as the Provider stored it: an addition inserts it, a modification
 // replaces the cached Record with its Before's Provider record ID, and a
 // deletion removes that Record. A modification whose Record is no longer
-// cached inserts it. The rest of the cache is left alone.
+// cached inserts it. A non-zero serial becomes the Zone's cached SOA
+// serial; zero keeps the cached one. The rest of the cache is left alone.
 //
 // Like SaveRefresh, it returns ErrZoneNotCached unless the cache still has
 // that very Zone: the same ID, Account, zone name and Provider zone ID.
 // It returns ErrNoRecordID, and saves nothing, when a change's Record has
 // no Provider record ID to find it by.
-func (s *Store) SaveApply(ctx context.Context, z dns.Zone, applied []dns.Change) error {
+func (s *Store) SaveApply(ctx context.Context, z dns.Zone, applied []dns.Change, serial uint32) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("save apply: %w", err)
@@ -321,6 +322,12 @@ func (s *Store) SaveApply(ctx context.Context, z dns.Zone, applied []dns.Change)
 		}
 
 		if err := insertRecord(ctx, tx, z.ID, c.After); err != nil {
+			return fmt.Errorf("save apply: %w", err)
+		}
+	}
+
+	if serial != 0 {
+		if _, err := tx.ExecContext(ctx, `UPDATE zones SET soa_serial = ? WHERE id = ?`, serial, z.ID); err != nil {
 			return fmt.Errorf("save apply: %w", err)
 		}
 	}
