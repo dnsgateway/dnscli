@@ -118,6 +118,17 @@ func TestEscClearsTheRecordsSearchAndRestoresAllRecords(t *testing.T) {
 	h.assertHides("/www")
 }
 
+func TestOpeningAnotherZoneStartsWithAllItsRecords(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	h := newHarness(t, s)
+	h.press("enter", "shift+tab", "/", "w", "w", "w", "tab", "j", "j", "enter")
+
+	h.assertShows("198.51.100.7")
+	h.assertHides("/www")
+}
+
 func TestKeysTypedIntoSearchDoNotTriggerActions(t *testing.T) {
 	s, _ := openStore(t)
 	seedCache(t, s)

@@ -222,6 +222,7 @@ func (m *Model) selectItem() tea.Cmd {
 	z := zones[m.cursor[paneDomains]]
 	m.open = &z
 	m.records = nil
+	m.search[paneRecords] = search{}
 	m.recordsLoading = true
 	m.recordsErr = nil
 
