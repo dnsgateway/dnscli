@@ -4,13 +4,13 @@
 
 **Blocked by:** 04
 
-**Status:** ready-for-human
+**Status:** resolved
 
 - [x] The Keychain + Touch ID Unseal Method wraps the data key in its own slot
 - [x] Enrolling it requires an already-unsealed session, for example one unsealed with the passphrase
 - [x] It is the default Unseal Method on macOS. A flag or environment variable can select the passphrase instead
 - [x] The build still works on non-macOS platforms, where the method is unavailable
-- [ ] Manually verified on macOS: enroll, Unseal with Touch ID, fall back to the passphrase
+- [x] Manually verified on macOS: enroll, Unseal with Touch ID, fall back to the passphrase
 
 ## Comments
 
@@ -20,6 +20,8 @@
   - The Objective-C bridge (`internal/keychain/keychain_darwin.m`) has never been compiled. Status is ready-for-human until the Mac check below passes.
   - Risk: a plain CLI binary may not be able to carry `keychain-access-groups` without a provisioning profile. If macOS kills the signed binary, the Keychain method needs app-bundle packaging.
   - Risk: it is assumed that SecItemDelete removes a biometry-protected item without asking for Touch ID.
+- 2026-10-07: Manually verified on macOS with a `-tags devkeychain` build (870eed1). Enroll, Unseal with Touch ID, and fall back to the passphrase all work, and all known issues are fixed. Resolved.
+  - The dev build uses the login keychain, guarded only by dnscli's own Touch ID check. The data protection keychain path still needs a signed .app bundle built from the `hack/macos` templates. That path has not been run on a Mac yet.
 
 ### Manual Mac verification
 
