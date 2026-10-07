@@ -233,6 +233,67 @@ func TestAFailureToReadTheAccountsNameserversStillCachesItsZones(t *testing.T) {
 	h.assertShows("not cached", "Live Zone unknown")
 }
 
+// runOnce runs cmd and the commands it batches, without feeding their
+// messages back to the model, and returns those messages.
+func runOnce(cmd tea.Cmd) []tea.Msg {
+	if cmd == nil {
+		return nil
+	}
+
+	switch msg := cmd().(type) {
+	case nil:
+		return nil
+	case tea.BatchMsg:
+		var out []tea.Msg
+		for _, c := range msg {
+			out = append(out, runOnce(c)...)
+		}
+
+		return out
+	default:
+		return []tea.Msg{msg}
+	}
+}
+
+func TestDelegationLookupsRunBoundedLikeTheSerialChecks(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	r := &fakeResolver{ns: map[string][]string{}}
+	h, startup := newHarnessHoldingStartup(t, s, tui.Deps{Resolver: r, SerialChecks: 2})
+
+	msgs := runOnce(startup)
+	if got := r.nsQueries(); len(got) != 2 {
+		t.Fatalf("NS queries in flight = %v, want 2", got)
+	}
+
+	for _, msg := range msgs {
+		h.send(msg)
+	}
+
+	if got := r.nsQueries(); len(got) != 3 {
+		t.Fatalf("NS queries = %v, want each of the 3 zone names asked", got)
+	}
+}
+
+func TestAFailedDelegationLookupRunsAgainOnReload(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+	expectNameservers(t, s, "cloudflare.personal", "example.com", cruzDee...)
+
+	r := &fakeResolver{
+		ns:     map[string][]string{"example.com": cruzDee},
+		nsErrs: map[string]error{"example.com": errors.New("i/o timeout")},
+	}
+	h := newSerialCheckHarness(t, s, r)
+	h.assertLive("example.com", false)
+
+	delete(r.nsErrs, "example.com")
+	h.reloadCache()
+
+	h.assertLive("example.com", true)
+}
+
 func TestAResolverFailureLeavesTheLiveZoneUnknownWithoutAnError(t *testing.T) {
 	s, _ := openStore(t)
 	seedSharedName(t, s)
