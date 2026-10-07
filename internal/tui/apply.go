@@ -192,9 +192,10 @@ func (m *Model) applyChanges() tea.Cmd {
 	p.busy = true
 
 	ctx, s, key, newProvider := m.ctx, m.deps.Store, m.key, m.deps.Providers[a.Provider]
+	q := m.serialQueryFor(z)
 
 	return func() tea.Msg {
-		return apply(ctx, s, key, newProvider, a, cs)
+		return apply(ctx, s, key, newProvider, a, cs, q)
 	}
 }
 
@@ -202,7 +203,12 @@ func (m *Model) applyChanges() tea.Cmd {
 // Provider and, when none changed, sends the Changeset and saves the
 // changes the Provider confirmed to the cache, from the Records it
 // returned.
-func apply(ctx context.Context, s *store.Store, key *vault.Key, newProvider provider.Constructor, a dns.Account, cs dns.Changeset) changesAppliedMsg {
+//
+// It stores the Zone's new serial when the Provider reports it. Else, once
+// any change applied, q asks the Zone's nameservers, whose serial is
+// stored only when it is newer than the cached one: they may not have
+// taken the changes yet.
+func apply(ctx context.Context, s *store.Store, key *vault.Key, newProvider provider.Constructor, a dns.Account, cs dns.Changeset, q serialQuery) changesAppliedMsg {
 	msg := changesAppliedMsg{zoneID: cs.Zone.ID, sent: cs}
 
 	p, err := accountProvider(ctx, s, key, newProvider, a)
@@ -236,7 +242,10 @@ func apply(ctx context.Context, s *store.Store, key *vault.Key, newProvider prov
 
 	msg.failed = make([]error, len(cs.Changes))
 
-	var confirmed []dns.Change
+	var (
+		confirmed []dns.Change
+		applied   bool
+	)
 
 	for i, r := range res.Results {
 		if r.Err != nil {
@@ -244,6 +253,8 @@ func apply(ctx context.Context, s *store.Store, key *vault.Key, newProvider prov
 
 			continue
 		}
+
+		applied = true
 
 		c := cs.Changes[i]
 		if c.Kind != dns.ChangeDelete {
@@ -259,6 +270,12 @@ func apply(ctx context.Context, s *store.Store, key *vault.Key, newProvider prov
 		}
 
 		confirmed = append(confirmed, c)
+	}
+
+	if res.Serial == 0 && applied {
+		if serial := q.serial(ctx, cs.Zone.Name); serialNewer(serial, cs.Zone.Serial) {
+			res.Serial = serial
+		}
 	}
 
 	if err := s.SaveApply(ctx, cs.Zone, confirmed, res.Serial); err != nil {

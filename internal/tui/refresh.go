@@ -172,9 +172,10 @@ func (m *Model) startRefreshes() tea.Cmd {
 // refreshCmd Refreshes a Zone from its Provider in the background.
 func (m *Model) refreshCmd(z dns.Zone, a dns.Account, r *zoneRefresh) tea.Cmd {
 	ctx, s, key, newProvider, now := m.ctx, m.deps.Store, m.key, m.deps.Providers[a.Provider], m.deps.now
+	q := m.serialQueryFor(z)
 
 	return func() tea.Msg {
-		stored, ttl, statusErr, err := refresh(ctx, s, key, newProvider, a, z, now)
+		stored, ttl, statusErr, err := refresh(ctx, s, key, newProvider, a, z, q, now)
 
 		return zoneRefreshedMsg{zoneID: z.ID, state: r, zone: stored, ttl: ttl, err: err, statusErr: statusErr}
 	}
@@ -195,10 +196,13 @@ type zoneStatusRead struct {
 // serial and the Refresh time, in one transaction. It returns the Zone as
 // stored, and the TTLs its Provider takes.
 //
+// The serial is the one the Provider reports, else the one q gets from the
+// Zone's nameservers. Without either, the cached serial is kept.
+//
 // A Zone Status that cannot be read does not fail the Refresh: the cached
 // one is kept, and shows as older than the Refresh. Why it could not be
 // read is returned as statusErr.
-func refresh(ctx context.Context, s *store.Store, key *vault.Key, newProvider provider.Constructor, a dns.Account, z dns.Zone, now func() time.Time) (stored dns.Zone, ttl dns.TTLRange, statusErr, err error) {
+func refresh(ctx context.Context, s *store.Store, key *vault.Key, newProvider provider.Constructor, a dns.Account, z dns.Zone, q serialQuery, now func() time.Time) (stored dns.Zone, ttl dns.TTLRange, statusErr, err error) {
 	p, err := accountProvider(ctx, s, key, newProvider, a)
 	if err != nil {
 		return dns.Zone{}, ttl, nil, err
@@ -219,6 +223,10 @@ func refresh(ctx context.Context, s *store.Store, key *vault.Key, newProvider pr
 	rs, err := p.Records(ctx, z)
 	if err != nil {
 		return dns.Zone{}, ttl, nil, err
+	}
+
+	if rs.Serial == 0 {
+		rs.Serial = q.serial(ctx, z.Name)
 	}
 
 	status := <-read
