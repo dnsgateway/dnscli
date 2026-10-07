@@ -183,10 +183,9 @@ func (m *Model) submitTemplateForm() tea.Cmd {
 		return nil
 	}
 
-	// Each modification and deletion is of a row; find it, and refuse to
-	// touch a row that has a pending change.
+	// Each modification and deletion is of a Record of current, so of a
+	// row; take it, and refuse to touch a row that has a pending change.
 	of := make([]recordRow, len(changes))
-	used := map[int]bool{}
 
 	for i, c := range changes {
 		// An addition or a modification must not bring back a Record the
@@ -203,34 +202,20 @@ func (m *Model) submitTemplateForm() tea.Cmd {
 			continue
 		}
 
-		j := -1
-
-		for k, r := range rows {
-			if !used[k] && sameRecord(r.rec, c.Before) {
-				j = k
-
-				break
-			}
-		}
-
-		if j < 0 {
-			f.err = "The Records changed while the Template was open: try again."
-
-			return nil
-		}
-
-		used[j] = true
-		of[i] = rows[j]
+		j := slices.IndexFunc(rows, func(r recordRow) bool { return sameRecord(r.rec, c.Before) })
+		row := rows[j]
+		of[i] = row
+		rows = slices.Delete(rows, j, j+1)
 
 		switch {
-		case rows[j].change >= 0:
-			f.conflicts = append(f.conflicts, describeRecord(z.Name, rows[j].rec))
-		case rows[j].base.ProviderID == "":
+		case row.change >= 0:
+			f.conflicts = append(f.conflicts, describeRecord(z.Name, row.rec))
+		case row.base.ProviderID == "":
 			// Without its Provider ID, it cannot be changed at the Provider.
 			// That alone stops the Template, whatever it conflicts with.
 			f.conflicts = nil
 			f.err = fmt.Sprintf("Nothing was staged: %s would change %s, which has no Provider ID, so dnscli cannot change it.",
-				t.Name, describeRecord(z.Name, rows[j].rec))
+				t.Name, describeRecord(z.Name, row.rec))
 
 			return nil
 		}
