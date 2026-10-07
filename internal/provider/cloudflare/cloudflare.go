@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	cfdns "github.com/cloudflare/cloudflare-go/v7/dns"
@@ -304,20 +305,40 @@ func (p *Provider) Apply(context.Context, dns.Changeset) (provider.ApplyResult, 
 }
 
 // ZoneStatus implements provider.Provider. DNSSEC comes from the Zone's
-// DNSSEC status and HSTS from its security_header setting. A setting the
-// API token lacks the permission to read (HTTP 403) is unknown.
+// DNSSEC status and HSTS from its security_header setting, read
+// concurrently. A setting the API token lacks the permission to read
+// (HTTP 403), or that fails to read while the other one is read, is
+// unknown. It fails only when both reads fail.
 func (p *Provider) ZoneStatus(ctx context.Context, zone dns.Zone) (dns.ZoneStatus, error) {
 	var (
-		status dns.ZoneStatus
-		err    error
+		status  dns.ZoneStatus
+		hstsErr error
+		wg      sync.WaitGroup
 	)
 
-	if status.DNSSEC, err = p.dnssecStatus(ctx, zone); err != nil {
-		return dns.ZoneStatus{}, err
+	wg.Add(1)
+
+	go func() {
+		defer wg.Done()
+
+		status.HSTS, hstsErr = p.hstsStatus(ctx, zone)
+	}()
+
+	dnssec, dnssecErr := p.dnssecStatus(ctx, zone)
+
+	wg.Wait()
+
+	if dnssecErr != nil && hstsErr != nil {
+		return dns.ZoneStatus{}, errors.Join(dnssecErr, hstsErr)
 	}
 
-	if status.HSTS, err = p.hstsStatus(ctx, zone); err != nil {
-		return dns.ZoneStatus{}, err
+	status.DNSSEC = dnssec
+	if dnssecErr != nil {
+		status.DNSSEC = dns.Unknown
+	}
+
+	if hstsErr != nil {
+		status.HSTS = dns.Unknown
 	}
 
 	return status, nil

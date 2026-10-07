@@ -340,8 +340,9 @@ func TestZoneStatusReadsDNSSECAndHSTSFromTheZoneSettings(t *testing.T) {
 				t.Errorf("ZoneStatus = %+v, want %+v", got, tt.want)
 			}
 
+			// The two settings are read concurrently, in either order.
 			want := []string{"/client/v4/zones/z1/dnssec?page=", "/client/v4/zones/z1/settings/security_header?page="}
-			if reqs := api.Requests(); !slices.Equal(reqs, want) {
+			if reqs := slices.Sorted(slices.Values(api.Requests())); !slices.Equal(reqs, want) {
 				t.Errorf("requests = %q, want %q", reqs, want)
 			}
 		})
@@ -371,6 +372,91 @@ func TestZoneStatusSettingsTheTokenMayNotReadAreUnknown(t *testing.T) {
 			got, err := p.ZoneStatus(context.Background(), dns.Zone{Name: "example.com", ProviderID: "z1"})
 			if err != nil {
 				t.Fatalf("ZoneStatus: %v", err)
+			}
+
+			if got != tt.want {
+				t.Errorf("ZoneStatus = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestZoneStatusReadsDNSSECAndHSTSConcurrently(t *testing.T) {
+	// The DNSSEC read is answered only once the HSTS read has arrived.
+	hstsAsked := make(chan struct{})
+
+	api := &cfAPI{dnssec: map[string]string{"z1": "active"}, hsts: map[string]bool{"z1": true}}
+	h := api.handler(t)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/settings/security_header"):
+			close(hstsAsked)
+		case strings.HasSuffix(r.URL.Path, "/dnssec"):
+			select {
+			case <-hstsAsked:
+			case <-time.After(5 * time.Second):
+				writeErrors(w, http.StatusBadRequest, 1004, "HSTS was not read concurrently")
+
+				return
+			}
+		}
+
+		h.ServeHTTP(w, r)
+	}))
+	t.Cleanup(srv.Close)
+
+	p, err := cloudflare.Config{BaseURL: srv.URL + "/client/v4/"}.New(
+		dns.Account{ID: 1, Provider: "cloudflare", Name: "work"}, testToken)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	got, err := p.ZoneStatus(context.Background(), dns.Zone{Name: "example.com", ProviderID: "z1"})
+	if err != nil {
+		t.Fatalf("ZoneStatus: %v", err)
+	}
+
+	if want := (dns.ZoneStatus{DNSSEC: dns.On, HSTS: dns.On}); got != want {
+		t.Errorf("ZoneStatus = %+v, want %+v", got, want)
+	}
+}
+
+func TestAZoneStatusSettingThatFailsToReadIsUnknownOnItsOwn(t *testing.T) {
+	tests := []struct {
+		name    string
+		failing string
+		want    dns.ZoneStatus
+	}{
+		{"DNSSEC", "/client/v4/zones/z1/dnssec", dns.ZoneStatus{DNSSEC: dns.Unknown, HSTS: dns.On}},
+		{"HSTS", "/client/v4/zones/z1/settings/security_header", dns.ZoneStatus{DNSSEC: dns.On, HSTS: dns.Unknown}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			api := &cfAPI{dnssec: map[string]string{"z1": "active"}, hsts: map[string]bool{"z1": true}}
+			h := api.handler(t)
+
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == tt.failing {
+					writeErrors(w, http.StatusBadRequest, 1004, "DNS Validation Error")
+
+					return
+				}
+
+				h.ServeHTTP(w, r)
+			}))
+			t.Cleanup(srv.Close)
+
+			p, err := cloudflare.Config{BaseURL: srv.URL + "/client/v4/"}.New(
+				dns.Account{ID: 1, Provider: "cloudflare", Name: "work"}, testToken)
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+
+			got, err := p.ZoneStatus(context.Background(), dns.Zone{Name: "example.com", ProviderID: "z1"})
+			if err != nil {
+				t.Fatalf("ZoneStatus: %v, want the other setting read", err)
 			}
 
 			if got != tt.want {
