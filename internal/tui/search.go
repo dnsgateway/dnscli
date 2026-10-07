@@ -16,7 +16,10 @@ type search struct {
 
 // startSearch opens the search input in the focused pane, if it has one.
 func (m *Model) startSearch() {
-	if m.focus != paneDomains {
+	switch {
+	case m.focus == paneDomains:
+	case m.focus == paneRecords && m.open != nil:
+	default:
 		return
 	}
 
@@ -79,6 +82,29 @@ func (m *Model) visibleZones() []dns.Zone {
 	for _, z := range m.zones {
 		if strings.Contains(strings.ToLower(z.Name), q) {
 			out = append(out, z)
+		}
+	}
+
+	return out
+}
+
+// visibleRecords are the open Zone's Records the Records pane lists, after
+// its search filter, which matches a Record's name, type or value.
+func (m *Model) visibleRecords() []dns.Record {
+	q := strings.ToLower(m.search[paneRecords].query)
+	if q == "" {
+		return m.records
+	}
+
+	var out []dns.Record
+
+	for _, r := range m.records {
+		for _, field := range []string{r.Name, r.Type, r.Value} {
+			if strings.Contains(strings.ToLower(field), q) {
+				out = append(out, r)
+
+				break
+			}
 		}
 	}
 

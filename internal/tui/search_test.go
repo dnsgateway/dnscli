@@ -68,6 +68,56 @@ func TestBackspaceWidensTheSearch(t *testing.T) {
 	h.assertHides("example.com")
 }
 
+// example.com's seeded Records:
+//
+//	example.com      A      192.0.2.10
+//	example.com      AAAA   2001:db8::10
+//	www.example.com  CNAME  example.com
+
+func TestSlashInRecordsFiltersByName(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	h := newHarness(t, s)
+	h.press("enter", "shift+tab", "/", "w", "w", "w")
+
+	h.assertShows("/www", "www.example.com", "CNAME")
+	h.assertHides("192.0.2.10", "2001:db8::10")
+}
+
+func TestSlashInRecordsFiltersByType(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	h := newHarness(t, s)
+	h.press("enter", "shift+tab", "/", "a", "a", "a", "a")
+
+	h.assertShows("2001:db8::10")
+	h.assertHides("192.0.2.10", "www.example.com")
+}
+
+func TestSlashInRecordsFiltersByValue(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	h := newHarness(t, s)
+	h.press("enter", "shift+tab", "/", "1", "9", "2")
+
+	h.assertShows("192.0.2.10")
+	h.assertHides("2001:db8::10", "www.example.com")
+}
+
+func TestEscClearsTheRecordsSearchAndRestoresAllRecords(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	h := newHarness(t, s)
+	h.press("enter", "shift+tab", "/", "w", "w", "w", "esc")
+
+	h.assertShows("192.0.2.10", "2001:db8::10", "www.example.com")
+	h.assertHides("/www")
+}
+
 func TestKeysTypedIntoSearchDoNotTriggerActions(t *testing.T) {
 	s, _ := openStore(t)
 	seedCache(t, s)

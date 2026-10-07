@@ -206,7 +206,7 @@ func (m *Model) itemCount(p pane) int {
 	case paneAccounts:
 		return len(m.accounts)
 	case paneRecords:
-		return len(m.records)
+		return len(m.visibleRecords())
 	}
 
 	return 0
