@@ -17,6 +17,9 @@ type Deps struct {
 	Store *store.Store
 	// Clock returns the current time. Defaults to time.Now.
 	Clock func() time.Time
+	// After is the Clock's timer: it delivers the time on the channel
+	// once d has passed. Defaults to time.After.
+	After func(d time.Duration) <-chan time.Time
 	// Shortcuts maps keys to actions. Defaults to DefaultShortcutProfile,
 	// which also replaces a profile that fails Validate.
 	Shortcuts *ShortcutProfile
@@ -118,6 +121,14 @@ func (d Deps) shortcuts() (ShortcutProfile, error) {
 	}
 
 	return *d.Shortcuts, nil
+}
+
+func (d Deps) after(wait time.Duration) <-chan time.Time {
+	if d.After == nil {
+		return time.After(wait)
+	}
+
+	return d.After(wait)
 }
 
 func (d Deps) now() time.Time {

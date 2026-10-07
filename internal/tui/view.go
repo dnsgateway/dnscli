@@ -128,6 +128,12 @@ func (m *Model) zoneMarker(z dns.Zone) string {
 		return " "
 	}
 
+	// The cached serial is behind the nameservers' until the poll stores
+	// the new one: not a sign of a stale Zone.
+	if m.serialUpdating(z.ID) {
+		return checkingStyle.Render("…")
+	}
+
 	return m.freshnessOf(z.ID).marker()
 }
 
@@ -338,8 +344,12 @@ func (m *Model) zoneStatus(z dns.Zone) string {
 		parts = append(parts, refresh)
 	} else if !m.serialCheckApplies(z) {
 		parts = append(parts, noSerialCheck)
-	} else if hint := m.freshnessOf(z.ID).describe(z.Serial); hint != "" {
+	} else if hint := m.freshnessOf(z.ID).describe(z.Serial); hint != "" && !m.serialUpdating(z.ID) {
 		parts = append(parts, hint)
+	}
+
+	if m.serialUpdating(z.ID) {
+		parts = append(parts, "serial updating after Apply")
 	}
 
 	if cs := m.pendingOf(z.ID); cs != nil {

@@ -90,6 +90,8 @@ type harness struct {
 	ctx    context.Context
 	quit   bool
 	dbPath string
+	// waits are the waits the model asked its timer for, in order.
+	waits []time.Duration
 }
 
 // openStore opens a Store on a fresh temp file.
@@ -116,7 +118,9 @@ func newHarness(t *testing.T, s *store.Store) *harness {
 }
 
 // newHarnessWith is newHarness with extra dependencies; Store is filled in,
-// and Clock, when unset, stops at testNow.
+// Clock, when unset, stops at testNow, and After, when unset, records each
+// wait and ends it at once, so a test steps through timed work without
+// sleeping.
 func newHarnessWith(t *testing.T, s *store.Store, deps tui.Deps) *harness {
 	t.Helper()
 
@@ -126,6 +130,19 @@ func newHarnessWith(t *testing.T, s *store.Store, deps tui.Deps) *harness {
 	}
 
 	h := &harness{t: t, store: s}
+
+	if deps.After == nil {
+		clock := deps.Clock
+		deps.After = func(d time.Duration) <-chan time.Time {
+			h.waits = append(h.waits, d)
+
+			c := make(chan time.Time, 1)
+			c <- clock().Add(d)
+
+			return c
+		}
+	}
+
 	h.model = tui.New(context.Background(), deps)
 
 	h.run(h.model.Init())

@@ -79,6 +79,9 @@ type Model struct {
 	// serialFailed is when each Zone's nameservers last failed to answer
 	// the query for its serial, by Zone ID.
 	serialFailed map[int64]time.Time
+	// serialPolls are the polls for the new serial after an Apply, by
+	// Zone ID.
+	serialPolls map[int64]*serialPoll
 	// delegations is each zone name's Delegation this session, by nameKey.
 	delegations map[string]*delegation
 	// lookups schedules the Delegation lookups, by nameKey.
@@ -283,6 +286,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.zonesDiscovered(msg)
 	case accountRemovedMsg:
 		return m, m.accountRemoved(msg)
+	case serialPolledMsg:
+		return m, m.serialPolled(msg)
+	case serialSavedMsg:
+		m.serialSaved(msg)
+
+		return m, nil
 	case changesAppliedMsg:
 		return m, m.changesApplied(msg)
 	case recordsLoadedMsg:

@@ -64,8 +64,8 @@ type changesAppliedMsg struct {
 	// conflicts are the Records the Changeset was built from that changed
 	// at the Provider since: nothing was sent.
 	conflicts []conflict
-	// serial is the Zone's SOA serial saved with the applied changes;
-	// zero when the cached one was kept.
+	// serial is the Zone's SOA serial the Provider reported, saved with
+	// the applied changes; zero when it reported none.
 	serial uint32
 }
 
@@ -269,10 +269,9 @@ func (m *Model) applyChanges() tea.Cmd {
 	p.busy = true
 
 	ctx, s, key, newProvider := m.ctx, m.deps.Store, m.key, m.deps.Providers[a.Provider]
-	q := m.serialQueryFor(z)
 
 	return func() tea.Msg {
-		return apply(ctx, s, key, newProvider, a, cs, q)
+		return apply(ctx, s, key, newProvider, a, cs)
 	}
 }
 
@@ -281,11 +280,9 @@ func (m *Model) applyChanges() tea.Cmd {
 // changes the Provider confirmed to the cache, from the Records it
 // returned.
 //
-// It stores the Zone's new serial when the Provider reports it. Else, once
-// any change applied, q asks the Zone's nameservers, whose serial is
-// stored only when it is newer than the cached one: they may not have
-// taken the changes yet.
-func apply(ctx context.Context, s *store.Store, key *vault.Key, newProvider provider.Constructor, a dns.Account, cs dns.Changeset, q serialQuery) changesAppliedMsg {
+// It stores the Zone's new serial when the Provider reports it. Else the
+// model polls the Zone's nameservers for it afterwards (serialPoll).
+func apply(ctx context.Context, s *store.Store, key *vault.Key, newProvider provider.Constructor, a dns.Account, cs dns.Changeset) changesAppliedMsg {
 	msg := changesAppliedMsg{zoneID: cs.Zone.ID, sent: cs}
 
 	p, err := accountProvider(ctx, s, key, newProvider, a)
@@ -322,10 +319,7 @@ func apply(ctx context.Context, s *store.Store, key *vault.Key, newProvider prov
 
 	msg.failed = make([]error, len(cs.Changes))
 
-	var (
-		confirmed []dns.Change
-		applied   bool
-	)
+	var confirmed []dns.Change
 
 	for i, r := range res.Results {
 		if r.Err != nil {
@@ -333,8 +327,6 @@ func apply(ctx context.Context, s *store.Store, key *vault.Key, newProvider prov
 
 			continue
 		}
-
-		applied = true
 
 		c := cs.Changes[i]
 		if c.Kind != dns.ChangeDelete {
@@ -350,12 +342,6 @@ func apply(ctx context.Context, s *store.Store, key *vault.Key, newProvider prov
 		}
 
 		confirmed = append(confirmed, c)
-	}
-
-	if res.Serial == 0 && applied {
-		if serial, _ := q.serial(ctx, cs.Zone.Name); serialNewer(serial, cs.Zone.Serial) {
-			res.Serial = serial
-		}
 	}
 
 	if err := s.SaveApply(ctx, cs.Zone, confirmed, res.Serial); err != nil {
@@ -425,9 +411,16 @@ func (m *Model) changesApplied(msg changesAppliedMsg) tea.Cmd {
 		m.records = applyToRecords(m.records, msg.applied)
 	}
 
-	if msg.saved && msg.serial != 0 {
+	var poll tea.Cmd
+
+	switch {
+	case msg.saved && msg.serial != 0:
 		z.Serial = msg.serial
 		m.updateZone(z)
+	case msg.saved && msg.uncached == 0:
+		// The Provider reported no serial: its nameservers are asked for
+		// it in the background, once they may have taken the changes.
+		poll = m.pollSerial(msg.sent.Zone, slices.Contains(msg.failed, nil))
 	}
 
 	if r, ok := m.refreshes[msg.zoneID]; ok {
@@ -493,7 +486,7 @@ func (m *Model) changesApplied(msg changesAppliedMsg) tea.Cmd {
 		}
 	}
 
-	return nil
+	return poll
 }
 
 // applyConflicted reports an Apply that was not sent because Records it
