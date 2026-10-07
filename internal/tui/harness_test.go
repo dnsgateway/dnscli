@@ -181,7 +181,21 @@ func (h *harness) pressHolding(k string) tea.Cmd {
 	return cmd
 }
 
+// keyMsg builds the key message Bubble Tea would deliver for a key name:
+// "ctrl+a".."ctrl+z" are real control keys, and "alt+" marks any other key
+// as pressed with Alt.
 func keyMsg(k string) tea.KeyMsg {
+	if rest, ok := strings.CutPrefix(k, "alt+"); ok {
+		msg := keyMsg(rest)
+		msg.Alt = true
+
+		return msg
+	}
+
+	if rest, ok := strings.CutPrefix(k, "ctrl+"); ok && len(rest) == 1 && rest[0] >= 'a' && rest[0] <= 'z' {
+		return tea.KeyMsg{Type: tea.KeyCtrlA + tea.KeyType(rest[0]-'a')}
+	}
+
 	switch k {
 	case "tab":
 		return tea.KeyMsg{Type: tea.KeyTab}
@@ -197,8 +211,6 @@ func keyMsg(k string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyUp}
 	case "down":
 		return tea.KeyMsg{Type: tea.KeyDown}
-	case "ctrl+c":
-		return tea.KeyMsg{Type: tea.KeyCtrlC}
 	default:
 		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}
 	}

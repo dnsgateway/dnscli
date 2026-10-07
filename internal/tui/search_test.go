@@ -192,6 +192,19 @@ func TestSearchKeyComesFromTheShortcutProfile(t *testing.T) {
 	h.assertHides("example.com")
 }
 
+func TestControlKeysAreNotTypedIntoSearch(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	profile := profileWith(tui.ActionSearch, "ctrl+f")
+
+	h := newHarnessWith(t, s, tui.Deps{Shortcuts: &profile})
+	h.press("ctrl+f", "t", "w", "o", "ctrl+f")
+
+	h.assertShows("/two", "two.tv")
+	h.assertHides("ctrl", "example.com")
+}
+
 func TestHelpOverlayListsTheSearchKey(t *testing.T) {
 	s, _ := openStore(t)
 	seedCache(t, s)
