@@ -37,10 +37,16 @@ func (m *Model) View() string {
 	)
 	right := box("Records", m.recordLines(rightW-2, bodyH-2), rightW, bodyH, m.focus == paneRecords)
 
-	return lipgloss.JoinVertical(lipgloss.Left,
+	view := lipgloss.JoinVertical(lipgloss.Left,
 		lipgloss.JoinHorizontal(lipgloss.Top, left, right),
 		ansi.Truncate(m.statusLine(), m.width, "…"),
 	)
+
+	if m.help {
+		view = overlay(view, m.helpView(), m.width, m.height)
+	}
+
+	return view
 }
 
 func (m *Model) domainLines(w, h int) []string {

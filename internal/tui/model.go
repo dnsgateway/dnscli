@@ -33,6 +33,7 @@ type Model struct {
 	width, height int
 	focus         pane
 	cursor        [paneCount]int
+	help          bool // help overlay shown
 
 	loaded   bool
 	err      error
@@ -129,7 +130,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // handle performs a user Action.
 func (m *Model) handle(a Action) tea.Cmd {
+	if m.help {
+		// The help overlay captures every Action except closing it.
+		switch a {
+		case ActionHelp, ActionClose:
+			m.help = false
+		}
+
+		return nil
+	}
+
 	switch a {
+	case ActionHelp:
+		m.help = true
 	case ActionNextPane:
 		m.focus = (m.focus + 1) % paneCount
 	case ActionPrevPane:
