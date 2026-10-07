@@ -50,6 +50,24 @@ func TestEnterOpensTheHighlightedMatchAndKeepsTheFilter(t *testing.T) {
 	h.assertShows("192.0.2.10", "/ex")
 }
 
+func TestBackspaceWidensTheSearch(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	h := newHarness(t, s)
+	h.press("/", "e", "x", "x")
+	h.assertHides("example.com")
+
+	h.press("backspace")
+	h.assertShows("/ex", "example.com", "example.org")
+	h.assertHides("/exx", "two.tv")
+
+	// Still typing.
+	h.press("a", "m", "p", "l", "e", ".", "o")
+	h.assertShows("example.org")
+	h.assertHides("example.com")
+}
+
 func TestKeysTypedIntoSearchDoNotTriggerActions(t *testing.T) {
 	s, _ := openStore(t)
 	seedCache(t, s)
