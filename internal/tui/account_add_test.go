@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
@@ -114,6 +115,99 @@ func TestAddingTheFirstAccountEnrollsAPassphraseAndDiscoversItsZones(t *testing.
 	}
 
 	assertNotInDatabase(t, path, token)
+}
+
+const passphrase = "correct horse"
+
+// enrollFirstAccount adds cloudflare.work in a first session, enrolling the
+// passphrase, and returns the Store for a later session to start on.
+func enrollFirstAccount(t *testing.T) (*store.Store, string) {
+	t.Helper()
+
+	s, path := openStore(t)
+	h := newAccountHarness(t, s, workZones())
+	h.fillAddAccount("work", token)
+	h.typeText(passphrase)
+	h.press("tab")
+	h.typeText(passphrase)
+	h.press("enter")
+	h.assertShows("work.example")
+
+	return s, path
+}
+
+func TestALaterSessionStartsSealedAndBrowsingNeverPrompts(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	f := workZones()
+	h := newAccountHarness(t, s, f)
+
+	h.assertShows("sealed · read-only", "cloudflare.work", "work.example")
+
+	h.press("enter", "j", "/", "w", "esc", "tab", "enter", "*", "tab", "?", "esc")
+
+	h.assertHides("Unseal", "Passphrase")
+	h.assertShows("sealed · read-only")
+
+	if calls := f.Calls(); len(calls) != 0 {
+		t.Fatalf("browsing called the Provider: %+v", calls)
+	}
+}
+
+func TestAWrongPassphraseIsReportedAndTheSessionStaysSealed(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	f := fake.New().AddZone(dns.Zone{Name: "home.example", ProviderID: "zh1"})
+	h := newAccountHarness(t, s, f)
+
+	h.fillAddAccount("home", "home-token")
+	h.assertShows("Unseal", "Passphrase", "needs your Account secrets")
+	h.assertHides("Choose a passphrase")
+
+	h.typeText("wrong horse")
+	h.press("enter")
+
+	h.assertShows("Wrong passphrase", "still sealed", "sealed · read-only")
+
+	if accounts, _ := s.Accounts(context.Background()); len(accounts) != 1 {
+		t.Fatalf("an Account was stored while sealed: %+v", accounts)
+	}
+
+	if calls := f.Calls(); len(calls) != 0 {
+		t.Fatalf("the Provider was called while sealed: %+v", calls)
+	}
+
+	h.typeText(passphrase)
+	h.press("enter")
+
+	h.assertShows("unsealed", "cloudflare.home", "home.example")
+	h.assertHides("Wrong passphrase")
+}
+
+func TestOneUnsealPerSessionUnlocksEveryAccount(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	f := fake.New()
+	h := newAccountHarness(t, s, f)
+
+	h.fillAddAccount("home", "home-token")
+	h.typeText(passphrase)
+	h.press("enter")
+	h.assertShows("cloudflare.home", "unsealed")
+
+	h.fillAddAccount("lab", "lab-token")
+
+	h.assertHides("Unseal ", "Passphrase")
+	h.assertShows("cloudflare.lab")
+
+	var tokens []string
+
+	for _, c := range f.Calls() {
+		if c.Op == fake.OpNew {
+			tokens = append(tokens, c.Account.Label()+"="+c.Token)
+		}
+	}
+
+	if want := []string{"cloudflare.home=home-token", "cloudflare.lab=lab-token"}; !slices.Equal(tokens, want) {
+		t.Fatalf("Provider built with %v, want %v", tokens, want)
+	}
 }
 
 // assertNotInDatabase checks that text appears nowhere in the database
