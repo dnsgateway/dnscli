@@ -179,16 +179,16 @@ const (
 )
 
 // liveness says whether z is the Live Zone: whether its expected
-// nameservers are exactly the delegated ones, compared as sets. It is
-// unknown while the Delegation is not resolved, or when the Zone's
-// expected nameservers are not cached.
+// nameservers are exactly the delegated ones, compared as sets; the cache
+// load made them a nameSet. It is unknown while the Delegation is not
+// resolved, or when the Zone's expected nameservers are not cached.
 func (m *Model) liveness(z dns.Zone) liveness {
 	d, ok := m.delegations[nameKey(z.Name)]
 	if !ok || d.state != lookupDone || len(z.Nameservers) == 0 {
 		return liveUnknown
 	}
 
-	if slices.Equal(nameSet(z.Nameservers), d.ns) {
+	if slices.Equal(z.Nameservers, d.ns) {
 		return liveYes
 	}
 
@@ -269,7 +269,7 @@ func (m *Model) delegationView() string {
 		if len(z.Nameservers) == 0 {
 			lines = append(lines, hintStyle.Render(fmt.Sprintf("    not cached: re-list the Account (%s) to read them", m.keys.keysFor(ActionRelistZones))))
 		} else {
-			lines = append(lines, "    "+strings.Join(nameSet(z.Nameservers), ", "))
+			lines = append(lines, "    "+strings.Join(z.Nameservers, ", "))
 		}
 	}
 

@@ -165,6 +165,14 @@ func (m *Model) loadCache() tea.Msg {
 		return cacheLoadedMsg{err: err}
 	}
 
+	// The session compares nameservers as nameSet sets: normalise them
+	// once here rather than on every View.
+	for i, z := range zones {
+		if len(z.Nameservers) > 0 {
+			zones[i].Nameservers = nameSet(z.Nameservers)
+		}
+	}
+
 	slots, err := m.deps.Store.KeySlots(m.ctx)
 	if err != nil {
 		return cacheLoadedMsg{err: err}
