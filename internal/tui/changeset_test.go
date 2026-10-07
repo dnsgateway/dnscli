@@ -17,9 +17,17 @@ import (
 func openValidated(t *testing.T, f *fake.Provider) *harness {
 	t.Helper()
 
+	return openValidatedShowing(t, f, "203.0.113.20")
+}
+
+// openValidatedShowing is openValidated for a Zone scripted in f with
+// other Records, one of which shows text.
+func openValidatedShowing(t *testing.T, f *fake.Provider, text string) *harness {
+	t.Helper()
+
 	h, _, _ := newRefreshHarness(t, f)
 	h.press("enter", "shift+tab")
-	h.assertShows("validated this session", "203.0.113.20")
+	h.assertShows("validated this session", text)
 
 	return h
 }

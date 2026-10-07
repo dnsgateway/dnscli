@@ -43,7 +43,7 @@ func (m *Model) recordRows() []recordRow {
 
 	if cs != nil {
 		for i, c := range cs.Changes {
-			if c.Kind != dns.ChangeAdd {
+			if c.Kind != dns.ChangeAdd && c.Before.ProviderID != "" {
 				byID[c.Before.ProviderID] = i
 			}
 		}
@@ -54,7 +54,7 @@ func (m *Model) recordRows() []recordRow {
 	for _, r := range m.records {
 		row := recordRow{rec: r, base: r, change: -1}
 
-		if i, ok := byID[r.ProviderID]; ok {
+		if i, ok := byID[r.ProviderID]; ok && r.ProviderID != "" {
 			row.change, row.kind = i, cs.Changes[i].Kind
 			shown[i] = true
 
@@ -180,6 +180,14 @@ func (m *Model) recordAction(a Action) tea.Cmd {
 	row, ok := m.highlightedRecord()
 	if !ok {
 		m.notice = notice{text: "Highlight a Record first.", err: true}
+
+		return nil
+	}
+
+	// Without its Provider ID a cached Record cannot be told apart from
+	// another, nor changed at the Provider.
+	if row.kind != dns.ChangeAdd && row.base.ProviderID == "" {
+		m.notice = notice{text: fmt.Sprintf("This %s Record has no Provider ID, so dnscli cannot change it.", row.rec.Type), err: true}
 
 		return nil
 	}

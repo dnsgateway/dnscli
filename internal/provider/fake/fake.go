@@ -49,6 +49,7 @@ type Provider struct {
 	nameservers []string
 	fail        map[Op]error
 	failChange  func(dns.Change) error
+	withhold    bool
 	calls       []Call
 	nextID      int
 }
@@ -112,6 +113,15 @@ func (p *Provider) FailChanges(fn func(dns.Change) error) {
 	defer p.mu.Unlock()
 
 	p.failChange = fn
+}
+
+// WithholdRecords makes Apply report no stored Record for the changes it
+// confirms, like a Provider whose API does not return them.
+func (p *Provider) WithholdRecords(on bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.withhold = on
 }
 
 // Calls returns the calls made so far, in order.
@@ -199,6 +209,10 @@ func (p *Provider) Apply(_ context.Context, cs dns.Changeset) (provider.ApplyRes
 
 		if r.Err == nil {
 			records, r.Record, r.Err = p.applyChange(records, c)
+		}
+
+		if p.withhold {
+			r.Record = dns.Record{}
 		}
 
 		res.Results = append(res.Results, r)

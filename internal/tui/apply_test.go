@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
+	"github.com/sergelogvinov/dnscli/internal/provider/fake"
 )
 
 // cachedRecordsOf returns a Zone's cached Records, read back through the Store.
@@ -63,4 +65,50 @@ func TestAPartialApplyCachesOnlyTheConfirmedChangesAndKeepsTheFailedOnesPending(
 
 	h.assertShows("Applied 1 change to work.example.")
 	h.assertHides("10 mail.work.example", "pending change")
+}
+
+func TestAnAdditionTheProviderReturnsNoRecordForIsNotCachedAndTheZoneNeedsARefresh(t *testing.T) {
+	f := refreshZones()
+	h := openValidated(t, f)
+	h.addRecord("TXT", "_one", "first", "300")
+	h.addRecord("TXT", "_two", "second", "300")
+
+	f.WithholdRecords(true)
+	h.press("p", "enter")
+
+	h.assertHides("Changes to work.example", "pending change")
+	h.assertShows("Applied 2 changes to work.example", "Refresh (r) needed")
+
+	// Without the IDs the Provider gave them, the additions cannot be cached.
+	if got := cachedRecordsOf(t, h, "work.example"); !reflect.DeepEqual(got, liveRecords) {
+		t.Fatalf("cached Records = %+v, want %+v", got, liveRecords)
+	}
+
+	// The Zone is no longer validated: it must be Refreshed before the next edit.
+	h.assertMarker("work.example", "✗")
+	h.press("i")
+	h.assertShows("work.example is a Stale Zone")
+	h.assertHides("Add Record")
+
+	h.press("r")
+	h.assertMarker("work.example", "✓")
+	h.assertShows("_one.work.example", "_two.work.example")
+}
+
+func TestARecordWithoutAProviderIDCannotBeChanged(t *testing.T) {
+	f := fake.New().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial},
+		dns.Record{Type: "TXT", Name: "work.example", Value: "first", TTL: 300},
+		dns.Record{Type: "TXT", Name: "work.example", Value: "second", TTL: 300})
+	h := openValidatedShowing(t, f, "second")
+
+	for _, key := range []string{"d", "e"} {
+		h.press(key)
+
+		h.assertShows("has no Provider ID")
+		h.assertHides("Edit Record")
+
+		if n := strings.Count(h.view(), "- work.example"); n != 0 {
+			t.Fatalf("%d rows are marked for deletion, want none:\n%s", n, h.view())
+		}
+	}
 }

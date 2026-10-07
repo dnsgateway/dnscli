@@ -266,6 +266,10 @@ func (s *Store) SaveRefresh(ctx context.Context, z dns.Zone, records []dns.Recor
 	return z, nil
 }
 
+// ErrNoRecordID is returned by SaveApply for a change whose Record has no
+// Provider record ID: the cache could not tell it from other such Records.
+var ErrNoRecordID = errors.New("the Record has no Provider record ID")
+
 // SaveApply updates a Zone's cached Records with the changes its Provider
 // confirmed applying, in one transaction. Each change's After is the
 // Record as the Provider stored it: an addition inserts it, a modification
@@ -275,6 +279,8 @@ func (s *Store) SaveRefresh(ctx context.Context, z dns.Zone, records []dns.Recor
 //
 // Like SaveRefresh, it returns ErrZoneNotCached unless the cache still has
 // that very Zone: the same ID, Account, zone name and Provider zone ID.
+// It returns ErrNoRecordID, and saves nothing, when a change's Record has
+// no Provider record ID to find it by.
 func (s *Store) SaveApply(ctx context.Context, z dns.Zone, applied []dns.Change) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -294,6 +300,12 @@ func (s *Store) SaveApply(ctx context.Context, z dns.Zone, applied []dns.Change)
 
 	if err != nil {
 		return fmt.Errorf("save apply: %w", err)
+	}
+
+	for _, c := range applied {
+		if (c.Kind != dns.ChangeAdd && c.Before.ProviderID == "") || (c.Kind != dns.ChangeDelete && c.After.ProviderID == "") {
+			return fmt.Errorf("save apply: %w", ErrNoRecordID)
+		}
 	}
 
 	for _, c := range applied {

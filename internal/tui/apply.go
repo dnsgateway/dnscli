@@ -36,6 +36,9 @@ type changesAppliedMsg struct {
 	// saved is false when the Provider confirmed changes that the cache
 	// could not take.
 	saved bool
+	// uncached counts the confirmed changes left out of the cache because
+	// the Provider returned no ID for their Record.
+	uncached int
 }
 
 // maxPreviewLines bounds how many changes the preview lists.
@@ -166,6 +169,14 @@ func apply(ctx context.Context, s *store.Store, key *vault.Key, newProvider prov
 			c.After = storedRecord(c, r.Record)
 		}
 
+		// A Record without its Provider ID cannot be told apart from
+		// other such Records: a Refresh must cache it.
+		if (c.Kind != dns.ChangeAdd && c.Before.ProviderID == "") || (c.Kind != dns.ChangeDelete && c.After.ProviderID == "") {
+			msg.uncached++
+
+			continue
+		}
+
 		confirmed = append(confirmed, c)
 	}
 
@@ -232,9 +243,11 @@ func (m *Model) changesApplied(msg changesAppliedMsg) tea.Cmd {
 
 	if r, ok := m.refreshes[msg.zoneID]; ok {
 		switch {
-		case msg.saved:
+		case msg.saved && msg.uncached == 0:
 			// The cache holds what the Provider confirmed: still validated.
 			r.validated = true
+		case msg.saved:
+			*r = zoneRefresh{err: errors.New("the Provider did not return the IDs of the Records it stored")}
 		case !errors.Is(msg.err, store.ErrZoneNotCached):
 			*r = zoneRefresh{err: fmt.Errorf("the applied changes could not be cached: %w", msg.err)}
 		}
@@ -265,6 +278,9 @@ func (m *Model) changesApplied(msg changesAppliedMsg) tea.Cmd {
 	case !msg.saved:
 		m.notice = notice{text: fmt.Sprintf("Applied %s to %s, but could not cache them: %v. Refresh the Zone (%s).",
 			changeCount(applied), z.Name, msg.err, m.keys.keysFor(ActionRefresh)), err: true}
+	case msg.uncached > 0:
+		m.notice = notice{text: fmt.Sprintf("Applied %s to %s, but the Provider did not return the IDs of %d to cache: Refresh (%s) needed.",
+			changeCount(applied), z.Name, msg.uncached, m.keys.keysFor(ActionRefresh)), err: true}
 	default:
 		m.notice = notice{text: fmt.Sprintf("Applied %s to %s.", changeCount(applied), z.Name)}
 	}
