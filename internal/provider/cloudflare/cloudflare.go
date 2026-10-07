@@ -23,6 +23,9 @@ const DefaultBaseURL = "https://api.cloudflare.com/client/v4/"
 // zonesPerPage is the largest page Cloudflare serves for Zones.
 const zonesPerPage = 50
 
+// recordsPerPage keeps a Refresh of a large Zone to a few requests.
+const recordsPerPage = 1000
+
 // Config configures the Cloudflare Provider. Its zero value talks to the
 // real Cloudflare API.
 type Config struct {
@@ -124,7 +127,44 @@ func listAll[T any](ctx context.Context, perPage int, list func(...option.Reques
 
 // Records implements provider.Provider.
 func (p *Provider) Records(ctx context.Context, zone dns.Zone) (provider.RecordSet, error) {
-	return provider.RecordSet{}, errors.New("todo")
+	// ZoneID is a param.Field, which only cloudflare-go's root package can
+	// build with F(); importing that package compiles the whole SDK.
+	var params cfdns.RecordListParams
+	params.ZoneID.Value, params.ZoneID.Present = zone.ProviderID, true
+
+	all, err := listAll(ctx, recordsPerPage, func(opts ...option.RequestOption) (*pagination.V4PagePaginationArray[cfdns.RecordResponse], error) {
+		return p.records.List(ctx, params, opts...)
+	})
+	if err != nil {
+		return provider.RecordSet{}, err
+	}
+
+	records := make([]dns.Record, 0, len(all))
+	for _, r := range all {
+		records = append(records, toRecord(r))
+	}
+
+	return provider.RecordSet{Records: records}, nil
+}
+
+// proxiedExtra is the Record extra holding Cloudflare's proxy flag, "true"
+// or "false". It is set only on Records Cloudflare can proxy.
+const proxiedExtra = "proxied"
+
+func toRecord(r cfdns.RecordResponse) dns.Record {
+	rec := dns.Record{
+		ProviderID: r.ID,
+		Type:       string(r.Type),
+		Name:       r.Name,
+		Value:      r.Content,
+		TTL:        uint32(r.TTL),
+	}
+
+	if r.Proxiable {
+		rec.Extras = map[string]string{proxiedExtra: strconv.FormatBool(r.Proxied)}
+	}
+
+	return rec
 }
 
 // Apply implements provider.Provider.

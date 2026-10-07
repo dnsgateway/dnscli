@@ -6,6 +6,7 @@ package cloudflare_test
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -178,5 +179,68 @@ func TestZonesListsEveryPage(t *testing.T) {
 
 	if got := strings.Join(api.requests, " "); got != "/client/v4/zones?page=1 /client/v4/zones?page=2" {
 		t.Errorf("requests = %s, want one per page", got)
+	}
+}
+
+func cfRecord(id, typ, name, content string, ttl int, proxiable, proxied bool) map[string]any {
+	return map[string]any{
+		"id":          id,
+		"type":        typ,
+		"name":        name,
+		"content":     content,
+		"ttl":         ttl,
+		"proxiable":   proxiable,
+		"proxied":     proxied,
+		"comment":     nil,
+		"tags":        []any{},
+		"settings":    map[string]any{},
+		"meta":        map[string]any{},
+		"created_on":  "2024-01-02T03:04:05.000000Z",
+		"modified_on": "2024-01-02T03:04:05.000000Z",
+	}
+}
+
+func TestRecordsListsEveryPageWithTheProxyFlag(t *testing.T) {
+	api := &cfAPI{
+		pageSize: 2,
+		zones:    []map[string]any{cfZone("z1", "example.com")},
+		records: map[string][]map[string]any{"z1": {
+			cfRecord("r1", "A", "example.com", "192.0.2.1", 1, true, true),
+			cfRecord("r2", "CNAME", "www.example.com", "example.com", 300, true, false),
+			cfRecord("r3", "TXT", "example.com", "\"v=spf1 -all\"", 3600, false, false),
+		}},
+	}
+	p := newProvider(t, api)
+
+	rs, err := p.Records(context.Background(), dns.Zone{Name: "example.com", ProviderID: "z1"})
+	if err != nil {
+		t.Fatalf("Records: %v", err)
+	}
+
+	want := []dns.Record{
+		{ProviderID: "r1", Type: "A", Name: "example.com", Value: "192.0.2.1", TTL: 1, Extras: map[string]string{"proxied": "true"}},
+		{ProviderID: "r2", Type: "CNAME", Name: "www.example.com", Value: "example.com", TTL: 300, Extras: map[string]string{"proxied": "false"}},
+		{ProviderID: "r3", Type: "TXT", Name: "example.com", Value: "\"v=spf1 -all\"", TTL: 3600},
+	}
+	assertRecords(t, rs.Records, want)
+
+	if got := strings.Join(api.requests, " "); !strings.Contains(got, "/client/v4/zones/z1/dns_records?page=2") {
+		t.Errorf("requests = %s, want the second page of Records", got)
+	}
+}
+
+func assertRecords(t *testing.T, got, want []dns.Record) {
+	t.Helper()
+
+	if len(got) != len(want) {
+		t.Fatalf("got %d Records, want %d:\n got %+v\nwant %+v", len(got), len(want), got, want)
+	}
+
+	for i := range want {
+		g, w := got[i], want[i]
+		if g.ProviderID != w.ProviderID || g.Type != w.Type || g.Name != w.Name ||
+			g.Value != w.Value || g.TTL != w.TTL || !maps.Equal(g.Extras, w.Extras) {
+			t.Errorf("Record %d = %+v, want %+v", i, g, w)
+		}
 	}
 }
