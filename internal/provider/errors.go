@@ -25,7 +25,8 @@ var (
 type APIError struct {
 	// Provider is the Provider type, e.g. "cloudflare".
 	Provider string
-	// StatusCode is the HTTP status.
+	// StatusCode is the HTTP status; zero for an error the Provider reported
+	// inside a successful answer, which the message then leaves out.
 	StatusCode int
 	// Messages are the Provider's own error messages.
 	Messages []string
@@ -40,13 +41,21 @@ type APIError struct {
 func (e *APIError) Error() string {
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "%s: ", e.Provider)
+	var head []string
 
 	if kind := e.kind(); kind != nil {
-		fmt.Fprintf(&b, "%v ", kind)
+		head = append(head, kind.Error())
 	}
 
-	fmt.Fprintf(&b, "(HTTP %d %s)", e.StatusCode, http.StatusText(e.StatusCode))
+	if e.StatusCode != 0 {
+		head = append(head, fmt.Sprintf("(HTTP %d %s)", e.StatusCode, http.StatusText(e.StatusCode)))
+	}
+
+	b.WriteString(e.Provider)
+
+	if len(head) > 0 {
+		fmt.Fprintf(&b, ": %s", strings.Join(head, " "))
+	}
 
 	if len(e.Messages) > 0 {
 		fmt.Fprintf(&b, ": %s", strings.Join(e.Messages, "; "))

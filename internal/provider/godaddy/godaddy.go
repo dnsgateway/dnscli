@@ -292,7 +292,7 @@ func toRecord(zone string, w wireRecord) dns.Record {
 		name = underscore(w.Service) + "." + underscore(w.Protocol) + "." + name
 	}
 
-	rec := dns.Record{Type: w.Type, Name: absolute(zone, name), Value: w.Data, TTL: w.TTL}
+	rec := dns.Record{Type: w.Type, Name: provider.AbsoluteName(zone, name), Value: w.Data, TTL: w.TTL}
 
 	// GoDaddy writes a target at the Zone apex as "@".
 	target := w.Data
@@ -319,18 +319,6 @@ func withID(r dns.Record) dns.Record {
 	r.ProviderID = fmt.Sprintf("%s %s %d %s", r.Type, strings.ToLower(r.Name), r.TTL, r.Value)
 
 	return r
-}
-
-// absolute turns a name relative to a Zone into an absolute one.
-func absolute(zone, name string) string {
-	switch {
-	case name == "@" || name == "":
-		return zone
-	case strings.HasSuffix(name, ".@"):
-		return strings.TrimSuffix(name, "@") + zone
-	}
-
-	return name + "." + zone
 }
 
 // underscore puts the leading underscore on an SRV service or protocol.

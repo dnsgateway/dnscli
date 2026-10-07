@@ -49,6 +49,14 @@ type ncAPI struct {
 	domains []ncDomain
 	hosts   map[string][]ncHost // by domain
 
+	// servedPageSize, when set, is the page size getList serves whatever
+	// PageSize asks for.
+	servedPageSize int
+	// noPaging leaves the Paging element out of getList answers.
+	noPaging bool
+	// stuckPage makes getList answer page 1 whatever Page asks for.
+	stuckPage bool
+
 	// fail, when it returns errors, answers the request with Status="ERROR".
 	fail func(command string) []ncError
 
@@ -131,8 +139,12 @@ func (api *ncAPI) getList(w http.ResponseWriter, r *http.Request) {
 		size = 20
 	}
 
+	if api.servedPageSize > 0 {
+		size = api.servedPageSize
+	}
+
 	page, err := strconv.Atoi(r.Form.Get("Page"))
-	if err != nil || page < 1 {
+	if err != nil || page < 1 || api.stuckPage {
 		page = 1
 	}
 
@@ -147,8 +159,12 @@ func (api *ncAPI) getList(w http.ResponseWriter, r *http.Request) {
 			len(d.Name), d.Name, d.OurDNS)
 	}
 
-	fmt.Fprintf(&b, `</DomainGetListResult><Paging><TotalItems>%d</TotalItems><CurrentPage>%d</CurrentPage><PageSize>%d</PageSize></Paging>`,
-		len(api.domains), page, size)
+	b.WriteString(`</DomainGetListResult>`)
+
+	if !api.noPaging {
+		fmt.Fprintf(&b, `<Paging><TotalItems>%d</TotalItems><CurrentPage>%d</CurrentPage><PageSize>%d</PageSize></Paging>`,
+			len(api.domains), page, size)
+	}
 
 	writeOK(w, "namecheap.domains.getList", b.String())
 }
@@ -326,6 +342,76 @@ func TestZonesAreTheDomainsOnNamecheapDNSOnEveryPage(t *testing.T) {
 	}
 }
 
+// domains returns n domains on Namecheap DNS, and their names.
+func domains(n int) ([]ncDomain, []string) {
+	var (
+		ds    []ncDomain
+		names []string
+	)
+
+	for i := range n {
+		ds = append(ds, ncDomain{Name: fmt.Sprintf("d%03d.example", i), OurDNS: true})
+		names = append(names, ds[i].Name)
+	}
+
+	return ds, names
+}
+
+func zoneNames(zones []dns.Zone) []string {
+	var out []string
+	for _, z := range zones {
+		out = append(out, z.Name)
+	}
+
+	return out
+}
+
+func TestZonesReadEveryPageWhenTheAnswerHasNoTotal(t *testing.T) {
+	api := &ncAPI{noPaging: true}
+
+	var want []string
+	api.domains, want = domains(150)
+
+	zones, err := newProvider(t, api).Zones(context.Background())
+	if err != nil {
+		t.Fatalf("Zones: %v", err)
+	}
+
+	if got := zoneNames(zones); !reflect.DeepEqual(got, want) {
+		t.Errorf("Zones = %d zones, want %d", len(got), len(want))
+	}
+}
+
+func TestZonesReadEveryPageWhenNamecheapServesSmallerPages(t *testing.T) {
+	api := &ncAPI{servedPageSize: 20}
+
+	var want []string
+	api.domains, want = domains(45)
+
+	zones, err := newProvider(t, api).Zones(context.Background())
+	if err != nil {
+		t.Fatalf("Zones: %v", err)
+	}
+
+	if got := zoneNames(zones); !reflect.DeepEqual(got, want) {
+		t.Errorf("Zones = %d zones, want %d", len(got), len(want))
+	}
+}
+
+func TestZonesFailWhenTheListAnswersTheSamePageTwice(t *testing.T) {
+	api := &ncAPI{stuckPage: true}
+	api.domains, _ = domains(250)
+
+	_, err := newProvider(t, api).Zones(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "same page") {
+		t.Errorf("err = %v, want the same page answered twice", err)
+	}
+
+	if got := len(api.Commands()); got != 2 {
+		t.Errorf("requests = %d, want 2: stop at the repeated page", got)
+	}
+}
+
 func TestZonesOfAnAccountWithNoDomainsAreNone(t *testing.T) {
 	api := &ncAPI{}
 
@@ -406,6 +492,67 @@ func TestRecordsHaveAbsoluteNamesThePriorityFirstAndTheHostID(t *testing.T) {
 	}
 }
 
+func TestRecordsKeepTheRootTargetAsADot(t *testing.T) {
+	api := &ncAPI{hosts: map[string][]ncHost{"example.com": {
+		{ID: "31", Name: "@", Type: "MX", Address: ".", MXPref: 0, TTL: 1800},
+		{ID: "32", Name: "nil", Type: "CNAME", Address: ".", TTL: 1800},
+		{ID: "33", Name: "sub", Type: "NS", Address: ".", TTL: 1800},
+		{ID: "34", Name: "alias", Type: "ALIAS", Address: ".", TTL: 300},
+	}}}
+
+	set, err := newProvider(t, api).Records(context.Background(), example)
+	if err != nil {
+		t.Fatalf("Records: %v", err)
+	}
+
+	var got []string
+	for _, r := range set.Records {
+		got = append(got, r.Type+" "+r.Value)
+	}
+
+	if want := []string{"MX 0 .", "CNAME .", "NS .", "ALIAS ."}; !reflect.DeepEqual(got, want) {
+		t.Errorf("Records = %q, want %q", got, want)
+	}
+}
+
+func TestSRVRecordsPutTheMXPrefPriorityFirst(t *testing.T) {
+	api := &ncAPI{hosts: map[string][]ncHost{"example.com": {
+		{ID: "41", Name: "_sip._tcp", Type: "SRV", Address: "5 5060 sip.example.net.", MXPref: 10, TTL: 1800},
+		{ID: "42", Name: "_xmpp._tcp.chat", Type: "SRV", Address: "0 5222 xmpp.example.net", MXPref: 20, TTL: 1800},
+		{ID: "43", Name: "_none._tcp", Type: "SRV", Address: "0 0 .", MXPref: 0, TTL: 1800},
+	}}}
+
+	set, err := newProvider(t, api).Records(context.Background(), example)
+	if err != nil {
+		t.Fatalf("Records: %v", err)
+	}
+
+	want := []dns.Record{
+		{ProviderID: "41", Type: "SRV", Name: "_sip._tcp.example.com", Value: "10 5 5060 sip.example.net", TTL: 1800},
+		{ProviderID: "42", Type: "SRV", Name: "_xmpp._tcp.chat.example.com", Value: "20 0 5222 xmpp.example.net", TTL: 1800},
+		{ProviderID: "43", Type: "SRV", Name: "_none._tcp.example.com", Value: "0 0 0 .", TTL: 1800},
+	}
+	if !reflect.DeepEqual(set.Records, want) {
+		t.Errorf("Records =\n%v\nwant\n%v", set.Records, want)
+	}
+}
+
+func TestRecordsRefuseAnAnswerOverTheSizeLimit(t *testing.T) {
+	huge := strings.Repeat("a", 5<<20)
+	api := &ncAPI{hosts: map[string][]ncHost{"example.com": {
+		{ID: "51", Name: "@", Type: "TXT", Address: huge, TTL: 1800},
+	}}}
+
+	set, err := newProvider(t, api).Records(context.Background(), example)
+	if err == nil {
+		t.Fatalf("Records = %d records, want an error: the answer is over 4 MiB", len(set.Records))
+	}
+
+	if !strings.Contains(err.Error(), "namecheap") {
+		t.Errorf("err = %v, want it to name namecheap", err)
+	}
+}
+
 func TestErrorAnswersAreTypedErrorsWithTheirNumbers(t *testing.T) {
 	cases := []struct {
 		name string
@@ -420,6 +567,11 @@ func TestErrorAnswersAreTypedErrorsWithTheirNumbers(t *testing.T) {
 		{"unknown domain", []ncError{{2019166, "Domain not found"}}, provider.ErrNotFound, "2019166: Domain not found"},
 		{"not the Account's domain", []ncError{{2016166, "Domain is not associated with your account"}}, provider.ErrNotFound, "2016166: Domain is not associated with your account"},
 		{"rate limited", []ncError{{500000, "Too many requests"}}, provider.ErrRateLimited, "500000: Too many requests"},
+		{"domain not on Namecheap DNS", []ncError{{2030288, "Cannot complete this command as this domain is not using proper DNS servers"}}, provider.ErrNotFound, "2030288: Cannot complete this command"},
+		{"unknown number, too many requests", []ncError{{9999901, "Too many requests"}}, provider.ErrRateLimited, "9999901: Too many requests"},
+		{"unknown number, IP not whitelisted", []ncError{{9999902, "Invalid request IP: 198.51.100.7"}}, provider.ErrUnauthorized, "9999902: Invalid request IP"},
+		{"unknown number, IP not on the whitelist", []ncError{{9999903, "Your IP is not whitelisted"}}, provider.ErrUnauthorized, "9999903: Your IP is not whitelisted"},
+		{"unknown number, bad API key", []ncError{{9999904, "API Key is invalid or API access has not been enabled"}}, provider.ErrUnauthorized, "9999904: API Key is invalid"},
 		{"other", []ncError{{3050900, "Unknown error"}, {2030280, "TLD is not supported"}}, nil, "3050900: Unknown error; 2030280: TLD is not supported"},
 	}
 
@@ -449,6 +601,10 @@ func TestErrorAnswersAreTypedErrorsWithTheirNumbers(t *testing.T) {
 
 			if !strings.Contains(err.Error(), c.msg) {
 				t.Errorf("err = %q, want it to hold %q", err, c.msg)
+			}
+
+			if strings.Contains(err.Error(), "HTTP") {
+				t.Errorf("err = %q, want no HTTP status: the error came in the answer", err)
 			}
 		})
 	}

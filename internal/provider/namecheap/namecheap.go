@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -26,6 +27,10 @@ const DefaultBaseURL = "https://api.namecheap.com/xml.response"
 
 // DefaultRequestTimeout bounds each request to the Namecheap API.
 const DefaultRequestTimeout = 30 * time.Second
+
+// maxResponseBytes bounds an answer dnscli reads; a larger one is an
+// error. A page of 100 domains or a domain's whole host list is far less.
+const maxResponseBytes = 4 << 20
 
 // domainsPerPage is the largest page Namecheap serves for domains.
 const domainsPerPage = 100
@@ -110,6 +115,7 @@ type getListResult struct {
 	Domains []wireDomain `xml:"DomainGetListResult>Domain"`
 	Paging  struct {
 		TotalItems int `xml:"TotalItems"`
+		PageSize   int `xml:"PageSize"`
 	} `xml:"Paging"`
 }
 
@@ -117,7 +123,11 @@ type getListResult struct {
 // Namecheap's own DNS. A domain delegated elsewhere has no host list
 // Namecheap will read.
 func (p *Provider) Zones(ctx context.Context) ([]dns.Zone, error) {
-	var out []dns.Zone
+	var (
+		out  []dns.Zone
+		read int
+		last []wireDomain
+	)
 
 	for page := 1; ; page++ {
 		res, err := call[getListResult](ctx, p, "namecheap.domains.getList", url.Values{
@@ -128,16 +138,35 @@ func (p *Provider) Zones(ctx context.Context) ([]dns.Zone, error) {
 			return nil, err
 		}
 
+		if len(res.Domains) == 0 {
+			return out, nil
+		}
+
+		if slices.Equal(res.Domains, last) {
+			return nil, errors.New("namecheap: the domain list answered the same page twice")
+		}
+
 		for _, d := range res.Domains {
 			if d.IsOurDNS {
 				out = append(out, dns.Zone{Name: d.Name, ProviderID: d.Name})
 			}
 		}
 
-		// A short page is the last; so is the page that reaches the total.
-		if len(res.Domains) < domainsPerPage || page*domainsPerPage >= res.Paging.TotalItems {
+		// A page shorter than the size Namecheap says it served (or, if it
+		// does not say, than asked for) is the last; so is the page that
+		// reaches the total, when Namecheap reports one.
+		read += len(res.Domains)
+
+		size := res.Paging.PageSize
+		if size <= 0 {
+			size = domainsPerPage
+		}
+
+		if len(res.Domains) < size || (res.Paging.TotalItems > 0 && read >= res.Paging.TotalItems) {
 			return out, nil
 		}
+
+		last = res.Domains
 	}
 }
 
@@ -176,29 +205,38 @@ func (p *Provider) Records(ctx context.Context, zone dns.Zone) (provider.RecordS
 }
 
 // toRecord turns a host into a Record of a Zone, with an absolute name, its
-// HostId as the Provider ID, and its Value in presentation form: the MX
-// priority first, and host names without the trailing dot. A Namecheap-only
+// HostId as the Provider ID, and its Value in presentation form: the MX and
+// SRV priority first, and host names without the trailing dot. A Namecheap-only
 // type, such as URL or MXE, keeps its type name and address.
 func toRecord(zone string, h wireHost) dns.Record {
-	rec := dns.Record{ProviderID: h.HostID, Type: h.Type, Name: absolute(zone, h.Name), Value: h.Address, TTL: h.TTL}
+	rec := dns.Record{ProviderID: h.HostID, Type: h.Type, Name: provider.AbsoluteName(zone, h.Name), Value: h.Address, TTL: h.TTL}
+	pref := strconv.FormatUint(uint64(h.MXPref), 10)
 
 	switch h.Type {
 	case "CNAME", "NS", "ALIAS":
-		rec.Value = strings.TrimSuffix(h.Address, ".")
+		rec.Value = target(h.Address)
 	case "MX":
-		rec.Value = strconv.FormatUint(uint64(h.MXPref), 10) + " " + strings.TrimSuffix(h.Address, ".")
+		rec.Value = pref + " " + target(h.Address)
+	case "SRV":
+		// Namecheap keeps the SRV priority in MXPref, as for MX, and the
+		// rest in the address as "weight port target". Any other shape is
+		// kept as given.
+		if f := strings.Fields(h.Address); len(f) == 3 {
+			rec.Value = pref + " " + f[0] + " " + f[1] + " " + target(f[2])
+		}
 	}
 
 	return rec
 }
 
-// absolute turns a host name relative to a Zone into an absolute one.
-func absolute(zone, name string) string {
-	if name == "@" || name == "" {
-		return zone
+// target is a host name target without its trailing dot. The root, ".",
+// stays "." (a null MX reads "0 .").
+func target(name string) string {
+	if name == "." {
+		return name
 	}
 
-	return name + "." + zone
+	return strings.TrimSuffix(name, ".")
 }
 
 // splitDomain splits a domain into Namecheap's SLD, its first label, and
@@ -276,13 +314,19 @@ func call[T any](ctx context.Context, p *Provider, command string, params url.Va
 	}
 	defer func() { _ = res.Body.Close() }()
 
-	data, err := io.ReadAll(res.Body)
+	// A non-2xx answer is an error page, not XML: its body is not read.
+	if res.StatusCode < 200 || res.StatusCode > 299 {
+		return zero, &provider.APIError{Provider: "namecheap", StatusCode: res.StatusCode}
+	}
+
+	// One byte past the limit tells a cut-off answer from one that fits.
+	data, err := io.ReadAll(io.LimitReader(res.Body, maxResponseBytes+1))
 	if err != nil {
 		return zero, fmt.Errorf("namecheap: %w", err)
 	}
 
-	if res.StatusCode < 200 || res.StatusCode > 299 {
-		return zero, &provider.APIError{Provider: "namecheap", StatusCode: res.StatusCode}
+	if len(data) > maxResponseBytes {
+		return zero, fmt.Errorf("namecheap: the %s answer is over %d bytes", command, maxResponseBytes)
 	}
 
 	var body apiResponse[T]
