@@ -142,6 +142,18 @@ func TestSearchWithoutMatchesSaysSo(t *testing.T) {
 	h.assertHides("No matching Zones")
 }
 
+func TestRecordsSearchNeedsRecordsToSearch(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	h := newHarness(t, s)
+	h.press("j", "enter", "shift+tab", "/", "q")
+
+	if !h.quit {
+		t.Fatal("with no Records to search, q should still quit")
+	}
+}
+
 func TestKeysTypedIntoSearchDoNotTriggerActions(t *testing.T) {
 	s, _ := openStore(t)
 	seedCache(t, s)

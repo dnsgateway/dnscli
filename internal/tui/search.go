@@ -18,7 +18,7 @@ type search struct {
 func (m *Model) startSearch() {
 	switch {
 	case m.focus == paneDomains:
-	case m.focus == paneRecords && m.open != nil:
+	case m.focus == paneRecords && len(m.records) > 0:
 	default:
 		return
 	}
