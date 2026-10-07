@@ -6,13 +6,18 @@ package cloudflare_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
 	"github.com/sergelogvinov/dnscli/internal/provider"
@@ -30,8 +35,25 @@ type cfAPI struct {
 	export   map[string]string           // BIND export by zone ID
 	// fail, when set, answers every request instead of the scripted data.
 	fail http.HandlerFunc
+
+	mu sync.Mutex
 	// requests records each request's path and page.
 	requests []string
+}
+
+func (api *cfAPI) record(request string) {
+	api.mu.Lock()
+	defer api.mu.Unlock()
+
+	api.requests = append(api.requests, request)
+}
+
+// Requests returns each request's path and page, in order.
+func (api *cfAPI) Requests() []string {
+	api.mu.Lock()
+	defer api.mu.Unlock()
+
+	return slices.Clone(api.requests)
 }
 
 func newProvider(t *testing.T, api *cfAPI) provider.Provider {
@@ -71,7 +93,7 @@ func (api *cfAPI) handler(t *testing.T) http.Handler {
 	})
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		api.requests = append(api.requests, r.URL.Path+"?page="+r.URL.Query().Get("page"))
+		api.record(r.URL.Path+"?page="+r.URL.Query().Get("page"))
 
 		if got := r.Header.Get("Authorization"); got != "Bearer "+testToken {
 			t.Errorf("Authorization = %q, want the Account's API token", got)
@@ -177,7 +199,7 @@ func TestZonesListsEveryPage(t *testing.T) {
 		t.Fatalf("Zones = %+v, want %+v", zones, want)
 	}
 
-	if got := strings.Join(api.requests, " "); got != "/client/v4/zones?page=1 /client/v4/zones?page=2" {
+	if got := strings.Join(api.Requests(), " "); got != "/client/v4/zones?page=1 /client/v4/zones?page=2" {
 		t.Errorf("requests = %s, want one per page", got)
 	}
 }
@@ -199,6 +221,143 @@ func TestNameserversAreTheOnesCloudflareAssignedToTheAccountsZones(t *testing.T)
 	if !slices.Equal(ns, want) {
 		t.Errorf("Nameservers = %v, want %v", ns, want)
 	}
+}
+
+func TestRateLimitIsATypedErrorWithoutWaiting(t *testing.T) {
+	api := &cfAPI{fail: func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", "120")
+		writeErrors(w, http.StatusTooManyRequests, 971, "Please wait and consider throttling your request speed")
+	}}
+	p := newProvider(t, api)
+
+	_, err := p.Zones(context.Background())
+
+	if !errors.Is(err, provider.ErrRateLimited) {
+		t.Fatalf("err = %v, want provider.ErrRateLimited", err)
+	}
+
+	var apiErr *provider.APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("err = %T %v, want a *provider.APIError", err, err)
+	}
+
+	if apiErr.RetryAfter != 120*time.Second {
+		t.Errorf("RetryAfter = %v, want the server's 2m0s", apiErr.RetryAfter)
+	}
+
+	if len(api.Requests()) != 1 {
+		t.Errorf("made %d requests, want 1: a rate limit is reported, not waited out", len(api.Requests()))
+	}
+}
+
+func TestEdgeRateLimitWithoutAJSONBodyIsATypedError(t *testing.T) {
+	api := &cfAPI{fail: func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=UTF-8")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte("error code: 1015"))
+	}}
+	p := newProvider(t, api)
+
+	_, err := p.Records(context.Background(), dns.Zone{Name: "example.com", ProviderID: "z1"})
+
+	if !errors.Is(err, provider.ErrRateLimited) {
+		t.Fatalf("err = %v, want provider.ErrRateLimited", err)
+	}
+}
+
+func TestErrorResponsesAreTypedErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		status  int
+		code    int
+		message string
+		is      error
+	}{
+		{"invalid token", http.StatusUnauthorized, 1000, "Invalid API Token", provider.ErrUnauthorized},
+		{"missing permission", http.StatusForbidden, 9109, "Unauthorized to access requested resource", provider.ErrUnauthorized},
+		{"unknown zone", http.StatusNotFound, 7003, "Could not route to /zones/nope/dns_records, perhaps your object identifier is invalid?", provider.ErrNotFound},
+		{"server error", http.StatusInternalServerError, 10001, "Internal server error", nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			api := &cfAPI{fail: func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Retry-After", "0") // keep retries of server errors quick
+				writeErrors(w, tt.status, tt.code, tt.message)
+			}}
+			p := newProvider(t, api)
+
+			_, err := p.Records(context.Background(), dns.Zone{Name: "example.com", ProviderID: "nope"})
+
+			var apiErr *provider.APIError
+			if !errors.As(err, &apiErr) {
+				t.Fatalf("err = %T %v, want a *provider.APIError", err, err)
+			}
+
+			if apiErr.StatusCode != tt.status {
+				t.Errorf("StatusCode = %d, want %d", apiErr.StatusCode, tt.status)
+			}
+
+			if tt.is != nil && !errors.Is(err, tt.is) {
+				t.Errorf("err = %v, want it to be %v", err, tt.is)
+			}
+
+			for _, sentinel := range []error{provider.ErrRateLimited, provider.ErrUnauthorized, provider.ErrNotFound} {
+				if sentinel != tt.is && errors.Is(err, sentinel) {
+					t.Errorf("err = %v, should not be %v", err, sentinel)
+				}
+			}
+
+			if !strings.Contains(err.Error(), tt.message) {
+				t.Errorf("err = %q, want Cloudflare's message %q", err, tt.message)
+			}
+		})
+	}
+}
+
+func TestErrorsAreNotPrintedToTheTerminal(t *testing.T) {
+	api := &cfAPI{fail: func(w http.ResponseWriter, _ *http.Request) {
+		writeErrors(w, http.StatusForbidden, 9109, "Unauthorized to access requested resource")
+	}}
+	p := newProvider(t, api)
+
+	output := captureOutput(t, func() {
+		if _, err := p.Zones(context.Background()); err == nil {
+			t.Error("Zones succeeded, want an error")
+		}
+	})
+
+	if output != "" {
+		t.Errorf("printed %q to the terminal, want nothing", output)
+	}
+}
+
+// captureOutput returns what fn writes to stdout and stderr.
+func captureOutput(t *testing.T, fn func()) string {
+	t.Helper()
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr := os.Stdout, os.Stderr
+	os.Stdout, os.Stderr = w, w
+
+	func() {
+		defer func() { os.Stdout, os.Stderr = stdout, stderr }()
+
+		fn()
+	}()
+
+	_ = w.Close()
+
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return string(out)
 }
 
 func cfRecord(id, typ, name, content string, ttl int, proxiable, proxied bool) map[string]any {
@@ -243,7 +402,7 @@ func TestRecordsListsEveryPageWithTheProxyFlag(t *testing.T) {
 	}
 	assertRecords(t, rs.Records, want)
 
-	if got := strings.Join(api.requests, " "); !strings.Contains(got, "/client/v4/zones/z1/dns_records?page=2") {
+	if got := strings.Join(api.Requests(), " "); !strings.Contains(got, "/client/v4/zones/z1/dns_records?page=2") {
 		t.Errorf("requests = %s, want the second page of Records", got)
 	}
 }

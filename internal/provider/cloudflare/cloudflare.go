@@ -57,6 +57,7 @@ func (c Config) New(_ dns.Account, token string) (provider.Provider, error) {
 	opts := []option.RequestOption{
 		option.WithBaseURL(baseURL),
 		option.WithAPIToken(token),
+		option.WithMiddleware(reportRateLimits),
 	}
 	if c.HTTPClient != nil {
 		opts = append(opts, option.WithHTTPClient(c.HTTPClient))
@@ -108,12 +109,15 @@ func listAll[T any](ctx context.Context, perPage int, list func(...option.Reques
 			return nil, err
 		}
 
+		var raw *http.Response
+
 		res, err := list(
 			option.WithQuery("page", strconv.Itoa(page)),
 			option.WithQuery("per_page", strconv.Itoa(perPage)),
+			option.WithResponseInto(&raw),
 		)
 		if err != nil {
-			return nil, err
+			return nil, apiError(err, raw)
 		}
 
 		out = append(out, res.Result...)
@@ -172,9 +176,11 @@ func (p *Provider) serial(ctx context.Context, zone dns.Zone) (uint32, error) {
 	var params cfdns.RecordExportParams
 	params.ZoneID.Value, params.ZoneID.Present = zone.ProviderID, true
 
-	export, err := p.records.Export(ctx, params)
+	var raw *http.Response
+
+	export, err := p.records.Export(ctx, params, option.WithResponseInto(&raw))
 	if err != nil {
-		return 0, err
+		return 0, apiError(err, raw)
 	}
 
 	if export == nil {
