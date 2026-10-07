@@ -6,6 +6,7 @@ package tui
 
 import (
 	"context"
+	"slices"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -167,6 +168,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		zoneID, accountID := m.cursorIDs()
+
 		m.loaded = true
 		m.err = msg.err
 		m.accounts = msg.accounts
@@ -174,8 +177,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.slots = msg.slots
 		m.shared = sharedNames(msg.zones)
 		m.refilter(paneDomains)
-		// A reload, such as after Zone discovery, may change the lists:
-		// keep every cursor inside its list.
+		// A reload, such as after Zone discovery, may reorder the lists:
+		// keep each cursor on its Zone or Account, else inside its list.
+		if i := slices.IndexFunc(m.visible, func(z dns.Zone) bool { return z.ID == zoneID }); i >= 0 {
+			m.cursor[paneDomains] = i
+		}
+
+		if i := slices.IndexFunc(m.accounts, func(a dns.Account) bool { return a.ID == accountID }); i >= 0 {
+			m.cursor[paneAccounts] = i
+		}
+
 		for p := range paneCount {
 			m.cursor[p] = min(m.cursor[p], max(m.itemCount(p)-1, 0))
 		}
@@ -272,6 +283,20 @@ func (m *Model) move(delta int) {
 	}
 
 	m.cursor[m.focus] = min(max(m.cursor[m.focus]+delta, 0), n-1)
+}
+
+// cursorIDs returns the IDs of the Zone and the Account under the cursors;
+// zero for an empty list.
+func (m *Model) cursorIDs() (zoneID, accountID int64) {
+	if i := m.cursor[paneDomains]; i < len(m.visible) {
+		zoneID = m.visible[i].ID
+	}
+
+	if i := m.cursor[paneAccounts]; i < len(m.accounts) {
+		accountID = m.accounts[i].ID
+	}
+
+	return zoneID, accountID
 }
 
 func (m *Model) itemCount(p pane) int {
