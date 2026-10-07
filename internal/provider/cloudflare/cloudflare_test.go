@@ -481,6 +481,82 @@ func TestApplyDeletesARecord(t *testing.T) {
 	}
 }
 
+func TestApplySendsDeletionsFirstAndReportsInChangesetOrder(t *testing.T) {
+	// A CNAME replaces an A Record of the same name: deleted first, the A
+	// Record does not collide with it.
+	api := &cfAPI{records: map[string][]map[string]any{"z1": {
+		cfRecord("r1", "A", "www.example.com", "192.0.2.1", 300, true, false),
+		cfRecord("r2", "TXT", "example.com", "\"v=1\"", 300, false, false),
+	}}}
+	p := newProvider(t, api)
+
+	add := dns.Change{Kind: dns.ChangeAdd, After: dns.Record{Type: "CNAME", Name: "www.example.com", Value: "example.com", TTL: 300}}
+	modify := dns.Change{Kind: dns.ChangeModify,
+		Before: dns.Record{ProviderID: "r2", Type: "TXT", Name: "example.com", Value: "\"v=1\"", TTL: 300},
+		After:  dns.Record{ProviderID: "r2", Type: "TXT", Name: "example.com", Value: "\"v=2\"", TTL: 300}}
+	del := dns.Change{Kind: dns.ChangeDelete, Before: dns.Record{ProviderID: "r1", Type: "A", Name: "www.example.com", Value: "192.0.2.1", TTL: 300}}
+
+	res, err := p.Apply(context.Background(), dns.Changeset{Zone: dns.Zone{Name: "example.com", ProviderID: "z1"}, Changes: []dns.Change{add, modify, del}})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	var methods []string
+	for _, w := range api.Writes() {
+		methods = append(methods, w.Method)
+	}
+
+	if want := []string{"DELETE", "PATCH", "POST"}; !slices.Equal(methods, want) {
+		t.Errorf("writes = %v, want %v", methods, want)
+	}
+
+	assertResults(t, res, []provider.ChangeResult{
+		{Change: add, Record: dns.Record{ProviderID: "new1", Type: "CNAME", Name: "www.example.com", Value: "example.com", TTL: 300, Extras: map[string]string{"proxied": "false"}}},
+		{Change: modify, Record: modify.After},
+		{Change: del},
+	})
+}
+
+func TestApplyKeepsGoingAfterAChangeFails(t *testing.T) {
+	api := &cfAPI{
+		records: map[string][]map[string]any{"z1": {}},
+		reject: func(_ string, body map[string]any) string {
+			if body["name"] == "bad.example.com" {
+				return "Content for A record is invalid."
+			}
+
+			return ""
+		},
+	}
+	p := newProvider(t, api)
+
+	good1 := dns.Change{Kind: dns.ChangeAdd, After: dns.Record{Type: "TXT", Name: "one.example.com", Value: "\"1\"", TTL: 300}}
+	bad := dns.Change{Kind: dns.ChangeAdd, After: dns.Record{Type: "A", Name: "bad.example.com", Value: "192.0.2.1", TTL: 300}}
+	good2 := dns.Change{Kind: dns.ChangeAdd, After: dns.Record{Type: "TXT", Name: "two.example.com", Value: "\"2\"", TTL: 300}}
+	gone := dns.Change{Kind: dns.ChangeDelete, Before: dns.Record{ProviderID: "r9", Type: "TXT", Name: "gone.example.com", Value: "\"9\"", TTL: 300}}
+
+	res, err := p.Apply(context.Background(), dns.Changeset{Zone: dns.Zone{Name: "example.com", ProviderID: "z1"}, Changes: []dns.Change{good1, bad, good2, gone}})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	assertResults(t, res, []provider.ChangeResult{
+		{Change: good1, Record: dns.Record{ProviderID: "new1", Type: "TXT", Name: "one.example.com", Value: "\"1\"", TTL: 300}},
+		{Change: bad, Err: errors.New("Content for A record is invalid.")},
+		{Change: good2, Record: dns.Record{ProviderID: "new2", Type: "TXT", Name: "two.example.com", Value: "\"2\"", TTL: 300}},
+		{Change: gone, Err: errors.New("Record does not exist.")},
+	})
+
+	if !errors.Is(res.Results[3].Err, provider.ErrNotFound) {
+		t.Errorf("err = %v, want provider.ErrNotFound", res.Results[3].Err)
+	}
+
+	var apiErr *provider.APIError
+	if !errors.As(res.Results[1].Err, &apiErr) || apiErr.StatusCode != http.StatusBadRequest {
+		t.Errorf("err = %v, want a *provider.APIError with HTTP 400", res.Results[1].Err)
+	}
+}
+
 func assertWrites(t *testing.T, api *cfAPI, want []write) {
 	t.Helper()
 

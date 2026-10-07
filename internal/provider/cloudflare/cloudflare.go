@@ -265,16 +265,42 @@ func decodeRecord(data []byte) (dns.Record, error) {
 	return rec, nil
 }
 
-// Apply implements provider.Provider. Each change is its own API call.
+// Apply implements provider.Provider. Each change is its own API call,
+// made one at a time: deletions first, then modifications, then additions,
+// so a Record that takes the place of another does not collide with it. A
+// failed change does not stop the others. The results are in Changeset
+// order, and carry no serial: Cloudflare's API does not report it.
 func (p *Provider) Apply(ctx context.Context, cs dns.Changeset) (provider.ApplyResult, error) {
 	res := provider.ApplyResult{Results: make([]provider.ChangeResult, len(cs.Changes))}
 
-	for i, c := range cs.Changes {
+	order := make([]int, len(cs.Changes))
+	for i := range order {
+		order[i] = i
+	}
+
+	slices.SortStableFunc(order, func(a, b int) int {
+		return applyRank(cs.Changes[a].Kind) - applyRank(cs.Changes[b].Kind)
+	})
+
+	for _, i := range order {
+		c := cs.Changes[i]
 		rec, err := p.applyChange(ctx, cs.Zone, c)
 		res.Results[i] = provider.ChangeResult{Change: c, Record: rec, Err: err}
 	}
 
 	return res, nil
+}
+
+// applyRank is when Apply makes a change of a kind: lowest first.
+func applyRank(k dns.ChangeKind) int {
+	switch k {
+	case dns.ChangeDelete:
+		return 0
+	case dns.ChangeModify:
+		return 1
+	default:
+		return 2
+	}
 }
 
 // applyChange makes one change and returns the Record as Cloudflare
