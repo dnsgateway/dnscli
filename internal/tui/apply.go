@@ -218,15 +218,18 @@ func apply(ctx context.Context, s *store.Store, key *vault.Key, newProvider prov
 		return msg
 	}
 
-	live, err := p.Records(ctx, cs.Zone)
-	if err != nil {
-		msg.err = fmt.Errorf("re-check the Records: %w", err)
+	// Additions are built from no Record: only the others are re-checked.
+	if slices.ContainsFunc(cs.Changes, func(c dns.Change) bool { return c.Kind != dns.ChangeAdd }) {
+		live, err := p.Records(ctx, cs.Zone)
+		if err != nil {
+			msg.err = fmt.Errorf("re-check the Records: %w", err)
 
-		return msg
-	}
+			return msg
+		}
 
-	if msg.conflicts = conflicts(cs.Changes, live.Records); msg.conflicts != nil {
-		return msg
+		if msg.conflicts = conflicts(cs.Changes, live.Records); msg.conflicts != nil {
+			return msg
+		}
 	}
 
 	res, err := p.Apply(ctx, cs)

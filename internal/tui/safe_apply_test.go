@@ -26,6 +26,21 @@ func TestApplyReChecksTheAffectedRecordsBeforeSending(t *testing.T) {
 	h.assertShows("Applied 3 changes to work.example.")
 }
 
+func TestAnApplyOfOnlyAdditionsDoesNotReCheckTheZone(t *testing.T) {
+	f := refreshZones()
+	h := openValidated(t, f)
+	h.addRecord("TXT", "_verify", "token-123", "3600")
+	before := recordsCalls(f, "zw1")
+
+	h.press("p", "enter")
+
+	h.assertShows("Applied 1 change to work.example.")
+
+	if n := recordsCalls(f, "zw1") - before; n != 0 {
+		t.Fatalf("Records calls = %d, want none: an addition is built from no Record", n)
+	}
+}
+
 func TestAnApplyWhoseRecordsChangedAtTheProviderIsNotSentAndRefreshesTheZone(t *testing.T) {
 	changed := liveRecords[0]
 	changed.Value = "203.0.113.21"
