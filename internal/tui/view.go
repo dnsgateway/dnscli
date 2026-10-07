@@ -25,11 +25,17 @@ var (
 
 // View renders the three panes and the status bar.
 func (m *Model) View() string {
+	// Panes keep their minimum sizes while the terminal has room for them,
+	// and shrink to fit it when it does not.
 	leftW := max(m.width/4, 24)
-	rightW := max(m.width-leftW, 20)
-	bodyH := max(m.height-1, 6)
-	domainsH := max(bodyH*2/3, 3)
-	accountsH := max(bodyH-domainsH, 3)
+	if m.width < leftW+20 {
+		leftW = m.width / 2
+	}
+
+	rightW := m.width - leftW
+	bodyH := max(m.height-1, 0)
+	domainsH := min(max(bodyH*2/3, 3), bodyH)
+	accountsH := bodyH - domainsH
 
 	left := lipgloss.JoinVertical(lipgloss.Left,
 		box("Domains", m.domainLines(leftW-2, domainsH-2), leftW, domainsH, m.focus == paneDomains),
@@ -46,7 +52,20 @@ func (m *Model) View() string {
 		view = overlay(view, m.helpView(), m.width, m.height)
 	}
 
-	return view
+	// Terminals too small to draw the panes in get a clipped view.
+	return clip(view, m.width, m.height)
+}
+
+// clip cuts s to at most w columns and h lines.
+func clip(s string, w, h int) string {
+	lines := strings.Split(s, "\n")
+	lines = lines[:min(len(lines), max(h, 0))]
+
+	for i, l := range lines {
+		lines[i] = ansi.Truncate(l, w, "")
+	}
+
+	return strings.Join(lines, "\n")
 }
 
 func (m *Model) domainLines(w, h int) []string {
