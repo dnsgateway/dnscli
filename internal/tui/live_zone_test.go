@@ -208,14 +208,65 @@ func TestZoneDiscoveryCachesTheNameserversEachZoneExpects(t *testing.T) {
 func TestZonesListedWithoutNameserversExpectTheAccountsNameservers(t *testing.T) {
 	f := fake.New().
 		AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1"}).
-		AddZone(dns.Zone{Name: "work.test", ProviderID: "zw2", Nameservers: []string{"ada.ns.cloudflare.com", "bob.ns.cloudflare.com"}})
+		AddZone(dns.Zone{Name: "work.test", ProviderID: "zw2"})
 	f.SetNameservers(cruzDee...)
 
-	h, _ := addWorkAccount(t, f, &fakeResolver{ns: map[string][]string{"work.example": cruzDee, "work.test": cruzDee}})
+	h, _ := addWorkAccount(t, f, &fakeResolver{ns: map[string][]string{
+		"work.example": cruzDee,
+		"work.test":    {"ada.ns.cloudflare.com", "bob.ns.cloudflare.com"},
+	}})
 
 	h.assertLive("work.example", true)
-	// A Zone's own nameservers outrank the Account's.
 	h.assertLive("work.test", false)
+}
+
+// nameserversCalls counts how often the Account's nameservers were asked for.
+func nameserversCalls(f *fake.Provider) int {
+	n := 0
+
+	for _, c := range f.Calls() {
+		if c.Op == fake.OpNameservers {
+			n++
+		}
+	}
+
+	return n
+}
+
+func TestAZoneListedWithoutNameserversExpectsTheOnesItsAccountsOtherZonesShare(t *testing.T) {
+	f := fake.New().
+		AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1"}).
+		AddZone(dns.Zone{Name: "work.test", ProviderID: "zw2", Nameservers: cruzDee}).
+		AddZone(dns.Zone{Name: "work.net", ProviderID: "zw3", Nameservers: []string{"DEE.ns.cloudflare.com.", "cruz.ns.cloudflare.com"}})
+
+	h, _ := addWorkAccount(t, f, &fakeResolver{ns: map[string][]string{"work.example": cruzDee}})
+
+	h.assertLive("work.example", true)
+
+	// The listed Zones already say which nameservers the Account expects.
+	if n := nameserversCalls(f); n != 0 {
+		t.Fatalf("Nameservers calls = %d, want none", n)
+	}
+}
+
+func TestAZoneListedWithoutNameserversInAnAccountWithSeveralSetsHasNoneExpected(t *testing.T) {
+	adaBob := []string{"ada.ns.cloudflare.com", "bob.ns.cloudflare.com"}
+	f := fake.New().
+		AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1"}).
+		AddZone(dns.Zone{Name: "work.test", ProviderID: "zw2", Nameservers: cruzDee}).
+		AddZone(dns.Zone{Name: "work.net", ProviderID: "zw3", Nameservers: adaBob})
+	f.SetNameservers(append(adaBob, cruzDee...)...)
+
+	h, _ := addWorkAccount(t, f, &fakeResolver{ns: map[string][]string{"work.example": cruzDee}})
+
+	h.assertLive("work.example", false)
+
+	h.press("N")
+	h.assertShows("Delegation of work.example", "not cached", "Live Zone unknown")
+
+	if n := nameserversCalls(f); n != 0 {
+		t.Fatalf("Nameservers calls = %d, want none", n)
+	}
 }
 
 func TestAFailureToReadTheAccountsNameserversStillCachesItsZones(t *testing.T) {

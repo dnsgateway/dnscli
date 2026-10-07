@@ -239,17 +239,33 @@ func discover(ctx context.Context, s *store.Store, key *vault.Key, newProvider p
 }
 
 // expectAccountNameservers gives each Zone the Provider listed without
-// nameservers the ones its Account expects, asking the Provider only when
-// such a Zone exists. Not knowing them leaves the Live Zone unknown, so a
-// failure here does not fail the discovery.
+// nameservers the ones its Account expects. When other Zones were listed
+// with nameservers, those are the Account's, provided they all share one
+// set; an Account with several sets leaves them unknown. When none was,
+// the Provider is asked. Not knowing them leaves the Live Zone unknown, so
+// a failure here does not fail the discovery.
 func expectAccountNameservers(ctx context.Context, p provider.Provider, zones []dns.Zone) {
 	if !slices.ContainsFunc(zones, func(z dns.Zone) bool { return len(z.Nameservers) == 0 }) {
 		return
 	}
 
-	ns, err := p.Nameservers(ctx)
-	if err != nil {
-		return
+	var ns []string
+
+	for _, z := range zones {
+		switch {
+		case len(z.Nameservers) == 0:
+		case ns == nil:
+			ns = z.Nameservers
+		case !slices.Equal(nameSet(z.Nameservers), nameSet(ns)):
+			return // several sets: which one a Zone expects is unknown
+		}
+	}
+
+	if ns == nil {
+		var err error
+		if ns, err = p.Nameservers(ctx); err != nil {
+			return
+		}
 	}
 
 	for i := range zones {
