@@ -117,7 +117,13 @@ var (
 	_ provider.Provider  = (*Provider)(nil)
 	_ provider.TTLLimits = (*Provider)(nil)
 	_ provider.ProxyFlag = (*Provider)(nil)
+	_ provider.AutoTTL   = (*Provider)(nil)
 )
+
+// AutoTTL implements provider.AutoTTL: Cloudflare reads TTL 1 as automatic.
+func (p *Provider) AutoTTL() bool {
+	return true
+}
 
 // TTLRange implements provider.TTLLimits: below Enterprise plans, a
 // Cloudflare TTL is at least 60 seconds, besides 1 for automatic.

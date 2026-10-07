@@ -53,6 +53,7 @@ type Provider struct {
 	noSerial    bool
 	ttlRange    []uint32 // min, max; nil when not scripted
 	proxiable   []string // nil when not scripted
+	autoTTL     bool
 	calls       []Call
 	nextID      int
 }
@@ -106,6 +107,15 @@ func (p *Provider) SetProxiableTypes(types ...string) {
 	p.proxiable = slices.Clone(types)
 }
 
+// SetAutoTTL makes the Providers New builds read TTL 1 as automatic,
+// through provider.AutoTTL. Unscripted, they do not implement it.
+func (p *Provider) SetAutoTTL(on bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.autoTTL = on
+}
+
 // withOptions is the fake with its scripted optional interfaces.
 type withOptions struct {
 	*Provider
@@ -122,6 +132,14 @@ func (p withOptions) TTLRange() (minTTL, maxTTL uint32) {
 	}
 
 	return p.ttlRange[0], p.ttlRange[1]
+}
+
+// AutoTTL implements provider.AutoTTL.
+func (p withOptions) AutoTTL() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	return p.autoTTL
 }
 
 // ProxiableTypes implements provider.ProxyFlag.
@@ -217,7 +235,7 @@ func (p *Provider) New(account dns.Account, token string) (provider.Provider, er
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if p.ttlRange != nil || p.proxiable != nil {
+	if p.ttlRange != nil || p.proxiable != nil || p.autoTTL {
 		return withOptions{p}, nil
 	}
 

@@ -1319,6 +1319,17 @@ func TestCloudflareTakesTTLsFrom60Seconds(t *testing.T) {
 	}
 }
 
+func TestCloudflareTakesTTL1AsAutomatic(t *testing.T) {
+	p, err := cloudflare.Config{}.New(dns.Account{Provider: "cloudflare", Name: "work"}, testToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !provider.AutoTTLOf(p) {
+		t.Fatal("Cloudflare has no automatic TTL")
+	}
+}
+
 func TestCloudflareProxiesAAAAAAndCNAMERecords(t *testing.T) {
 	p, err := cloudflare.Config{}.New(dns.Account{Provider: "cloudflare", Name: "work"}, testToken)
 	if err != nil {

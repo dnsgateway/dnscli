@@ -44,6 +44,20 @@ func TTLRangeOf(p Provider) dns.TTLRange {
 	return dns.DefaultTTLRange
 }
 
+// AutoTTL is implemented by a Provider that reads TTL dns.TTLAuto as
+// "automatic", such as Cloudflare. To any other Provider it is one second.
+type AutoTTL interface {
+	// AutoTTL reports whether TTL dns.TTLAuto is automatic.
+	AutoTTL() bool
+}
+
+// AutoTTLOf reports whether a Provider has an automatic TTL.
+func AutoTTLOf(p Provider) bool {
+	a, ok := p.(AutoTTL)
+
+	return ok && a.AutoTTL()
+}
+
 // ProxiedExtra is the Record extra holding a Provider's proxy flag, such
 // as Cloudflare's: "true" or "false".
 const ProxiedExtra = "proxied"

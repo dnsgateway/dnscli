@@ -37,14 +37,16 @@ type zoneRefresh struct {
 }
 
 // providerCaps is what a Provider takes beyond the Provider interface:
-// its TTL range and the Record types it can proxy.
+// its TTL range, whether TTL 1 is automatic, and the Record types it can
+// proxy.
 type providerCaps struct {
 	ttl       dns.TTLRange
+	autoTTL   bool
 	proxiable []string
 }
 
 func capsOf(p provider.Provider) providerCaps {
-	return providerCaps{ttl: provider.TTLRangeOf(p), proxiable: provider.ProxiableTypesOf(p)}
+	return providerCaps{ttl: provider.TTLRangeOf(p), autoTTL: provider.AutoTTLOf(p), proxiable: provider.ProxiableTypesOf(p)}
 }
 
 // zoneRefreshedMsg carries the result of one Refresh.
