@@ -42,10 +42,14 @@ type Model struct {
 	accounts []dns.Account
 	zones    []dns.Zone
 
-	// filter decides which Zones the Domains pane shows; visible holds them.
-	filter  zoneFilter
+	// accountFilter is the Account filter: the Domains pane shows only this
+	// Account's Zones. Zero means every Account.
+	accountFilter int64
+	// visible are the Zones the Domains pane lists, after the Account filter
+	// and its search.
 	visible []dns.Zone
-	// shared holds the zone names that exist in more than one Account.
+	// shared holds the zone names, as nameKey keys, that exist in more than
+	// one Account.
 	shared map[string]bool
 
 	// open is the Zone whose Records are shown; nil until the user opens one.
@@ -134,7 +138,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.accounts = msg.accounts
 		m.zones = msg.zones
 		m.shared = sharedNames(msg.zones)
-		m.visible = filterZones(m.zones, m.filter)
+		m.refilter(paneDomains)
 	case recordsLoadedMsg:
 		if m.open == nil || m.open.ID != msg.zoneID {
 			return m, nil // the user has moved on to another Zone
@@ -143,7 +147,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.recordsLoading = false
 		m.recordsErr = msg.err
 		m.records = msg.records
-		m.visibleRecords = filterRecords(m.records, m.search[paneRecords].query)
+		m.refilter(paneRecords)
 		m.cursor[paneRecords] = 0
 	case tea.KeyMsg:
 		if m.typeIntoSearch(msg) {
@@ -192,9 +196,7 @@ func (m *Model) handle(a Action) tea.Cmd {
 	case ActionSelect:
 		return m.selectItem()
 	case ActionAllAccounts:
-		f := m.filter
-		f.account = 0
-		m.setFilter(f)
+		m.setAccount(0)
 	case ActionSearch:
 		m.startSearch()
 	case ActionClose:
@@ -235,25 +237,34 @@ func (m *Model) selectItem() tea.Cmd {
 		return m.openZone()
 	case paneAccounts:
 		if len(m.accounts) > 0 {
-			f := m.filter
-			f.account = m.accounts[m.cursor[paneAccounts]].ID
-			m.setFilter(f)
+			m.setAccount(m.accounts[m.cursor[paneAccounts]].ID)
 		}
 	}
 
 	return nil
 }
 
-// setFilter changes which Zones the Domains pane shows. An unchanged filter
-// changes nothing, so the cursor stays put.
-func (m *Model) setFilter(f zoneFilter) {
-	if f == m.filter {
+// setAccount changes the Account filter. An unchanged filter changes
+// nothing, so the cursor stays put.
+func (m *Model) setAccount(id int64) {
+	if id == m.accountFilter {
 		return
 	}
 
-	m.filter = f
-	m.visible = filterZones(m.zones, f)
+	m.accountFilter = id
+	m.refilter(paneDomains)
 	m.cursor[paneDomains] = 0
+}
+
+// refilter recomputes the items pane p lists from its unfiltered items and
+// its filters. Each pane's search query lives only in m.search.
+func (m *Model) refilter(p pane) {
+	switch p {
+	case paneDomains:
+		m.visible = filterZones(m.zones, zoneFilter{account: m.accountFilter, query: m.search[paneDomains].query})
+	case paneRecords:
+		m.visibleRecords = filterRecords(m.records, m.search[paneRecords].query)
+	}
 }
 
 // openZone shows the highlighted Zone's Records.
@@ -265,8 +276,8 @@ func (m *Model) openZone() tea.Cmd {
 	z := m.visible[m.cursor[paneDomains]]
 	m.open = &z
 	m.records = nil
-	m.visibleRecords = nil
 	m.search[paneRecords] = search{}
+	m.refilter(paneRecords)
 	m.recordsLoading = true
 	m.recordsErr = nil
 

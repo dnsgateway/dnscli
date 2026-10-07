@@ -106,7 +106,7 @@ func (m *Model) accountLines(w, h int) []string {
 	var lines []string
 	for i := start; i < end; i++ {
 		text := " " + m.accounts[i].Label()
-		if m.accounts[i].ID == m.filter.account {
+		if m.accounts[i].ID == m.accountFilter {
 			text += " ✓" // the Domains pane shows only this Account's Zones
 		}
 

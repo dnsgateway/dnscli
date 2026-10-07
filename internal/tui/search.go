@@ -42,20 +42,7 @@ func (m *Model) clearSearch() {
 
 	m.search[m.focus] = search{}
 	m.cursor[m.focus] = 0
-	m.syncQuery()
-}
-
-// syncQuery applies the focused pane's search query to the items it shows.
-// The Domains search narrows the Zone filter, together with the Account filter.
-func (m *Model) syncQuery() {
-	switch m.focus {
-	case paneDomains:
-		f := m.filter
-		f.query = m.search[paneDomains].query
-		m.setFilter(f)
-	case paneRecords:
-		m.visibleRecords = filterRecords(m.records, m.search[paneRecords].query)
-	}
+	m.refilter(m.focus)
 }
 
 // typeIntoSearch sends a typed key to the focused pane's search input, and
@@ -84,7 +71,7 @@ func (m *Model) typeIntoSearch(msg tea.KeyMsg) bool {
 	}
 
 	m.cursor[m.focus] = 0
-	m.syncQuery()
+	m.refilter(m.focus)
 
 	return true
 }
