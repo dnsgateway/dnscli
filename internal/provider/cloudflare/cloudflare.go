@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
+	"strings"
 
 	cfdns "github.com/cloudflare/cloudflare-go/v7/dns"
 	"github.com/cloudflare/cloudflare-go/v7/option"
@@ -151,7 +153,54 @@ func (p *Provider) Records(ctx context.Context, zone dns.Zone) (provider.RecordS
 		records = append(records, rec)
 	}
 
-	return provider.RecordSet{Records: records}, nil
+	serial, err := p.serial(ctx, zone)
+	if err != nil {
+		return provider.RecordSet{}, err
+	}
+
+	return provider.RecordSet{Records: records, Serial: serial}, nil
+}
+
+// serial reads the Zone's SOA serial. The v4 API lists no SOA record, so
+// it comes from the SOA line of the Zone's BIND export; zero when the
+// export has none.
+func (p *Provider) serial(ctx context.Context, zone dns.Zone) (uint32, error) {
+	var params cfdns.RecordExportParams
+	params.ZoneID.Value, params.ZoneID.Present = zone.ProviderID, true
+
+	export, err := p.records.Export(ctx, params)
+	if err != nil {
+		return 0, err
+	}
+
+	if export == nil {
+		return 0, nil
+	}
+
+	return soaSerial(*export), nil
+}
+
+// soaSerial finds the serial in a zone file's SOA record:
+// <name> [ttl] [class] SOA <mname> <rname> <serial> ...
+func soaSerial(zoneFile string) uint32 {
+	for line := range strings.Lines(zoneFile) {
+		line, _, _ = strings.Cut(line, ";")
+		fields := strings.Fields(line)
+
+		i := slices.IndexFunc(fields, func(f string) bool { return strings.EqualFold(f, "SOA") })
+		if i < 0 || i+3 >= len(fields) {
+			continue
+		}
+
+		serial, err := strconv.ParseUint(fields[i+3], 10, 32)
+		if err != nil {
+			continue
+		}
+
+		return uint32(serial)
+	}
+
+	return 0
 }
 
 // proxiedExtra is the Record extra holding Cloudflare's proxy flag, "true"

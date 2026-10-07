@@ -250,6 +250,61 @@ func TestRecordsPutThePriorityInTheValue(t *testing.T) {
 	})
 }
 
+// exportExample is a zone export as Cloudflare formats it.
+const exportExample = `;;
+;; Domain:     example.com.
+;; Exported:   2026-10-07 12:00:00
+;;
+;; This file is intended for use for informational and archival
+;; purposes ONLY and MUST be edited before use on a production
+;; DNS server.
+;;
+
+;; SOA Record
+example.com	3600	IN	SOA	ada.ns.cloudflare.com. dns.cloudflare.com. 2051234567 10000 2400 604800 3600
+
+;; NS Records
+example.com.	86400	IN	NS	ada.ns.cloudflare.com.
+example.com.	86400	IN	NS	bob.ns.cloudflare.com.
+
+;; A Records
+example.com.	1	IN	A	192.0.2.1 ; cf_tags=cf-proxied:true
+`
+
+func TestRecordsReadTheSerialFromTheZoneExport(t *testing.T) {
+	api := &cfAPI{
+		records: map[string][]map[string]any{"z1": {cfRecord("r1", "A", "example.com", "192.0.2.1", 1, true, true)}},
+		export:  map[string]string{"z1": exportExample},
+	}
+	p := newProvider(t, api)
+
+	rs, err := p.Records(context.Background(), dns.Zone{Name: "example.com", ProviderID: "z1"})
+	if err != nil {
+		t.Fatalf("Records: %v", err)
+	}
+
+	if rs.Serial != 2051234567 {
+		t.Errorf("Serial = %d, want the export's SOA serial 2051234567", rs.Serial)
+	}
+}
+
+func TestRecordsWithoutAnSOAInTheExportHaveNoSerial(t *testing.T) {
+	api := &cfAPI{
+		records: map[string][]map[string]any{"z1": {}},
+		export:  map[string]string{"z1": ";; no SOA here\n"},
+	}
+	p := newProvider(t, api)
+
+	rs, err := p.Records(context.Background(), dns.Zone{Name: "example.com", ProviderID: "z1"})
+	if err != nil {
+		t.Fatalf("Records: %v", err)
+	}
+
+	if rs.Serial != 0 {
+		t.Errorf("Serial = %d, want 0 (unknown)", rs.Serial)
+	}
+}
+
 func assertRecords(t *testing.T, got, want []dns.Record) {
 	t.Helper()
 
