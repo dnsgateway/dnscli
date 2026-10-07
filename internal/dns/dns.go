@@ -28,6 +28,12 @@ type Zone struct {
 	Serial uint32
 	// RefreshedAt is the time of the last Refresh; zero when never Refreshed.
 	RefreshedAt time.Time
+
+	// Status is the cached Provider-side Zone Status.
+	Status ZoneStatus
+	// StatusAt is when Status was read; zero when it never was. A Refresh
+	// that could not read it leaves it older than RefreshedAt.
+	StatusAt time.Time
 }
 
 // Record is a single DNS resource record inside a Zone.
@@ -70,6 +76,29 @@ type Changeset struct {
 // ZoneStatus is the Provider-side summary of a Zone shown in the status bar.
 // Mail records and the Live Zone marker are worked out by dnscli itself.
 type ZoneStatus struct {
-	DNSSEC bool
-	HSTS   bool
+	DNSSEC Setting
+	HSTS   Setting
+}
+
+// Setting is a Zone setting that is on, off, or unknown, such as when the
+// API token may not read it.
+type Setting int8
+
+// Settings. The zero value is Unknown.
+const (
+	Unknown Setting = iota
+	Off
+	On
+)
+
+// String is "on", "off" or "?".
+func (s Setting) String() string {
+	switch s {
+	case On:
+		return "on"
+	case Off:
+		return "off"
+	}
+
+	return "?"
 }
