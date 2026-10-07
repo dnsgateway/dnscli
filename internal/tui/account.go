@@ -103,10 +103,13 @@ type accountAddedMsg struct {
 	err     error
 }
 
-// zonesDiscoveredMsg reports the Zones discovered for a new Account.
+// zonesDiscoveredMsg reports the Zones discovered for a new Account, or
+// re-listed for an existing one.
 type zonesDiscoveredMsg struct {
 	account dns.Account
-	count   int
+	relist  bool
+	count   int // how many Zones the Provider listed
+	sync    store.ZoneSync
 	err     error
 }
 
@@ -194,61 +197,66 @@ func (m *Model) accountAdded(msg accountAddedMsg) tea.Cmd {
 	m.addForm = nil
 	m.notice = notice{text: "Added " + msg.account.Label() + "; discovering its Zones…"}
 
-	return tea.Batch(m.loadCache, m.discoverZones(msg.account))
+	return tea.Batch(m.loadCache, m.discoverZones(msg.account, false))
 }
 
 // discoverZones lists an Account's Zones from its Provider in the
-// background and caches them.
-func (m *Model) discoverZones(a dns.Account) tea.Cmd {
+// background and caches them. Re-listing an existing Account's Zones runs
+// the same discovery; relist changes only how the result is reported.
+func (m *Model) discoverZones(a dns.Account, relist bool) tea.Cmd {
 	key, store, ctx, newProvider := m.key, m.deps.Store, m.ctx, m.deps.Providers[a.Provider]
 
 	return func() tea.Msg {
-		n, err := discover(ctx, store, key, newProvider, a)
+		n, sync, err := discover(ctx, store, key, newProvider, a)
 
-		return zonesDiscoveredMsg{account: a, count: n, err: err}
+		return zonesDiscoveredMsg{account: a, relist: relist, count: n, sync: sync, err: err}
 	}
 }
 
-func discover(ctx context.Context, s *store.Store, key *vault.Key, newProvider provider.Constructor, a dns.Account) (int, error) {
+// discover lists an Account's Zones from its Provider and makes its cached
+// Zones match them. A Provider error leaves the cache untouched.
+func discover(ctx context.Context, s *store.Store, key *vault.Key, newProvider provider.Constructor, a dns.Account) (int, store.ZoneSync, error) {
 	if newProvider == nil {
-		return 0, fmt.Errorf("Provider type %q is not available in this build", a.Provider)
+		return 0, store.ZoneSync{}, fmt.Errorf("Provider type %q is not available in this build", a.Provider)
 	}
 
 	sealed, err := s.AccountSecret(ctx, a.ID)
 	if err != nil {
-		return 0, err
+		return 0, store.ZoneSync{}, err
 	}
 
 	if sealed == nil {
-		return 0, errors.New("this Account has no API token")
+		return 0, store.ZoneSync{}, errors.New("this Account has no API token")
 	}
 
 	token, err := key.Open(sealed, secretLabel(a))
 	if err != nil {
-		return 0, err
+		return 0, store.ZoneSync{}, err
 	}
 
 	p, err := newProvider(a, string(token))
 	if err != nil {
-		return 0, err
+		return 0, store.ZoneSync{}, err
 	}
 
 	zones, err := p.Zones(ctx)
 	if err != nil {
-		return 0, err
+		return 0, store.ZoneSync{}, err
 	}
 
-	for _, z := range zones {
-		z.AccountID = a.ID
-		if _, err := s.PutZone(ctx, z); err != nil {
-			return 0, err
-		}
+	sync, err := s.SyncAccountZones(ctx, a.ID, zones)
+	if err != nil {
+		return 0, store.ZoneSync{}, err
 	}
 
-	return len(zones), nil
+	return len(zones), sync, nil
 }
 
 func (m *Model) zonesDiscovered(msg zonesDiscoveredMsg) tea.Cmd {
+	if msg.relist {
+		return m.zonesRelisted(msg)
+	}
+
 	if msg.err != nil {
 		m.notice = notice{text: "Zone discovery for " + msg.account.Label() + " failed: " + msg.err.Error(), err: true}
 

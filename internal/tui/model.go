@@ -86,6 +86,8 @@ type Model struct {
 	keychain *keychainConfirm
 	// remove asks to remove an Account; nil when closed.
 	remove *removeConfirm
+	// relisting holds the IDs of the Accounts whose Zones are being re-listed.
+	relisting map[int64]bool
 }
 
 // notice is a message for the status bar.
@@ -307,6 +309,8 @@ func (m *Model) handle(a Action) tea.Cmd {
 		return m.enrollKeychain()
 	case ActionRemoveAccount:
 		return m.removeAccount()
+	case ActionRelistZones:
+		return m.relistZones()
 	}
 
 	return nil

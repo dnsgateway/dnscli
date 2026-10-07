@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -14,9 +15,18 @@ import (
 // A zero Serial or RefreshedAt keeps the cached value, so relisting an
 // Account's Zones does not forget their last Refresh.
 func (s *Store) PutZone(ctx context.Context, z dns.Zone) (dns.Zone, error) {
+	return putZone(ctx, s.db, z)
+}
+
+// queryRower is a database handle or connection that runs one-row queries.
+type queryRower interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+func putZone(ctx context.Context, db queryRower, z dns.Zone) (dns.Zone, error) {
 	var refreshed int64
 
-	err := s.db.QueryRowContext(ctx, `
+	err := db.QueryRowContext(ctx, `
 		INSERT INTO zones (account_id, name, provider_zone_id, soa_serial, refreshed_at)
 		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT (account_id, name) DO UPDATE SET
@@ -33,6 +43,96 @@ func (s *Store) PutZone(ctx context.Context, z dns.Zone) (dns.Zone, error) {
 	z.RefreshedAt = timeOrZero(refreshed)
 
 	return z, nil
+}
+
+// ZoneSync is what SyncAccountZones changed.
+type ZoneSync struct {
+	// Added are the Zones that were not cached before.
+	Added []dns.Zone
+	// Dropped are the cached Zones the list no longer had; their Records
+	// were deleted with them.
+	Dropped []dns.Zone
+}
+
+// SyncAccountZones makes an Account's cached Zones match a Zone list from
+// its Provider, in one transaction. Each listed Zone is stored as PutZone
+// stores it, so a Zone that was already cached keeps its ID, serial, last
+// Refresh time and Records. A cached Zone the list does not have is
+// deleted with its Records.
+func (s *Store) SyncAccountZones(ctx context.Context, accountID int64, zones []dns.Zone) (ZoneSync, error) {
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return ZoneSync{}, fmt.Errorf("sync zones: %w", err)
+	}
+	defer conn.Close()
+
+	var res ZoneSync
+
+	err = writeLocked(ctx, conn, func() error {
+		cached, err := accountZones(ctx, conn, accountID)
+		if err != nil {
+			return err
+		}
+
+		listed := map[string]bool{}
+
+		for _, z := range zones {
+			z.AccountID = accountID
+			listed[z.Name] = true
+
+			stored, err := putZone(ctx, conn, z)
+			if err != nil {
+				return err
+			}
+
+			if _, ok := cached[z.Name]; !ok {
+				res.Added = append(res.Added, stored)
+			}
+		}
+
+		for name, z := range cached {
+			if listed[name] {
+				continue
+			}
+
+			for _, q := range []string{`DELETE FROM records WHERE zone_id = ?`, `DELETE FROM zones WHERE id = ?`} {
+				if _, err := conn.ExecContext(ctx, q, z.ID); err != nil {
+					return err
+				}
+			}
+
+			res.Dropped = append(res.Dropped, z)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return ZoneSync{}, fmt.Errorf("sync zones: %w", err)
+	}
+
+	return res, nil
+}
+
+// accountZones returns an Account's cached Zones by zone name.
+func accountZones(ctx context.Context, conn *sql.Conn, accountID int64) (map[string]dns.Zone, error) {
+	rows, err := conn.QueryContext(ctx, `SELECT id, name, provider_zone_id FROM zones WHERE account_id = ?`, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := map[string]dns.Zone{}
+
+	for rows.Next() {
+		z := dns.Zone{AccountID: accountID}
+		if err := rows.Scan(&z.ID, &z.Name, &z.ProviderID); err != nil {
+			return nil, err
+		}
+
+		out[z.Name] = z
+	}
+
+	return out, rows.Err()
 }
 
 // Zones returns every cached Zone, ordered by zone name and then Account.

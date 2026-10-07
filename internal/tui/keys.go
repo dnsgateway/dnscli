@@ -33,6 +33,9 @@ const (
 	// ActionRemoveAccount asks to remove the highlighted Account with its
 	// cached Zones, Records and secret.
 	ActionRemoveAccount
+	// ActionRelistZones re-lists the highlighted Account's Zones from its
+	// Provider, after Unseal.
+	ActionRelistZones
 )
 
 // Binding maps one Action to its keys.
@@ -64,6 +67,7 @@ func DefaultShortcutProfile() ShortcutProfile {
 			{Action: ActionAllAccounts, Keys: []string{"*"}, Help: "Zones of all Accounts"},
 			{Action: ActionAddAccount, Keys: []string{"a"}, Help: "add Account"},
 			{Action: ActionRemoveAccount, Keys: []string{"X"}, Help: "remove Account"},
+			{Action: ActionRelistZones, Keys: []string{"L"}, Help: "re-list the Account's Zones"},
 			{Action: ActionEnrollKeychain, Keys: []string{"K"}, Help: "enroll the Keychain (Touch ID)"},
 			{Action: ActionHelp, Keys: []string{"?"}, Help: "toggle help"},
 			{Action: ActionClose, Keys: []string{"esc"}, Help: "close"},
