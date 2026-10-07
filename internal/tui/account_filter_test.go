@@ -30,3 +30,18 @@ func TestClearingTheAccountFilterShowsTheZonesOfEveryAccount(t *testing.T) {
 
 	h.assertShows("example.com", "two.tv", "example.org")
 }
+
+func TestSelectedAccountIsMarkedUntilTheFilterIsCleared(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	h := newHarness(t, s)
+	h.assertHides("✓")
+
+	h.press("tab", "j", "enter")
+	h.assertShows("cloudflare.work ✓")
+	h.assertHides("cloudflare.personal ✓")
+
+	h.press("*")
+	h.assertHides("✓")
+}

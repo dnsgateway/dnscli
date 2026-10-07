@@ -85,7 +85,12 @@ func (m *Model) accountLines(w, h int) []string {
 
 	var lines []string
 	for i := start; i < end; i++ {
-		lines = append(lines, m.row(paneAccounts, i, " "+m.accounts[i].Label(), w, lipgloss.NewStyle()))
+		text := " " + m.accounts[i].Label()
+		if m.accounts[i].ID == m.filter.account {
+			text += " ✓" // the Domains pane shows only this Account's Zones
+		}
+
+		lines = append(lines, m.row(paneAccounts, i, text, w, lipgloss.NewStyle()))
 	}
 
 	return lines
