@@ -32,11 +32,16 @@ type Model struct {
 
 	width, height int
 	focus         pane
+	cursor        [paneCount]int
 
 	loaded   bool
 	err      error
 	accounts []dns.Account
 	zones    []dns.Zone
+
+	// open is the Zone whose Records are shown; nil until the user opens one.
+	open    *dns.Zone
+	records []dns.Record
 }
 
 // New builds the model. All background work derives its context from ctx,
@@ -61,6 +66,13 @@ type cacheLoadedMsg struct {
 	err      error
 }
 
+// recordsLoadedMsg carries a Zone's cached Records read from the Store.
+type recordsLoadedMsg struct {
+	zoneID  int64
+	records []dns.Record
+	err     error
+}
+
 // Init loads the cached data from the Store. It never touches the network.
 func (m *Model) Init() tea.Cmd {
 	return m.loadCache
@@ -80,6 +92,16 @@ func (m *Model) loadCache() tea.Msg {
 	return cacheLoadedMsg{accounts: accounts, zones: zones}
 }
 
+func (m *Model) loadRecords(zoneID int64) tea.Cmd {
+	ctx, store := m.ctx, m.deps.Store
+
+	return func() tea.Msg {
+		records, err := store.Records(ctx, zoneID)
+
+		return recordsLoadedMsg{zoneID: zoneID, records: records, err: err}
+	}
+}
+
 // Update handles a message.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -90,6 +112,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err
 		m.accounts = msg.accounts
 		m.zones = msg.zones
+	case recordsLoadedMsg:
+		if m.open == nil || m.open.ID != msg.zoneID {
+			return m, nil // the user has moved on to another Zone
+		}
+
+		m.err = msg.err
+		m.records = msg.records
+		m.cursor[paneRecords] = 0
 	case tea.KeyMsg:
 		return m, m.handle(m.keys.action(msg.String()))
 	}
@@ -104,7 +134,59 @@ func (m *Model) handle(a Action) tea.Cmd {
 		m.focus = (m.focus + 1) % paneCount
 	case ActionPrevPane:
 		m.focus = (m.focus + paneCount - 1) % paneCount
+	case ActionUp:
+		m.move(-1)
+	case ActionDown:
+		m.move(+1)
+	case ActionSelect:
+		return m.selectItem()
 	}
 
 	return nil
+}
+
+// move moves the focused pane's cursor by delta, staying inside the list.
+func (m *Model) move(delta int) {
+	n := m.itemCount(m.focus)
+	if n == 0 {
+		return
+	}
+
+	m.cursor[m.focus] = min(max(m.cursor[m.focus]+delta, 0), n-1)
+}
+
+func (m *Model) itemCount(p pane) int {
+	switch p {
+	case paneDomains:
+		return len(m.zones)
+	case paneAccounts:
+		return len(m.accounts)
+	case paneRecords:
+		return len(m.records)
+	}
+
+	return 0
+}
+
+// selectItem opens the highlighted item of the focused pane.
+func (m *Model) selectItem() tea.Cmd {
+	if m.focus != paneDomains || len(m.zones) == 0 {
+		return nil
+	}
+
+	z := m.zones[m.cursor[paneDomains]]
+	m.open = &z
+	m.records = nil
+
+	return m.loadRecords(z.ID)
+}
+
+func (m *Model) account(id int64) (dns.Account, bool) {
+	for _, a := range m.accounts {
+		if a.ID == id {
+			return a, true
+		}
+	}
+
+	return dns.Account{}, false
 }

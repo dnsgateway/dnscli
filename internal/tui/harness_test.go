@@ -220,6 +220,11 @@ func (h *harness) assertDimmed(text string) {
 	}
 }
 
+// highlighted reports whether text is drawn as the cursor row (reverse video).
+func (h *harness) highlighted(text string) bool {
+	return styledWith(h.rawView(), text, "7")
+}
+
 // styledWith reports whether the last SGR sequence before text on its line
 // includes the given parameter (e.g. "2" for faint, "7" for reverse).
 func styledWith(raw, text, param string) bool {
