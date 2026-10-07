@@ -12,6 +12,12 @@ import (
 // ErrKeychainUnavailable means this platform or build has no Keychain.
 var ErrKeychainUnavailable = errors.New("the Keychain Unseal Method is not available on this platform")
 
+// ErrTouchIDUnavailable means the OS cannot make Touch ID guard a keychain
+// item on this machine, such as for a build without the keychain
+// entitlement or on a Mac without Touch ID. A backend stores nothing then:
+// an item dnscli alone guards would be no better than the passphrase.
+var ErrTouchIDUnavailable = errors.New("Touch ID protection is unavailable")
+
 // KeychainBackend keeps secrets in the OS keychain, such as the macOS
 // Keychain behind Touch ID.
 type KeychainBackend interface {
@@ -58,7 +64,10 @@ func (k Keychain) Wrap(dataKey, _ []byte) (Slot, error) {
 	}
 
 	ref, err := k.Backend.Store(kek)
-	if err != nil {
+	switch {
+	case errors.Is(err, ErrTouchIDUnavailable):
+		return Slot{}, err // already says why, for the user
+	case err != nil:
 		return Slot{}, fmt.Errorf("store the key in the Keychain: %w", err)
 	}
 

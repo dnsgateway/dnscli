@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"slices"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -11,8 +12,10 @@ import (
 
 // keychainConfirm asks before enrolling the Keychain as an Unseal Method.
 type keychainConfirm struct {
-	err  string
-	busy bool // the key slot is being stored
+	err string
+	// advice follows err, such as to keep using the passphrase.
+	advice string
+	busy   bool // the key slot is being stored
 }
 
 // keychainEnrolledMsg reports the result of enrolling the Keychain.
@@ -58,7 +61,7 @@ func (m *Model) keychainKey(msg tea.KeyMsg) tea.Cmd {
 		m.keychain = nil
 	case ActionSelect:
 		c.busy = true
-		c.err = ""
+		c.err, c.advice = "", ""
 		key, method, store, ctx := m.key, m.deps.Keychain, m.deps.Store, m.ctx
 
 		return func() tea.Msg {
@@ -98,6 +101,13 @@ func (m *Model) keychainEnrolled(msg keychainEnrolledMsg) {
 	if msg.err != nil {
 		m.keychain.busy = false
 		m.keychain.err = "Could not enroll the Keychain: " + msg.err.Error()
+		m.keychain.advice = ""
+
+		if errors.Is(msg.err, vault.ErrTouchIDUnavailable) {
+			// Nothing was stored: enrolling cannot succeed on this Mac or build.
+			m.keychain.err = msg.err.Error()
+			m.keychain.advice = "The Keychain is not enrolled: keep using the passphrase."
+		}
 
 		return
 	}
@@ -123,6 +133,10 @@ func (m *Model) keychainView() string {
 	if c.err != "" {
 		notes = append(notes, "")
 		notes = append(notes, wrapNote(errorStyle, c.err, noteWidth)...)
+	}
+
+	if c.advice != "" {
+		notes = append(notes, wrapNote(lipgloss.NewStyle(), c.advice, noteWidth)...)
 	}
 
 	if c.busy {

@@ -24,9 +24,16 @@ type fakeKeychain struct {
 	touches int
 	// denied makes Touch ID fail, as when the user cancels it.
 	denied bool
+	// refuse makes Store fail, as on a Mac that cannot protect an item
+	// with Touch ID.
+	refuse error
 }
 
 func (k *fakeKeychain) Store(secret []byte) ([]byte, error) {
+	if k.refuse != nil {
+		return nil, k.refuse
+	}
+
 	if k.items == nil {
 		k.items = map[string][]byte{}
 	}
@@ -258,6 +265,25 @@ func TestReenrollingTheKeychainDeletesTheReplacedItem(t *testing.T) {
 	h := newKeychainHarness(t, s, fake.New(), kc)
 	h.fillAddAccount("home", "home-token")
 	h.assertShows("unsealed", "cloudflare.home")
+}
+
+func TestTheKeychainIsNotEnrolledWhereTouchIDCannotProtectIt(t *testing.T) {
+	// Short reasons, so the dialog does not wrap them.
+	for _, why := range []string{"unsigned build", "no Touch ID"} {
+		t.Run(why, func(t *testing.T) {
+			s, _ := enrollFirstAccount(t)
+			kc := &fakeKeychain{refuse: fmt.Errorf("%w: %s", vault.ErrTouchIDUnavailable, why)}
+			h := newPassphraseOnMacHarness(t, s, fake.New(), kc)
+
+			h.press("K")
+			h.typeText(passphrase)
+			h.press("enter", "enter")
+
+			h.assertShows("Touch ID protection is unavailable: "+why, "not enrolled: keep using the passphrase")
+			h.assertHides("Keychain enrolled", "Touch ID now Unseals")
+			assertKeySlots(t, s, 1)
+		})
+	}
 }
 
 func TestAFailedKeychainEnrollmentLeavesNoKeychainItem(t *testing.T) {
