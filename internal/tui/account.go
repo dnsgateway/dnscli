@@ -255,7 +255,17 @@ func (m *Model) zonesDiscovered(msg zonesDiscoveredMsg) tea.Cmd {
 		return nil
 	}
 
-	m.notice = notice{text: fmt.Sprintf("Discovered %d Zones for %s.", msg.count, msg.account.Label())}
+	label := msg.account.Label()
+
+	switch msg.count {
+	case 0:
+		// An API token without zone read permission lists no Zones.
+		m.notice = notice{text: "Discovered no Zones for " + label + ": check that its API token may list Zones."}
+	case 1:
+		m.notice = notice{text: "Discovered 1 Zone for " + label + "."}
+	default:
+		m.notice = notice{text: fmt.Sprintf("Discovered %d Zones for %s.", msg.count, label)}
+	}
 
 	return m.loadCache
 }

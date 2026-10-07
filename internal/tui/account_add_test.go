@@ -307,6 +307,34 @@ func TestDiscoveryForAnAccountWithoutAnAPITokenSaysSo(t *testing.T) {
 	}
 }
 
+func TestTheDiscoveryNoticeCountsZones(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		zones []string
+		want  string
+	}{
+		{name: "one", zones: []string{"home.example"}, want: "Discovered 1 Zone for cloudflare.home."},
+		{name: "two", zones: []string{"home.example", "home.test"}, want: "Discovered 2 Zones for cloudflare.home."},
+		{name: "none", want: "Discovered no Zones for cloudflare.home: check that its API token may list Zones."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _ := enrollFirstAccount(t)
+			f := fake.New()
+
+			for i, z := range tc.zones {
+				f.AddZone(dns.Zone{Name: z, ProviderID: "zh" + string(rune('1'+i))})
+			}
+
+			h := newAccountHarness(t, s, f)
+			h.fillAddAccount("home", "home-token")
+			h.typeText(passphrase)
+			h.press("enter")
+
+			h.assertShows(tc.want)
+		})
+	}
+}
+
 func TestMismatchedPassphrasesAreNotEnrolled(t *testing.T) {
 	s, _ := openStore(t)
 	h := newAccountHarness(t, s, workZones())
