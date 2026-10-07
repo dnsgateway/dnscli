@@ -1,4 +1,5 @@
-// Package dns holds dnscli's domain types: Account, Zone and Record.
+// Package dns holds dnscli's domain types: Account, Zone, Record,
+// Changeset and Zone Status.
 // They are plain values with no Provider or UI dependencies.
 package dns
 
@@ -38,4 +39,37 @@ type Record struct {
 	TTL        uint32
 	// Extras holds Provider-specific fields, such as Cloudflare's proxy flag.
 	Extras map[string]string
+}
+
+// ChangeKind says what a Change does to a Record.
+type ChangeKind int
+
+// Change kinds.
+const (
+	ChangeAdd ChangeKind = iota + 1
+	ChangeModify
+	ChangeDelete
+)
+
+// Change is one Record addition, modification or deletion.
+type Change struct {
+	Kind ChangeKind
+	// Before is the Record as the Changeset was built from it; empty for an addition.
+	Before Record
+	// After is the Record as it should become; empty for a deletion.
+	After Record
+}
+
+// Changeset is a set of Record additions, modifications and deletions for
+// one Zone, applied to the Provider as one operation.
+type Changeset struct {
+	Zone    Zone
+	Changes []Change
+}
+
+// ZoneStatus is the Provider-side summary of a Zone shown in the status bar.
+// Mail records and the Live Zone marker are worked out by dnscli itself.
+type ZoneStatus struct {
+	DNSSEC bool
+	HSTS   bool
 }
