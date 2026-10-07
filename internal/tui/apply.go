@@ -23,6 +23,19 @@ type changesetPreview struct {
 	zoneID int64
 	err    string
 	busy   bool // the Changeset is being applied
+	// conflicts describe the Records that changed at the Provider since
+	// the Changeset was built, which stopped the last Apply.
+	conflicts []string
+	// outcomes are the changes the last Apply sent, with how each fared,
+	// when the Provider failed some of them.
+	outcomes []changeOutcome
+}
+
+// changeOutcome is how one change of an Apply fared.
+type changeOutcome struct {
+	change dns.Change
+	// err is why the Provider failed the change; nil when it applied it.
+	err error
 }
 
 // changesApplied reports the result of applying a Changeset.
@@ -45,6 +58,55 @@ type changesAppliedMsg struct {
 	// uncached counts the confirmed changes left out of the cache because
 	// the Provider returned no ID for their Record.
 	uncached int
+	// conflicts are the Records the Changeset was built from that changed
+	// at the Provider since: nothing was sent.
+	conflicts []conflict
+	// serial is the Zone's SOA serial saved with the applied changes;
+	// zero when the cached one was kept.
+	serial uint32
+}
+
+// conflict is a Record a Changeset was built from that changed at the
+// Provider since.
+type conflict struct {
+	// before is the Record as the Changeset was built from it.
+	before dns.Record
+	// now is the Record as the Provider has it; empty when it is gone.
+	now dns.Record
+}
+
+// conflicts returns the Records the changes were built from that the
+// Provider no longer has as they were. An addition is built from no
+// Record, so it never conflicts.
+func conflicts(changes []dns.Change, live []dns.Record) []conflict {
+	byID := map[string]dns.Record{}
+	for _, r := range live {
+		byID[r.ProviderID] = r
+	}
+
+	var out []conflict
+
+	for _, c := range changes {
+		if c.Kind == dns.ChangeAdd {
+			continue
+		}
+
+		now, ok := byID[c.Before.ProviderID]
+		if !ok || !sameRecord(c.Before, now) {
+			out = append(out, conflict{before: c.Before, now: now})
+		}
+	}
+
+	return out
+}
+
+// describe explains a conflict, naming Records relative to zone.
+func (c conflict) describe(zone string) string {
+	if c.now.Type == "" {
+		return describeRecord(zone, c.before) + " no longer exists"
+	}
+
+	return describeRecord(zone, c.before) + " is now " + describeRecord(zone, c.now)
 }
 
 // maxPreviewLines bounds how many changes the preview lists.
@@ -102,7 +164,7 @@ func (m *Model) previewKey(msg tea.KeyMsg) tea.Cmd {
 // write gate.
 func (m *Model) applyChanges() tea.Cmd {
 	p := m.preview
-	p.err = ""
+	p.err, p.conflicts, p.outcomes = "", nil, nil
 
 	z, cmd, ok := m.writeGate()
 	if !ok || z.ID != p.zoneID {
@@ -130,21 +192,40 @@ func (m *Model) applyChanges() tea.Cmd {
 	p.busy = true
 
 	ctx, s, key, newProvider := m.ctx, m.deps.Store, m.key, m.deps.Providers[a.Provider]
+	q := m.serialQueryFor(z)
 
 	return func() tea.Msg {
-		return apply(ctx, s, key, newProvider, a, cs)
+		return apply(ctx, s, key, newProvider, a, cs, q)
 	}
 }
 
-// apply sends a Changeset to the Provider and saves the changes it
-// confirmed to the cache, from the Records it returned.
-func apply(ctx context.Context, s *store.Store, key *vault.Key, newProvider provider.Constructor, a dns.Account, cs dns.Changeset) changesAppliedMsg {
+// apply re-checks the Records a Changeset was built from against the
+// Provider and, when none changed, sends the Changeset and saves the
+// changes the Provider confirmed to the cache, from the Records it
+// returned.
+//
+// It stores the Zone's new serial when the Provider reports it. Else, once
+// any change applied, q asks the Zone's nameservers, whose serial is
+// stored only when it is newer than the cached one: they may not have
+// taken the changes yet.
+func apply(ctx context.Context, s *store.Store, key *vault.Key, newProvider provider.Constructor, a dns.Account, cs dns.Changeset, q serialQuery) changesAppliedMsg {
 	msg := changesAppliedMsg{zoneID: cs.Zone.ID, sent: cs}
 
 	p, err := accountProvider(ctx, s, key, newProvider, a)
 	if err != nil {
 		msg.err = err
 
+		return msg
+	}
+
+	live, err := p.Records(ctx, cs.Zone)
+	if err != nil {
+		msg.err = fmt.Errorf("re-check the Records: %w", err)
+
+		return msg
+	}
+
+	if msg.conflicts = conflicts(cs.Changes, live.Records); msg.conflicts != nil {
 		return msg
 	}
 
@@ -161,7 +242,10 @@ func apply(ctx context.Context, s *store.Store, key *vault.Key, newProvider prov
 
 	msg.failed = make([]error, len(cs.Changes))
 
-	var confirmed []dns.Change
+	var (
+		confirmed []dns.Change
+		applied   bool
+	)
 
 	for i, r := range res.Results {
 		if r.Err != nil {
@@ -169,6 +253,8 @@ func apply(ctx context.Context, s *store.Store, key *vault.Key, newProvider prov
 
 			continue
 		}
+
+		applied = true
 
 		c := cs.Changes[i]
 		if c.Kind != dns.ChangeDelete {
@@ -186,11 +272,19 @@ func apply(ctx context.Context, s *store.Store, key *vault.Key, newProvider prov
 		confirmed = append(confirmed, c)
 	}
 
-	if err := s.SaveApply(ctx, cs.Zone, confirmed); err != nil {
+	if res.Serial == 0 && applied {
+		if serial := q.serial(ctx, cs.Zone.Name); serialNewer(serial, cs.Zone.Serial) {
+			res.Serial = serial
+		}
+	}
+
+	if err := s.SaveApply(ctx, cs.Zone, confirmed, res.Serial); err != nil {
 		msg.err = err
 
 		return msg
 	}
+
+	msg.serial = res.Serial
 
 	msg.saved, msg.applied = true, confirmed
 
@@ -230,6 +324,10 @@ func (m *Model) changesApplied(msg changesAppliedMsg) tea.Cmd {
 		p.busy = false
 	}
 
+	if msg.conflicts != nil {
+		return m.applyConflicted(z, msg.conflicts)
+	}
+
 	if msg.failed == nil {
 		text := "Could not apply the changes to " + z.Name + ": " + msg.err.Error()
 		m.notice = notice{text: text, err: true}
@@ -245,6 +343,11 @@ func (m *Model) changesApplied(msg changesAppliedMsg) tea.Cmd {
 	// in the same step that takes the changes out of the Changeset.
 	if m.open != nil && m.open.ID == msg.zoneID {
 		m.records = applyToRecords(m.records, msg.applied)
+	}
+
+	if msg.saved && msg.serial != 0 {
+		z.Serial = msg.serial
+		m.updateZone(z)
 	}
 
 	if r, ok := m.refreshes[msg.zoneID]; ok {
@@ -299,10 +402,43 @@ func (m *Model) changesApplied(msg changesAppliedMsg) tea.Cmd {
 	}
 
 	if p != nil && m.preview != nil && failed > 0 {
-		p.err = m.notice.text
+		p.outcomes = make([]changeOutcome, len(msg.sent.Changes))
+		for i, c := range msg.sent.Changes {
+			p.outcomes[i] = changeOutcome{change: c, err: msg.failed[i]}
+		}
+
+		// The outcomes say which changes failed and why.
+		if !msg.saved || msg.uncached > 0 {
+			p.err = m.notice.text
+		}
 	}
 
 	return nil
+}
+
+// applyConflicted reports an Apply that was not sent because Records it
+// was built from changed at the Provider, and Refreshes the Zone. The
+// changes stay pending for the user to review.
+func (m *Model) applyConflicted(z dns.Zone, cs []conflict) tea.Cmd {
+	described := make([]string, len(cs))
+	for i, c := range cs {
+		described[i] = c.describe(z.Name)
+	}
+
+	verb := "have"
+	if len(cs) == 1 {
+		verb = "has"
+	}
+
+	text := fmt.Sprintf("Nothing was applied to %s: %s %s changed at the Provider since the last Refresh. Refreshing it; review the pending changes.",
+		z.Name, plural(len(cs), "Record"), verb)
+	m.notice = notice{text: text + " " + strings.Join(described, "; ") + ".", err: true}
+
+	if p := m.preview; p != nil && p.zoneID == z.ID {
+		p.err, p.conflicts = text, described
+	}
+
+	return m.refreshZone(z)
 }
 
 // applyToRecords returns Records with the applied changes made to them as
@@ -362,7 +498,14 @@ func (m *Model) previewView() string {
 
 	var lines []string
 
+	if len(p.outcomes) > 0 {
+		lines = append(lines, outcomeLines(z.Name, p.outcomes)...)
+		lines = append(lines, "")
+	}
+
 	if cs := m.pendingOf(p.zoneID); cs != nil {
+		lines = append(lines, "Applying sends "+plural(len(cs.Changes), "pending change")+" to the Provider:", "")
+
 		for i, c := range cs.Changes {
 			if i == maxPreviewLines {
 				lines = append(lines, hintStyle.Render(fmt.Sprintf("… and %d more", len(cs.Changes)-i)))
@@ -372,13 +515,15 @@ func (m *Model) previewView() string {
 
 			lines = append(lines, changeStyle(c.Kind).Render(describeChange(z.Name, c)))
 		}
-
-		lines = append([]string{"Applying sends " + plural(len(cs.Changes), "pending change") + " to the Provider:", ""}, lines...)
 	}
 
 	if p.err != "" {
 		lines = append(lines, "")
 		lines = append(lines, wrapNote(errorStyle, p.err, noteWidth)...)
+	}
+
+	for _, c := range p.conflicts {
+		lines = append(lines, errorStyle.Render("  "+c))
 	}
 
 	if p.busy {
@@ -389,4 +534,39 @@ func (m *Model) previewView() string {
 		m.keys.keysFor(ActionDiscardChanges)+" discard · "+m.keys.keysFor(ActionClose)+" close"))
 
 	return dialogView("Changes to "+z.Name, nil, -1, false, lines)
+}
+
+// outcomeLines lists how each change of an Apply fared: ✓ for a change
+// the Provider applied, ✗ for one it failed, followed by why.
+func outcomeLines(zone string, outcomes []changeOutcome) []string {
+	applied := 0
+
+	for _, o := range outcomes {
+		if o.err == nil {
+			applied++
+		}
+	}
+
+	lines := []string{fmt.Sprintf("The Provider applied %d of %d changes:", applied, len(outcomes))}
+
+	for i, o := range outcomes {
+		if i == maxPreviewLines {
+			lines = append(lines, hintStyle.Render(fmt.Sprintf("… and %d more", len(outcomes)-i)))
+
+			break
+		}
+
+		if o.err == nil {
+			lines = append(lines, hintCurrentStyle.Render("✓ "+describeChange(zone, o.change)))
+
+			continue
+		}
+
+		lines = append(lines, errorStyle.Render("✗ "+describeChange(zone, o.change)))
+		for _, l := range wrapNote(errorStyle, o.err.Error(), noteWidth-4) {
+			lines = append(lines, "    "+l)
+		}
+	}
+
+	return lines
 }

@@ -310,8 +310,9 @@ func TestApplyingSendsTheChangesetAndCachesTheProvidersRecords(t *testing.T) {
 		t.Fatalf("cached Records = %+v, want %+v", records, wantCached)
 	}
 
-	if n := recordsCalls(f, "zw1"); n != 1 {
-		t.Fatalf("Records calls = %d, want 1", n)
+	// The validating Refresh and the Apply's re-check: no Refresh after it.
+	if n := recordsCalls(f, "zw1"); n != 2 {
+		t.Fatalf("Records calls = %d, want 2", n)
 	}
 
 	// The Zone stays validated, so editing goes on.

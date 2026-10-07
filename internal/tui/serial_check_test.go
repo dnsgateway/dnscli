@@ -28,8 +28,57 @@ type fakeResolver struct {
 	ns     map[string][]string
 	nsErrs map[string]error
 
+	// soaAt are the serials the Zones' own nameservers answer with, and
+	// soaAtErrs fail those queries; see setSOAAt.
+	soaAt     map[string]uint32
+	soaAtErrs map[string]error
+
 	mu      sync.Mutex
 	nsAsked []string // zone names asked for NS, in order
+	atAsked []soaAtQuery
+}
+
+// soaAtQuery is one SOA query sent straight to a Zone's nameservers.
+type soaAtQuery struct {
+	zone    string
+	servers []string
+}
+
+// setSOAAt scripts the serial a zone's own nameservers answer with.
+func (r *fakeResolver) setSOAAt(zone string, serial uint32) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.soaAt == nil {
+		r.soaAt = map[string]uint32{}
+	}
+
+	r.soaAt[zone] = serial
+}
+
+func (r *fakeResolver) SOAAt(_ context.Context, zone string, servers []string) (uint32, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.atAsked = append(r.atAsked, soaAtQuery{zone: zone, servers: append([]string(nil), servers...)})
+
+	if err, ok := r.soaAtErrs[zone]; ok {
+		return 0, err
+	}
+
+	if serial, ok := r.soaAt[zone]; ok {
+		return serial, nil
+	}
+
+	return 0, errors.New("no SOA answer scripted at the nameservers of " + zone)
+}
+
+// soaAtQueries returns the SOA queries sent straight to Zones' nameservers so far.
+func (r *fakeResolver) soaAtQueries() []soaAtQuery {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return append([]soaAtQuery(nil), r.atAsked...)
 }
 
 func (r *fakeResolver) NS(_ context.Context, zone string) ([]string, error) {

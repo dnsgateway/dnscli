@@ -40,7 +40,6 @@ func TestAPartialApplyCachesOnlyTheConfirmedChangesAndKeepsTheFailedOnesPending(
 
 	h.assertShows("Applied 2 of 3 changes to work.example; 1 failed and are still pending: record is locked",
 		"Changes to work.example", "- @ MX 10 mail.work.example TTL 3600")
-	h.assertHides("+ _verify TXT", "~ @ A")
 
 	h.press("esc")
 	h.assertShows("- work.example", "10 mail.work.example", "_verify.work.example", "203.0.113.99")

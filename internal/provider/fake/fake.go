@@ -50,6 +50,7 @@ type Provider struct {
 	fail        map[Op]error
 	failChange  func(dns.Change) error
 	withhold    bool
+	noSerial    bool
 	ttlRange    []uint32 // min, max; nil when not scripted
 	proxiable   []string // nil when not scripted
 	calls       []Call
@@ -179,6 +180,25 @@ func (p *Provider) WithholdRecords(on bool) {
 	p.withhold = on
 }
 
+// WithholdSerial makes Records and Apply report no SOA serial, like a
+// Provider whose API has no easy way to read it. The scripted serial
+// still goes up with each Apply.
+func (p *Provider) WithholdSerial(on bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.noSerial = on
+}
+
+// serial is the serial Records and Apply report for a Zone.
+func (p *Provider) serial(zoneProviderID string) uint32 {
+	if p.noSerial {
+		return 0
+	}
+
+	return p.serials[zoneProviderID]
+}
+
 // Calls returns the calls made so far, in order.
 func (p *Provider) Calls() []Call {
 	p.mu.Lock()
@@ -240,7 +260,7 @@ func (p *Provider) Records(_ context.Context, z dns.Zone) (provider.RecordSet, e
 		return provider.RecordSet{}, fmt.Errorf("zone %s (%s) not found", z.Name, z.ProviderID)
 	}
 
-	return provider.RecordSet{Records: slices.Clone(records), Serial: p.serials[z.ProviderID]}, nil
+	return provider.RecordSet{Records: slices.Clone(records), Serial: p.serial(z.ProviderID)}, nil
 }
 
 // Apply implements provider.Provider. It applies each change to the
@@ -285,7 +305,7 @@ func (p *Provider) Apply(_ context.Context, cs dns.Changeset) (provider.ApplyRes
 	for _, r := range res.Results {
 		if r.Err == nil {
 			p.serials[zid]++
-			res.Serial = p.serials[zid]
+			res.Serial = p.serial(zid)
 
 			break
 		}
