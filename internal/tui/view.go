@@ -19,6 +19,7 @@ var (
 	hintStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	errorStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 	statusStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("7"))
+	sealedStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
 	// staleStyle dims cached data that has not been confirmed in this session.
 	staleStyle = lipgloss.NewStyle().Faint(true)
 )
@@ -45,12 +46,14 @@ func (m *Model) View() string {
 
 	view := lipgloss.JoinVertical(lipgloss.Left,
 		lipgloss.JoinHorizontal(lipgloss.Top, left, right),
-		ansi.Truncate(m.statusLine(), m.width, "…"),
+		m.statusBar(),
 	)
 
 	switch {
 	case m.help:
 		view = overlay(view, m.helpView(), m.width, m.height)
+	case m.unseal != nil:
+		view = overlay(view, m.unsealView(), m.width, m.height)
 	case m.addForm != nil:
 		view = overlay(view, m.addAccountView(), m.width, m.height)
 	}
@@ -128,7 +131,7 @@ func (m *Model) recordLines(w, h int) []string {
 	case len(m.accounts) == 0:
 		return []string{
 			"",
-			"  No Accounts yet: add your first Account to get started.",
+			fmt.Sprintf("  No Accounts yet: press %s to add your first Account.", m.keys.keysFor(ActionAddAccount)),
 			"",
 			"  An Account is a Provider, a name and an API token.",
 			hintStyle.Render("  dnscli keeps Accounts in its local database; it is not a disposable cache."),
@@ -213,6 +216,24 @@ func window(n, cursor, h int) (start, end int) {
 	return start, start + h
 }
 
+// statusBar renders the status line with the session state at its right
+// edge. A terminal too narrow for both keeps the status line.
+func (m *Model) statusBar() string {
+	tag := sealedStyle.Render("sealed · read-only ")
+	if !m.sealed() {
+		tag = statusStyle.Render("unsealed ")
+	}
+
+	room := m.width - lipgloss.Width(tag) - 1
+	if room < 20 {
+		return ansi.Truncate(m.statusLine(), m.width, "…")
+	}
+
+	left := ansi.Truncate(m.statusLine(), room, "…")
+
+	return left + strings.Repeat(" ", m.width-lipgloss.Width(left)-lipgloss.Width(tag)) + tag
+}
+
 func (m *Model) statusLine() string {
 	switch {
 	case m.err != nil:
@@ -221,6 +242,10 @@ func (m *Model) statusLine() string {
 		return errorStyle.Render(" " + m.recordsErr.Error())
 	case m.profileErr != nil:
 		return errorStyle.Render(" " + m.profileErr.Error())
+	case m.notice.err:
+		return errorStyle.Render(" " + m.notice.text)
+	case m.notice.text != "":
+		return statusStyle.Render(" " + m.notice.text)
 	case !m.loaded:
 		return statusStyle.Render(" loading cache…")
 	case m.open != nil:

@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
+	"github.com/sergelogvinov/dnscli/internal/vault"
 )
 
 // pane identifies one of the three panes, in Tab order.
@@ -62,6 +63,23 @@ type Model struct {
 
 	// addForm is the add-Account dialog; nil when closed.
 	addForm *addAccountForm
+	// notice is the latest background result shown in the status bar.
+	notice notice
+
+	// key is the data key; nil while the session is sealed.
+	key *vault.Key
+	// slots are the enrolled Unseal Method key slots.
+	slots []vault.Slot
+	// unseal is the Unseal prompt; nil when closed.
+	unseal *unsealPrompt
+	// afterUnseal is the action waiting for the Unseal prompt.
+	afterUnseal func() tea.Cmd
+}
+
+// notice is a message for the status bar.
+type notice struct {
+	text string
+	err  bool
 }
 
 // New builds the model. All background work derives its context from ctx,
@@ -91,6 +109,7 @@ func (m *Model) Context() context.Context {
 type cacheLoadedMsg struct {
 	accounts []dns.Account
 	zones    []dns.Zone
+	slots    []vault.Slot
 	err      error
 }
 
@@ -117,7 +136,12 @@ func (m *Model) loadCache() tea.Msg {
 		return cacheLoadedMsg{err: err}
 	}
 
-	return cacheLoadedMsg{accounts: accounts, zones: zones}
+	slots, err := m.deps.Store.KeySlots(m.ctx)
+	if err != nil {
+		return cacheLoadedMsg{err: err}
+	}
+
+	return cacheLoadedMsg{accounts: accounts, zones: zones, slots: slots}
 }
 
 func (m *Model) loadRecords(zoneID int64) tea.Cmd {
@@ -140,8 +164,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err
 		m.accounts = msg.accounts
 		m.zones = msg.zones
+		m.slots = msg.slots
 		m.shared = sharedNames(msg.zones)
 		m.refilter(paneDomains)
+		// A reload, such as after Zone discovery, may change the lists:
+		// keep every cursor inside its list.
+		for p := range paneCount {
+			m.cursor[p] = min(m.cursor[p], max(m.itemCount(p)-1, 0))
+		}
+	case unsealedMsg:
+		return m, m.unsealed(msg)
+	case accountAddedMsg:
+		return m, m.accountAdded(msg)
+	case zonesDiscoveredMsg:
+		return m, m.zonesDiscovered(msg)
 	case recordsLoadedMsg:
 		if m.open == nil || m.open.ID != msg.zoneID {
 			return m, nil // the user has moved on to another Zone
@@ -153,6 +189,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refilter(paneRecords)
 		m.cursor[paneRecords] = 0
 	case tea.KeyMsg:
+		if m.unseal != nil {
+			return m, m.unsealKey(msg)
+		}
+
 		if m.addForm != nil {
 			return m, m.addAccountKey(msg)
 		}
@@ -160,6 +200,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.typeIntoSearch(msg) {
 			return m, nil
 		}
+
+		m.notice = notice{} // a notice stays until the user moves on
 
 		return m, m.handle(m.keys.action(msg.String()))
 	}
