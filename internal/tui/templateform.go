@@ -289,14 +289,9 @@ func (m *Model) pendingRecords() ([]recordRow, []dns.Record) {
 // automatic TTL where its Provider has one, else an hour, kept inside the
 // Provider's TTL range.
 func (m *Model) templateTTL(zoneID int64) uint32 {
-	caps := m.refreshOf(zoneID).caps
-	if caps.autoTTL {
+	r := m.refreshOf(zoneID).caps.ttlRange()
+	if r.Auto {
 		return dns.TTLAuto
-	}
-
-	r := caps.ttl
-	if r == (dns.TTLRange{}) {
-		r = dns.DefaultTTLRange
 	}
 
 	return min(max(templateTTL, r.Min), r.Max)
