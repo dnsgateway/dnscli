@@ -214,6 +214,10 @@ func TestDeletingMarksARecordAndDeletingAgainTakesTheChangeBack(t *testing.T) {
 
 	h.press("j", "j", "d")
 	h.assertHides("+ work.example", "hello", "pending change")
+
+	// The cursor moves up to the row that is now last.
+	h.press("e")
+	h.assertShows("Edit Record", "‹ MX ›", "10 mail.work.example")
 }
 
 // buildChangeset stages, on work.example, an addition, a modification of

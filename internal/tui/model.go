@@ -484,6 +484,8 @@ func (m *Model) refilter(p pane) {
 	case paneRecords:
 		m.rows = m.recordRows()
 		m.visibleRecords = filterRecords(m.rows, m.search[paneRecords].query)
+		// Taking back a pending addition removes its row.
+		m.cursor[paneRecords] = min(m.cursor[paneRecords], max(len(m.visibleRecords)-1, 0))
 	}
 }
 
