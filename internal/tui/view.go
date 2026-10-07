@@ -145,7 +145,7 @@ func (m *Model) recordLines(w, h int) []string {
 
 	lines := append(m.searchLines(paneRecords, w), header)
 
-	records := m.visibleRecords()
+	records := m.visibleRecords
 	start, end := window(len(records), m.cursor[paneRecords], h-len(lines))
 
 	for i := start; i < end; i++ {

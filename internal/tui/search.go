@@ -1,11 +1,7 @@
 package tui
 
 import (
-	"strings"
-
 	tea "github.com/charmbracelet/bubbletea"
-
-	"github.com/sergelogvinov/dnscli/internal/dns"
 )
 
 // search is one pane's search filter.
@@ -46,19 +42,20 @@ func (m *Model) clearSearch() {
 
 	m.search[m.focus] = search{}
 	m.cursor[m.focus] = 0
-	m.syncDomainsQuery()
+	m.syncQuery()
 }
 
-// syncDomainsQuery hands the Domains search query to the Zone filter, so it
-// narrows the Domains pane together with the Account filter.
-func (m *Model) syncDomainsQuery() {
-	if m.focus != paneDomains {
-		return
+// syncQuery applies the focused pane's search query to the items it shows.
+// The Domains search narrows the Zone filter, together with the Account filter.
+func (m *Model) syncQuery() {
+	switch m.focus {
+	case paneDomains:
+		f := m.filter
+		f.query = m.search[paneDomains].query
+		m.setFilter(f)
+	case paneRecords:
+		m.visibleRecords = filterRecords(m.records, m.search[paneRecords].query)
 	}
-
-	f := m.filter
-	f.query = m.search[paneDomains].query
-	m.setFilter(f)
 }
 
 // typeIntoSearch sends a typed key to the focused pane's search input, and
@@ -87,7 +84,7 @@ func (m *Model) typeIntoSearch(msg tea.KeyMsg) bool {
 	}
 
 	m.cursor[m.focus] = 0
-	m.syncDomainsQuery()
+	m.syncQuery()
 
 	return true
 }
@@ -105,27 +102,4 @@ func (m *Model) searchLines(p pane, w int) []string {
 	}
 
 	return []string{fit(" /"+s.query+"▏", w)}
-}
-
-// visibleRecords are the open Zone's Records the Records pane lists, after
-// its search filter, which matches a Record's name, type or value.
-func (m *Model) visibleRecords() []dns.Record {
-	q := strings.ToLower(m.search[paneRecords].query)
-	if q == "" {
-		return m.records
-	}
-
-	var out []dns.Record
-
-	for _, r := range m.records {
-		for _, field := range []string{r.Name, r.Type, r.Value} {
-			if strings.Contains(strings.ToLower(field), q) {
-				out = append(out, r)
-
-				break
-			}
-		}
-	}
-
-	return out
 }

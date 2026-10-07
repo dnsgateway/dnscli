@@ -16,22 +16,43 @@ type zoneFilter struct {
 	query string
 }
 
-// match reports whether z passes every criterion of f.
-func (f zoneFilter) match(z dns.Zone) bool {
-	if f.account != 0 && z.AccountID != f.account {
-		return false
-	}
-
-	return f.query == "" || strings.Contains(strings.ToLower(z.Name), strings.ToLower(f.query))
-}
-
 // filterZones returns the Zones that pass f, in their original order.
 func filterZones(zones []dns.Zone, f zoneFilter) []dns.Zone {
+	q := strings.ToLower(f.query)
+
 	var out []dns.Zone
 
 	for _, z := range zones {
-		if f.match(z) {
+		if f.account != 0 && z.AccountID != f.account {
+			continue
+		}
+
+		if q == "" || strings.Contains(strings.ToLower(z.Name), q) {
 			out = append(out, z)
+		}
+	}
+
+	return out
+}
+
+// filterRecords returns the Records whose name, type or value contains
+// query, ignoring case, in their original order. An empty query matches
+// every Record.
+func filterRecords(records []dns.Record, query string) []dns.Record {
+	q := strings.ToLower(query)
+	if q == "" {
+		return records
+	}
+
+	var out []dns.Record
+
+	for _, r := range records {
+		for _, field := range []string{r.Name, r.Type, r.Value} {
+			if strings.Contains(strings.ToLower(field), q) {
+				out = append(out, r)
+
+				break
+			}
 		}
 	}
 

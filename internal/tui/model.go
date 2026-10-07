@@ -53,6 +53,8 @@ type Model struct {
 	recordsLoading bool
 	recordsErr     error // reading the open Zone's Records failed
 	records        []dns.Record
+	// visibleRecords are the Records the Records pane lists, after its search.
+	visibleRecords []dns.Record
 }
 
 // New builds the model. All background work derives its context from ctx,
@@ -141,6 +143,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.recordsLoading = false
 		m.recordsErr = msg.err
 		m.records = msg.records
+		m.visibleRecords = filterRecords(m.records, m.search[paneRecords].query)
 		m.cursor[paneRecords] = 0
 	case tea.KeyMsg:
 		if m.typeIntoSearch(msg) {
@@ -218,7 +221,7 @@ func (m *Model) itemCount(p pane) int {
 	case paneAccounts:
 		return len(m.accounts)
 	case paneRecords:
-		return len(m.visibleRecords())
+		return len(m.visibleRecords)
 	}
 
 	return 0
@@ -262,6 +265,7 @@ func (m *Model) openZone() tea.Cmd {
 	z := m.visible[m.cursor[paneDomains]]
 	m.open = &z
 	m.records = nil
+	m.visibleRecords = nil
 	m.search[paneRecords] = search{}
 	m.recordsLoading = true
 	m.recordsErr = nil
