@@ -229,6 +229,27 @@ func TestRecordsListsEveryPageWithTheProxyFlag(t *testing.T) {
 	}
 }
 
+func TestRecordsPutThePriorityInTheValue(t *testing.T) {
+	mx := cfRecord("r1", "MX", "example.com", "mail.example.com", 3600, false, false)
+	mx["priority"] = 10
+	srv := cfRecord("r2", "SRV", "_sip._tcp.example.com", "5 5060 sip.example.com", 3600, false, false)
+	srv["priority"] = 20
+	srv["data"] = map[string]any{"priority": 20, "weight": 5, "port": 5060, "target": "sip.example.com"}
+
+	api := &cfAPI{records: map[string][]map[string]any{"z1": {mx, srv}}}
+	p := newProvider(t, api)
+
+	rs, err := p.Records(context.Background(), dns.Zone{Name: "example.com", ProviderID: "z1"})
+	if err != nil {
+		t.Fatalf("Records: %v", err)
+	}
+
+	assertRecords(t, rs.Records, []dns.Record{
+		{ProviderID: "r1", Type: "MX", Name: "example.com", Value: "10 mail.example.com", TTL: 3600},
+		{ProviderID: "r2", Type: "SRV", Name: "_sip._tcp.example.com", Value: "20 5 5060 sip.example.com", TTL: 3600},
+	})
+}
+
 func assertRecords(t *testing.T, got, want []dns.Record) {
 	t.Helper()
 

@@ -4,7 +4,9 @@ package cloudflare
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -141,7 +143,12 @@ func (p *Provider) Records(ctx context.Context, zone dns.Zone) (provider.RecordS
 
 	records := make([]dns.Record, 0, len(all))
 	for _, r := range all {
-		records = append(records, toRecord(r))
+		rec, err := toRecord(r)
+		if err != nil {
+			return provider.RecordSet{}, err
+		}
+
+		records = append(records, rec)
 	}
 
 	return provider.RecordSet{Records: records}, nil
@@ -151,20 +158,47 @@ func (p *Provider) Records(ctx context.Context, zone dns.Zone) (provider.RecordS
 // or "false". It is set only on Records Cloudflare can proxy.
 const proxiedExtra = "proxied"
 
-func toRecord(r cfdns.RecordResponse) dns.Record {
+// wireRecord is the part of a v4 DNS record that dnscli reads.
+//
+// It is decoded from the record's raw JSON: cloudflare-go decodes records
+// into an untagged union that settles on the A-record shape for every type,
+// dropping type-specific fields such as the MX priority.
+type wireRecord struct {
+	ID        string  `json:"id"`
+	Type      string  `json:"type"`
+	Name      string  `json:"name"`
+	Content   string  `json:"content"`
+	TTL       uint32  `json:"ttl"`
+	Priority  float64 `json:"priority"`
+	Proxiable bool    `json:"proxiable"`
+	Proxied   bool    `json:"proxied"`
+}
+
+func toRecord(r cfdns.RecordResponse) (dns.Record, error) {
+	var w wireRecord
+	if err := json.Unmarshal([]byte(r.JSON.RawJSON()), &w); err != nil {
+		return dns.Record{}, fmt.Errorf("cloudflare: decode record %s: %w", r.ID, err)
+	}
+
 	rec := dns.Record{
-		ProviderID: r.ID,
-		Type:       string(r.Type),
-		Name:       r.Name,
-		Value:      r.Content,
-		TTL:        uint32(r.TTL),
+		ProviderID: w.ID,
+		Type:       w.Type,
+		Name:       w.Name,
+		Value:      w.Content,
+		TTL:        w.TTL,
 	}
 
-	if r.Proxiable {
-		rec.Extras = map[string]string{proxiedExtra: strconv.FormatBool(r.Proxied)}
+	// Cloudflare keeps the MX and SRV priority out of the content; the
+	// Value is in zone-file presentation form, priority first.
+	if w.Type == "MX" || w.Type == "SRV" {
+		rec.Value = strconv.FormatFloat(w.Priority, 'f', -1, 64) + " " + w.Content
 	}
 
-	return rec
+	if w.Proxiable {
+		rec.Extras = map[string]string{proxiedExtra: strconv.FormatBool(w.Proxied)}
+	}
+
+	return rec, nil
 }
 
 // Apply implements provider.Provider.
