@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
@@ -34,16 +35,41 @@ func (s *Store) AccountSecret(ctx context.Context, accountID int64) ([]byte, err
 	return sealed, nil
 }
 
-// AddKeySlot stores an Unseal Method's key slot and returns it with its ID set.
-func (s *Store) AddKeySlot(ctx context.Context, slot vault.Slot) (vault.Slot, error) {
-	res, err := s.db.ExecContext(ctx, `INSERT INTO key_slots (method, params, wrapped) VALUES (?, ?, ?)`, slot.Method, slot.Params, slot.Wrapped)
-	if err != nil {
-		return vault.Slot{}, fmt.Errorf("add key slot: %w", err)
-	}
+// ErrAlreadyEnrolled means a key slot, and so a data key, already exists.
+var ErrAlreadyEnrolled = errors.New("an Unseal Method is already enrolled")
 
-	slot.ID, err = res.LastInsertId()
+// EnrollFirstKeySlot stores the first key slot, which wraps a new data key,
+// and returns it with its ID set. It returns ErrAlreadyEnrolled when any key
+// slot exists: the check and the insert hold the write lock together, so
+// even two processes enrolling at once leave exactly one data key.
+func (s *Store) EnrollFirstKeySlot(ctx context.Context, slot vault.Slot) (vault.Slot, error) {
+	conn, err := s.db.Conn(ctx)
 	if err != nil {
-		return vault.Slot{}, fmt.Errorf("add key slot: %w", err)
+		return vault.Slot{}, fmt.Errorf("enroll key slot: %w", err)
+	}
+	defer conn.Close()
+
+	err = writeLocked(ctx, conn, func() error {
+		var exists bool
+		if err := conn.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM key_slots)`).Scan(&exists); err != nil {
+			return err
+		}
+
+		if exists {
+			return ErrAlreadyEnrolled
+		}
+
+		res, err := conn.ExecContext(ctx, `INSERT INTO key_slots (method, params, wrapped) VALUES (?, ?, ?)`, slot.Method, slot.Params, slot.Wrapped)
+		if err != nil {
+			return err
+		}
+
+		slot.ID, err = res.LastInsertId()
+
+		return err
+	})
+	if err != nil {
+		return vault.Slot{}, fmt.Errorf("enroll key slot: %w", err)
 	}
 
 	return slot, nil

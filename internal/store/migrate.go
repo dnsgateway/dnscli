@@ -69,17 +69,7 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	}
 	defer conn.Close()
 
-	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
-		return fmt.Errorf("migrate: %w", err)
-	}
-
-	if err := migrateLocked(ctx, conn); err != nil {
-		_, _ = conn.ExecContext(context.WithoutCancel(ctx), "ROLLBACK")
-
-		return err
-	}
-
-	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+	if err := writeLocked(ctx, conn, func() error { return migrateLocked(ctx, conn) }); err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
 
@@ -88,6 +78,25 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	}
 
 	return nil
+}
+
+// writeLocked runs fn in a transaction that takes the write lock up front
+// (BEGIN IMMEDIATE), so what fn reads cannot change before it writes, even
+// from another process. It rolls back when fn fails.
+func writeLocked(ctx context.Context, conn *sql.Conn, fn func() error) error {
+	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return err
+	}
+
+	if err := fn(); err != nil {
+		_, _ = conn.ExecContext(context.WithoutCancel(ctx), "ROLLBACK")
+
+		return err
+	}
+
+	_, err := conn.ExecContext(ctx, "COMMIT")
+
+	return err
 }
 
 // enableWAL switches the database to WAL. The switch needs an exclusive lock

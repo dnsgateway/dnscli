@@ -1,12 +1,13 @@
 package tui
 
 import (
+	"context"
 	"errors"
-	"slices"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/sergelogvinov/dnscli/internal/store"
 	"github.com/sergelogvinov/dnscli/internal/vault"
 )
 
@@ -29,9 +30,9 @@ type unsealPrompt struct {
 
 // unsealedMsg reports the result of Unseal or of enrolling a passphrase.
 type unsealedMsg struct {
-	key  *vault.Key
-	slot *vault.Slot // the newly enrolled key slot
-	err  error
+	key   *vault.Key
+	slots []vault.Slot // the key slots in the Store; nil when unread
+	err   error
 }
 
 // sealed reports whether the session is sealed, and so read-only.
@@ -48,9 +49,9 @@ func (m *Model) withSecrets(next func() tea.Cmd) tea.Cmd {
 	}
 
 	m.afterUnseal = next
-	m.unseal = &unsealPrompt{enroll: !slices.ContainsFunc(m.slots, func(s vault.Slot) bool {
-		return s.Method == m.deps.unsealMethod().Name()
-	})}
+	// Any key slot means a data key exists: a new one would not open the
+	// secrets sealed with it. The Store has the final say when submitting.
+	m.unseal = &unsealPrompt{enroll: len(m.slots) == 0}
 
 	return nil
 }
@@ -120,30 +121,51 @@ func (m *Model) submitUnseal() tea.Cmd {
 	}
 
 	p.busy = true
-	method, slots, store, ctx := m.deps.unsealMethod(), m.slots, m.deps.Store, m.ctx
+	method, store, ctx, enroll := m.deps.unsealMethod(), m.deps.Store, m.ctx, p.enroll
 	secret := []byte(p.passphrase)
 
-	if !p.enroll {
-		return func() tea.Msg {
-			key, err := vault.Unseal(method, slots, secret)
+	return func() tea.Msg {
+		return unsealOrEnroll(ctx, store, method, enroll, secret)
+	}
+}
 
-			return unsealedMsg{key: key, err: err}
-		}
+// unsealOrEnroll decides from the Store, not from the cached key slots,
+// whether to Unseal or to enroll a new data key. Once any key slot exists,
+// even one another process enrolled a moment ago, it only Unseals.
+func unsealOrEnroll(ctx context.Context, s *store.Store, method vault.Method, enroll bool, secret []byte) unsealedMsg {
+	slots, err := s.KeySlots(ctx)
+	if err != nil {
+		return unsealedMsg{err: err}
 	}
 
-	return func() tea.Msg {
+	if len(slots) == 0 {
+		if !enroll {
+			return unsealedMsg{slots: slots, err: vault.ErrNoSlot}
+		}
+
 		key, slot, err := vault.Create(method, secret)
 		if err != nil {
 			return unsealedMsg{err: err}
 		}
 
-		slot, err = store.AddKeySlot(ctx, slot)
-		if err != nil {
+		slot, err = s.EnrollFirstKeySlot(ctx, slot)
+		if err == nil {
+			return unsealedMsg{key: key, slots: []vault.Slot{slot}}
+		}
+
+		if !errors.Is(err, store.ErrAlreadyEnrolled) {
 			return unsealedMsg{err: err}
 		}
 
-		return unsealedMsg{key: key, slot: &slot}
+		// Another process enrolled first: Unseal with its data key.
+		if slots, err = s.KeySlots(ctx); err != nil {
+			return unsealedMsg{err: err}
+		}
 	}
+
+	key, err := vault.Unseal(method, slots, secret)
+
+	return unsealedMsg{key: key, slots: slots, err: err}
 }
 
 // unsealed handles the result of Unseal: on success it runs the action
@@ -153,23 +175,35 @@ func (m *Model) unsealed(msg unsealedMsg) tea.Cmd {
 		return nil
 	}
 
-	if msg.err != nil {
-		m.unseal.busy = false
-		m.unseal.passphrase, m.unseal.repeat = "", ""
-		m.unseal.field = unsealFieldPassphrase
+	if msg.slots != nil {
+		m.slots = msg.slots
+	}
 
-		m.unseal.err = "Could not Unseal: " + msg.err.Error() + ". The session is still sealed."
-		if errors.Is(msg.err, vault.ErrWrongPassphrase) {
-			m.unseal.err = "Wrong passphrase. The session is still sealed."
+	if msg.err != nil {
+		p := m.unseal
+		// A passphrase enrolled elsewhere turns enrolling into Unseal.
+		enrolledElsewhere := p.enroll && len(m.slots) > 0
+
+		p.busy = false
+		p.passphrase, p.repeat = "", ""
+		p.field = unsealFieldPassphrase
+		if enrolledElsewhere {
+			p.enroll = false
+		}
+
+		switch {
+		case enrolledElsewhere && errors.Is(msg.err, vault.ErrWrongPassphrase):
+			p.err = "A passphrase is already enrolled: enter it to Unseal. The session is still sealed."
+		case errors.Is(msg.err, vault.ErrWrongPassphrase):
+			p.err = "Wrong passphrase. The session is still sealed."
+		default:
+			p.err = "Could not Unseal: " + msg.err.Error() + ". The session is still sealed."
 		}
 
 		return nil
 	}
 
 	m.key = msg.key
-	if msg.slot != nil {
-		m.slots = append(m.slots, *msg.slot)
-	}
 
 	m.unseal = nil
 	next := m.afterUnseal
