@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -25,13 +26,7 @@ var EditableTypes = []string{"A", "AAAA", "CNAME", "MX", "TXT", "NS", "SRV", "CA
 
 // Editable reports whether dnscli can add and edit Records of a type.
 func Editable(typ string) bool {
-	for _, t := range EditableTypes {
-		if t == typ {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(EditableTypes, typ)
 }
 
 // TTLAuto is Cloudflare's "automatic" TTL. Any other TTL must be in the

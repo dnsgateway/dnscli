@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -89,7 +90,7 @@ func (m *Model) previewKey(msg tea.KeyMsg) tea.Cmd {
 		delete(m.changesets, p.zoneID)
 		m.preview = nil
 		m.refilter(paneRecords)
-		m.notice = notice{text: fmt.Sprintf("Discarded %s for %s.", pendingCount(n), m.zoneByID[p.zoneID].Name)}
+		m.notice = notice{text: fmt.Sprintf("Discarded %s for %s.", plural(n, "pending change"), m.zoneByID[p.zoneID].Name)}
 	case ActionSelect:
 		return m.applyChanges()
 	}
@@ -276,7 +277,7 @@ func (m *Model) changesApplied(msg changesAppliedMsg) tea.Cmd {
 
 	applied := len(msg.sent.Changes) - failed
 
-	text := fmt.Sprintf("Applied %s to %s.", changeCount(applied), z.Name)
+	text := fmt.Sprintf("Applied %s to %s.", plural(applied, "change"), z.Name)
 	if failed > 0 {
 		text = fmt.Sprintf("Applied %d of %d changes to %s; %d failed and are still pending: %v.",
 			applied, len(msg.sent.Changes), z.Name, failed, first)
@@ -346,13 +347,13 @@ func (m *Model) dropApplied(msg changesAppliedMsg) {
 	m.refilter(paneRecords)
 }
 
-// changeCount says how many changes: "1 change", "3 changes".
-func changeCount(n int) string {
-	if n == 1 {
-		return "1 change"
+// plural says how many of a noun, such as "1 change" or "3 pending changes".
+func plural(n int, noun string) string {
+	if n != 1 {
+		noun += "s"
 	}
 
-	return fmt.Sprintf("%d changes", n)
+	return strconv.Itoa(n) + " " + noun
 }
 
 func (m *Model) previewView() string {
@@ -372,7 +373,7 @@ func (m *Model) previewView() string {
 			lines = append(lines, changeStyle(c.Kind).Render(describeChange(z.Name, c)))
 		}
 
-		lines = append([]string{"Applying sends " + pendingCount(len(cs.Changes)) + " to the Provider:", ""}, lines...)
+		lines = append([]string{"Applying sends " + plural(len(cs.Changes), "pending change") + " to the Provider:", ""}, lines...)
 	}
 
 	if p.err != "" {

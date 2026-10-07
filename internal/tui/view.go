@@ -343,7 +343,7 @@ func (m *Model) zoneStatus(z dns.Zone) string {
 	}
 
 	if cs := m.pendingOf(z.ID); cs != nil {
-		parts = append(parts, fmt.Sprintf("%s (%s preview)", pendingCount(len(cs.Changes)), m.keys.keysFor(ActionPreviewChanges)))
+		parts = append(parts, fmt.Sprintf("%s (%s preview)", plural(len(cs.Changes), "pending change"), m.keys.keysFor(ActionPreviewChanges)))
 	}
 
 	if z.RefreshedAt.IsZero() {

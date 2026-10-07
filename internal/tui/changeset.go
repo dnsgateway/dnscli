@@ -270,15 +270,6 @@ func sameRecord(a, b dns.Record) bool {
 		a.Value == b.Value && a.TTL == b.TTL && maps.Equal(a.Extras, b.Extras)
 }
 
-// pendingCount says how many changes are pending: "1 pending change".
-func pendingCount(n int) string {
-	if n == 1 {
-		return "1 pending change"
-	}
-
-	return strconv.Itoa(n) + " pending changes"
-}
-
 // changeMark is the one-column mark the Records pane draws for a pending change.
 func changeMark(k dns.ChangeKind) string {
 	switch k {
