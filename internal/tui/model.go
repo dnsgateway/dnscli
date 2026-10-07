@@ -347,9 +347,7 @@ func (m *Model) handle(a Action) tea.Cmd {
 	case ActionRelistZones:
 		return m.relistZones()
 	case ActionRefresh:
-		if m.open != nil {
-			return m.refreshZone(*m.open)
-		}
+		return m.retryRefresh()
 	}
 
 	return nil

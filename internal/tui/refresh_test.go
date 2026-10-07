@@ -240,6 +240,37 @@ func TestARateLimitedRefreshShowsWhenToRetryAndIsNotRetriedOnItsOwn(t *testing.T
 	}
 }
 
+func TestARateLimitedZoneIsNotRefreshedUntilTheProviderSaid(t *testing.T) {
+	f := refreshZones()
+	now := testNow
+	h, _, _ := newRefreshHarnessWith(t, f, tui.Deps{Clock: func() time.Time { return now }})
+
+	f.Fail(fake.OpRecords, &provider.APIError{Provider: "cloudflare", StatusCode: http.StatusTooManyRequests, RetryAfter: 90 * time.Second})
+	h.press("enter")
+	f.Fail(fake.OpRecords, nil)
+
+	retryAt := testNow.Add(90 * time.Second).Local().Format(time.TimeOnly)
+
+	// Opening the Zone again, or retrying, before then does not call the Provider.
+	h.press("enter")
+	h.press("r")
+
+	h.assertShows("rate-limited until " + retryAt)
+
+	if n := recordsCalls(f, "zw1"); n != 1 {
+		t.Fatalf("Records calls = %d before the Provider's retry time, want 1", n)
+	}
+
+	now = testNow.Add(90 * time.Second)
+	h.press("r")
+
+	h.assertShows("validated this session", "203.0.113.20")
+
+	if n := recordsCalls(f, "zw1"); n != 2 {
+		t.Fatalf("Records calls = %d after the Provider's retry time, want 2", n)
+	}
+}
+
 func TestRefreshesOfOneZoneAreSingleFlight(t *testing.T) {
 	f := refreshZones()
 	h, s, _ := newRefreshHarness(t, f)

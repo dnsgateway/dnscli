@@ -65,10 +65,36 @@ func (m *Model) canRefresh(z dns.Zone) bool {
 	return ok && m.deps.Providers[a.Provider] != nil
 }
 
+// rateLimited reports whether the Provider asked not to be called again
+// for a Zone yet.
+func (m *Model) rateLimited(r zoneRefresh) bool {
+	return !r.retryAt.IsZero() && m.deps.now().Before(r.retryAt)
+}
+
+// retryRefresh Refreshes the open Zone at the user's request, or explains
+// why it cannot.
+func (m *Model) retryRefresh() tea.Cmd {
+	if m.open == nil {
+		return nil
+	}
+
+	z := *m.open
+	r := m.refreshOf(z.ID)
+
+	if !r.pending && m.rateLimited(r) {
+		m.notice = notice{text: fmt.Sprintf("Refreshing %s is rate-limited until %s.", z.Name, r.retryAt.Local().Format(time.TimeOnly))}
+
+		return nil
+	}
+
+	return m.refreshZone(z)
+}
+
 // refreshZone Refreshes a Zone in the background once the session is
-// unsealed. A Zone with a Refresh already pending is left alone.
+// unsealed. A Zone with a Refresh already pending, or that the Provider
+// rate-limited until later, is left alone.
 func (m *Model) refreshZone(z dns.Zone) tea.Cmd {
-	if !m.canRefresh(z) || m.refreshOf(z.ID).pending {
+	if r := m.refreshOf(z.ID); !m.canRefresh(z) || r.pending || m.rateLimited(r) {
 		return nil
 	}
 
