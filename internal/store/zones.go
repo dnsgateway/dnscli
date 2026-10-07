@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -74,14 +76,59 @@ func (s *Store) ReplaceRecords(ctx context.Context, zoneID int64, records []dns.
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	if _, err := tx.ExecContext(ctx, `DELETE FROM records WHERE zone_id = ?`, zoneID); err != nil {
+	if err := replaceRecords(ctx, tx, zoneID, records); err != nil {
 		return fmt.Errorf("replace records: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+// ErrZoneNotCached means the Zone is no longer in the cache, for example
+// because its Account was removed.
+var ErrZoneNotCached = errors.New("the Zone is no longer cached")
+
+// SaveRefresh stores the result of a Refresh in one transaction: it
+// replaces the Zone's cached Records and sets its SOA serial (zero when the
+// Provider did not report one) and its last Refresh time.
+func (s *Store) SaveRefresh(ctx context.Context, zoneID int64, records []dns.Record, serial uint32, at time.Time) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("save refresh: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	res, err := tx.ExecContext(ctx, `UPDATE zones SET soa_serial = ?, refreshed_at = ? WHERE id = ?`,
+		serial, unixOrZero(at), zoneID)
+	if err != nil {
+		return fmt.Errorf("save refresh: %w", err)
+	}
+
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("save refresh: %w", err)
+	}
+
+	if n == 0 {
+		return fmt.Errorf("save refresh: %w", ErrZoneNotCached)
+	}
+
+	if err := replaceRecords(ctx, tx, zoneID, records); err != nil {
+		return fmt.Errorf("save refresh: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+// replaceRecords replaces a Zone's cached Records inside tx.
+func replaceRecords(ctx context.Context, tx *sql.Tx, zoneID int64, records []dns.Record) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM records WHERE zone_id = ?`, zoneID); err != nil {
+		return err
 	}
 
 	for _, r := range records {
 		extras, err := json.Marshal(nonNil(r.Extras))
 		if err != nil {
-			return fmt.Errorf("replace records: %w", err)
+			return err
 		}
 
 		if _, err := tx.ExecContext(ctx, `
@@ -89,11 +136,11 @@ func (s *Store) ReplaceRecords(ctx context.Context, zoneID int64, records []dns.
 			VALUES (?, ?, ?, ?, ?, ?, ?)`,
 			zoneID, r.ProviderID, r.Type, r.Name, r.Value, r.TTL, string(extras),
 		); err != nil {
-			return fmt.Errorf("replace records: %w", err)
+			return err
 		}
 	}
 
-	return tx.Commit()
+	return nil
 }
 
 // Records returns a Zone's cached Records, ordered by name and type.

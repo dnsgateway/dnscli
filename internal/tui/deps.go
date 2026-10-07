@@ -29,6 +29,9 @@ type Deps struct {
 	// SerialChecks is how many Serial Checks may run at once. Defaults to
 	// DefaultSerialChecks.
 	SerialChecks int
+	// Refreshes is how many Refreshes may run at once. Defaults to
+	// DefaultRefreshes.
+	Refreshes int
 	// UnsealMethod is the session's Unseal Method. Defaults to the
 	// passphrase method with the default argon2id cost.
 	UnsealMethod vault.Method
@@ -59,6 +62,17 @@ func (d Deps) serialChecks() int {
 	}
 
 	return d.SerialChecks
+}
+
+// DefaultRefreshes is the default limit on Refreshes running at once.
+const DefaultRefreshes = 4
+
+func (d Deps) refreshes() int {
+	if d.Refreshes < 1 {
+		return DefaultRefreshes
+	}
+
+	return d.Refreshes
 }
 
 func (d Deps) unsealMethod() vault.Method {

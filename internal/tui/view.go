@@ -83,9 +83,9 @@ func (m *Model) domainLines(w, h int) []string {
 	start, end := window(len(m.visible), m.cursor[paneDomains], h)
 
 	for i := start; i < end; i++ {
-		// No Zone is validated yet, so all are dimmed; the marker is the Serial Check hint.
+		// Stale Zones are dimmed; the marker shows the Refresh, else the Serial Check hint.
 		z := m.visible[i]
-		lines = append(lines, m.row(paneDomains, i, " "+m.zoneLabel(z), w-2, staleStyle)+" "+m.freshnessOf(z.ID).marker())
+		lines = append(lines, m.row(paneDomains, i, " "+m.zoneLabel(z), w-2, m.zoneStyle(z.ID))+" "+m.zoneMarker(z.ID))
 	}
 
 	if len(m.visible) == 0 && len(m.zones) > 0 {
@@ -93,6 +93,26 @@ func (m *Model) domainLines(w, h int) []string {
 	}
 
 	return lines
+}
+
+// zoneStyle dims a Stale Zone and its Records; a Validated Zone is drawn plain.
+func (m *Model) zoneStyle(id int64) lipgloss.Style {
+	if m.validatedZone(id) {
+		return lipgloss.NewStyle()
+	}
+
+	return staleStyle
+}
+
+// zoneMarker is the one-column marker drawn after a Zone: its Refresh
+// state once it has one, else its Serial Check hint, which never
+// contradicts a Refresh.
+func (m *Model) zoneMarker(id int64) string {
+	if marker := m.refreshOf(id).marker(); marker != "" {
+		return marker
+	}
+
+	return m.freshnessOf(id).marker()
 }
 
 // zoneLabel names a Zone in the Domains pane. A zone name that exists in
@@ -159,7 +179,7 @@ func (m *Model) recordLines(w, h int) []string {
 
 	for i := start; i < end; i++ {
 		r := records[i]
-		lines = append(lines, m.row(paneRecords, i, cols.format(r.Name, r.Type, r.Value, strconv.FormatUint(uint64(r.TTL), 10)), w, staleStyle))
+		lines = append(lines, m.row(paneRecords, i, cols.format(r.Name, r.Type, r.Value, strconv.FormatUint(uint64(r.TTL), 10)), w, m.zoneStyle(m.open.ID)))
 	}
 
 	if len(records) == 0 {
@@ -265,7 +285,10 @@ func (m *Model) zoneStatus(z dns.Zone) string {
 		parts = append(parts, a.Label())
 	}
 
-	if hint := m.freshnessOf(z.ID).describe(z.Serial); hint != "" {
+	// A Refresh outranks the Serial Check hint, which is never shown next to it.
+	if refresh := m.refreshOf(z.ID).describe(m.keys.keysFor(ActionRefresh)); refresh != "" {
+		parts = append(parts, refresh)
+	} else if hint := m.freshnessOf(z.ID).describe(z.Serial); hint != "" {
 		parts = append(parts, hint)
 	}
 

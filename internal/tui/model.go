@@ -68,6 +68,10 @@ type Model struct {
 	fresh map[int64]*zoneFreshness
 	// checks schedules the Serial Checks.
 	checks checkQueue
+	// refreshes is each Zone's Refresh state this session, by Zone ID.
+	refreshes map[int64]*zoneRefresh
+	// refreshQueue schedules the Refreshes.
+	refreshQueue checkQueue
 
 	// addForm is the add-Account dialog; nil when closed.
 	addForm *addAccountForm
@@ -128,6 +132,10 @@ type recordsLoadedMsg struct {
 	zoneID  int64
 	records []dns.Record
 	err     error
+	// opened is true when the user has just opened the Zone: once its
+	// cached Records show, it is Refreshed. Otherwise a Refresh reloaded
+	// them, and the cursor stays where it was.
+	opened bool
 }
 
 // Init loads the cached data from the Store. It never touches the network.
@@ -154,13 +162,23 @@ func (m *Model) loadCache() tea.Msg {
 	return cacheLoadedMsg{accounts: accounts, zones: zones, slots: slots}
 }
 
+// loadRecords reads a Zone the user has just opened from the Store.
 func (m *Model) loadRecords(zoneID int64) tea.Cmd {
+	return m.readRecords(zoneID, true)
+}
+
+// reloadRecords reads the open Zone's Records again after a Refresh.
+func (m *Model) reloadRecords(zoneID int64) tea.Cmd {
+	return m.readRecords(zoneID, false)
+}
+
+func (m *Model) readRecords(zoneID int64, opened bool) tea.Cmd {
 	ctx, store := m.ctx, m.deps.Store
 
 	return func() tea.Msg {
 		records, err := store.Records(ctx, zoneID)
 
-		return recordsLoadedMsg{zoneID: zoneID, records: records, err: err}
+		return recordsLoadedMsg{zoneID: zoneID, records: records, err: err, opened: opened}
 	}
 }
 
@@ -189,6 +207,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.zoneByID[z.ID] = z
 		}
 
+		if m.open != nil {
+			if z, ok := m.zoneByID[m.open.ID]; ok {
+				m.open = &z // a Refresh may have changed its serial
+			}
+		}
+
 		m.slots = msg.slots
 		m.shared = sharedNames(msg.zones)
 		m.refilter(paneDomains)
@@ -209,6 +233,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.queueSerialChecks()
 	case serialCheckedMsg:
 		return m, m.serialChecked(msg)
+	case zoneRefreshedMsg:
+		return m, m.zoneRefreshed(msg)
 	case unsealedMsg:
 		return m, m.unsealed(msg)
 	case keychainEnrolledMsg:
@@ -226,7 +252,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.recordsErr = msg.err
 		m.records = msg.records
 		m.refilter(paneRecords)
+
+		if !msg.opened {
+			m.cursor[paneRecords] = min(m.cursor[paneRecords], max(len(m.visibleRecords)-1, 0))
+
+			return m, nil
+		}
+
 		m.cursor[paneRecords] = 0
+
+		return m, m.refreshZone(*m.open)
 	case tea.KeyMsg:
 		if m.unseal != nil {
 			return m, m.unsealKey(msg)
@@ -297,6 +332,10 @@ func (m *Model) handle(a Action) tea.Cmd {
 		m.openAddAccount()
 	case ActionEnrollKeychain:
 		return m.enrollKeychain()
+	case ActionRefresh:
+		if m.open != nil {
+			return m.refreshZone(*m.open)
+		}
 	}
 
 	return nil

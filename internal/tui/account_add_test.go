@@ -143,7 +143,8 @@ func TestALaterSessionStartsSealedAndBrowsingNeverPrompts(t *testing.T) {
 
 	h.assertShows("sealed · read-only", "cloudflare.work", "work.example")
 
-	h.press("enter", "j", "/", "w", "esc", "tab", "enter", "*", "tab", "?", "esc")
+	// Opening a Zone Refreshes it, which needs secrets; everything else is browsing.
+	h.press("j", "/", "w", "esc", "tab", "enter", "*", "tab", "?", "esc")
 
 	h.assertHides("Unseal", "Passphrase")
 	h.assertShows("sealed · read-only")

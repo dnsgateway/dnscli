@@ -30,6 +30,9 @@ const (
 	// ActionEnrollKeychain enrolls the Keychain with Touch ID as another
 	// Unseal Method, after Unseal.
 	ActionEnrollKeychain
+	// ActionRefresh Refreshes the open Zone again, such as to retry a
+	// failed Refresh.
+	ActionRefresh
 )
 
 // Binding maps one Action to its keys.
@@ -59,6 +62,7 @@ func DefaultShortcutProfile() ShortcutProfile {
 			{Action: ActionSelect, Keys: []string{"enter"}, Help: "open / select"},
 			{Action: ActionSearch, Keys: []string{"/"}, Help: "search"},
 			{Action: ActionAllAccounts, Keys: []string{"*"}, Help: "Zones of all Accounts"},
+			{Action: ActionRefresh, Keys: []string{"r"}, Help: "Refresh the open Zone (retry)"},
 			{Action: ActionAddAccount, Keys: []string{"a"}, Help: "add Account"},
 			{Action: ActionEnrollKeychain, Keys: []string{"K"}, Help: "enroll the Keychain (Touch ID)"},
 			{Action: ActionHelp, Keys: []string{"?"}, Help: "toggle help"},
