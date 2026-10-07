@@ -1,6 +1,7 @@
 // Package store is dnscli's single local SQLite database.
 //
-// It holds Account definitions and the cached Zones and Records. It is not a
+// It holds Account definitions with their encrypted secrets, the Unseal
+// Method key slots, and the cached Zones and Records. It is not a
 // disposable cache: losing it loses Account definitions.
 package store
 

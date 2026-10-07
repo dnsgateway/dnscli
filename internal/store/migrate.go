@@ -46,6 +46,17 @@ var migrations = []string{
 
 	CREATE INDEX records_zone ON records(zone_id);
 	`,
+	// 2: encrypted Account secrets and Unseal Method key slots (ADR-0005).
+	`
+	ALTER TABLE accounts ADD COLUMN secret BLOB; -- API token sealed with the data key; NULL = none
+
+	CREATE TABLE key_slots (
+		id      INTEGER PRIMARY KEY,
+		method  TEXT NOT NULL, -- Unseal Method, e.g. "passphrase"
+		params  BLOB NOT NULL, -- the method's parameters, e.g. KDF salt and cost
+		wrapped BLOB NOT NULL  -- the data key, wrapped by the method
+	);
+	`,
 }
 
 // migrate applies pending migrations in one write transaction. BEGIN IMMEDIATE
