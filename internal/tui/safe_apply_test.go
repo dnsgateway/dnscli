@@ -94,6 +94,78 @@ func TestAnApplyWhoseRecordsChangedAtTheProviderIsNotSentAndRefreshesTheZone(t *
 	}
 }
 
+func TestAfterAConflictTheChangesApplyOverTheCurrentValuesOnlyWhenConfirmed(t *testing.T) {
+	changed := liveRecords[0]
+	changed.Value = "203.0.113.21"
+
+	f := refreshZones()
+	h := openValidated(t, f)
+	h.buildChangeset()
+
+	// The A Record changes and the MX Record goes, outside dnscli.
+	f.SetRecords("zw1", changed)
+	h.press("p", "enter")
+	h.assertShows("Nothing was applied", "O apply over the current values")
+
+	// Without the confirmation, the changes are as they were: they
+	// conflict again.
+	h.press("enter")
+	h.assertShows("Nothing was applied")
+
+	if calls := applyCalls(f); len(calls) != 0 {
+		t.Fatalf("a conflicting Changeset was sent: %+v", calls)
+	}
+
+	h.press("O")
+
+	calls := applyCalls(f)
+	if len(calls) != 1 {
+		t.Fatalf("Apply calls = %+v, want one", calls)
+	}
+
+	nineNine := liveRecords[0]
+	nineNine.Value = "203.0.113.99"
+
+	// The addition is untouched, the modification is of the A Record as
+	// it is now, and the deletion of the gone MX Record is dropped.
+	want := []dns.Change{
+		{Kind: dns.ChangeAdd, After: dns.Record{Type: "TXT", Name: "_verify.work.example", Value: "token-123", TTL: 3600}},
+		{Kind: dns.ChangeModify, Before: changed, After: nineNine},
+	}
+	if got := calls[0].Changes; !reflect.DeepEqual(got, want) {
+		t.Fatalf("applied changes:\n got %+v\nwant %+v", got, want)
+	}
+
+	h.assertShows("Applied 2 changes to work.example.")
+}
+
+func TestApplyingOverTheCurrentValuesAddsAModifiedRecordThatIsGone(t *testing.T) {
+	f := refreshZones()
+	h := openValidated(t, f)
+	h.buildChangeset()
+
+	// The A Record goes, outside dnscli.
+	f.SetRecords("zw1", liveRecords[1])
+	h.press("p", "enter")
+	h.assertShows("@ A 203.0.113.20 TTL 300 no longer exists")
+
+	h.press("O")
+
+	calls := applyCalls(f)
+	if len(calls) != 1 {
+		t.Fatalf("Apply calls = %+v, want one", calls)
+	}
+
+	want := []dns.Change{
+		{Kind: dns.ChangeAdd, After: dns.Record{Type: "TXT", Name: "_verify.work.example", Value: "token-123", TTL: 3600}},
+		{Kind: dns.ChangeAdd, After: dns.Record{Type: "A", Name: "work.example", Value: "203.0.113.99", TTL: 300}},
+		{Kind: dns.ChangeDelete, Before: liveRecords[1]},
+	}
+	if got := calls[0].Changes; !reflect.DeepEqual(got, want) {
+		t.Fatalf("applied changes:\n got %+v\nwant %+v", got, want)
+	}
+}
+
 func TestAPartialApplyShowsTheOutcomeOfEachChange(t *testing.T) {
 	f := refreshZones()
 	h := openValidated(t, f)

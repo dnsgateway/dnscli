@@ -26,6 +26,9 @@ type changesetPreview struct {
 	// conflicts describe the Records that changed at the Provider since
 	// the Changeset was built, which stopped the last Apply.
 	conflicts []string
+	// conflicting are those Records, as the Changeset was built from
+	// them, which ActionApplyOver rebases the changes of.
+	conflicting []conflict
 	// outcomes are the changes the last Apply sent, with how each fared,
 	// when the Provider failed some of them.
 	outcomes []changeOutcome
@@ -155,16 +158,90 @@ func (m *Model) previewKey(msg tea.KeyMsg) tea.Cmd {
 		m.notice = notice{text: fmt.Sprintf("Discarded %s for %s.", plural(n, "pending change"), m.zoneByID[p.zoneID].Name)}
 	case ActionSelect:
 		return m.applyChanges()
+	case ActionApplyOver:
+		if len(p.conflicting) > 0 {
+			return m.applyOver()
+		}
 	}
 
 	return nil
+}
+
+// applyOver rebases the changes built from the Records that conflicted
+// onto the Records as the conflict's Refresh cached them, and applies the
+// Changeset. A modification or deletion is then of the Record as it is
+// now. Of a Record that is gone, a deletion is dropped and a modification
+// becomes an addition. Every other change is left as it is.
+func (m *Model) applyOver() tea.Cmd {
+	p := m.preview
+
+	if !m.validatedZone(p.zoneID) || m.open == nil || m.open.ID != p.zoneID || m.recordsLoading {
+		p.err = "The Zone is being Refreshed: apply over the current values once it is validated."
+
+		return nil
+	}
+
+	cs := m.pendingOf(p.zoneID)
+	if cs == nil {
+		return nil
+	}
+
+	gone := map[string]bool{}
+	for _, c := range p.conflicting {
+		gone[c.before.ProviderID] = true
+	}
+
+	current := map[string]dns.Record{}
+	for _, r := range m.records {
+		current[r.ProviderID] = r
+	}
+
+	var rebased []dns.Change
+
+	for _, c := range cs.Changes {
+		if c.Kind == dns.ChangeAdd || !gone[c.Before.ProviderID] {
+			rebased = append(rebased, c)
+
+			continue
+		}
+
+		now, ok := current[c.Before.ProviderID]
+
+		switch {
+		case ok:
+			c.Before = now
+			if c.Kind == dns.ChangeModify && sameRecord(c.Before, c.After) {
+				continue // already as the change makes it
+			}
+		case c.Kind == dns.ChangeDelete:
+			continue
+		default:
+			c.Kind, c.Before = dns.ChangeAdd, dns.Record{}
+			c.After.ProviderID = ""
+		}
+
+		rebased = append(rebased, c)
+	}
+
+	cs.Changes = rebased
+	m.rebuildRecordRows()
+
+	if len(rebased) == 0 {
+		delete(m.changesets, p.zoneID)
+		m.preview = nil
+		m.notice = notice{text: "Nothing left to apply to " + m.zoneByID[p.zoneID].Name + ": the Records are already as the changes made them."}
+
+		return nil
+	}
+
+	return m.applyChanges()
 }
 
 // applyChanges sends the previewed Changeset to the Provider, past the
 // write gate.
 func (m *Model) applyChanges() tea.Cmd {
 	p := m.preview
-	p.err, p.conflicts, p.outcomes = "", nil, nil
+	p.err, p.conflicts, p.conflicting, p.outcomes = "", nil, nil, nil
 
 	z, cmd, ok := m.writeGate()
 	if !ok || z.ID != p.zoneID {
@@ -438,7 +515,7 @@ func (m *Model) applyConflicted(z dns.Zone, cs []conflict) tea.Cmd {
 	m.notice = notice{text: text + " " + strings.Join(described, "; ") + ".", err: true}
 
 	if p := m.preview; p != nil && p.zoneID == z.ID {
-		p.err, p.conflicts = text, described
+		p.err, p.conflicts, p.conflicting = text, described, cs
 	}
 
 	return m.refreshZone(z)
@@ -533,7 +610,13 @@ func (m *Model) previewView() string {
 		lines = append(lines, "", hintStyle.Render("applying…"))
 	}
 
-	lines = append(lines, "", hintStyle.Render(m.keys.keysFor(ActionSelect)+" apply · "+
+	lines = append(lines, "")
+
+	if len(p.conflicting) > 0 && !p.busy {
+		lines = append(lines, hintStyle.Render(m.keys.keysFor(ActionApplyOver)+" apply over the current values"))
+	}
+
+	lines = append(lines, hintStyle.Render(m.keys.keysFor(ActionSelect)+" apply · "+
 		m.keys.keysFor(ActionDiscardChanges)+" discard · "+m.keys.keysFor(ActionClose)+" close"))
 
 	return dialogView("Changes to "+z.Name, nil, -1, false, lines)

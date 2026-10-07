@@ -57,6 +57,10 @@ const (
 	ActionPreviewChanges
 	// ActionDiscardChanges discards the pending Changeset shown in the preview.
 	ActionDiscardChanges
+	// ActionApplyOver, in the preview after an Apply stopped on a
+	// conflict, rebases the conflicting changes onto the Records as the
+	// Provider has them now, and applies the Changeset.
+	ActionApplyOver
 )
 
 // Binding maps one Action to its keys.
@@ -93,6 +97,7 @@ func DefaultShortcutProfile() ShortcutProfile {
 			{Action: ActionDeleteRecord, Keys: []string{"d"}, Help: "delete the Record, or undo its change (Records pane)"},
 			{Action: ActionPreviewChanges, Keys: []string{"p"}, Help: "preview the pending changes, Enter applies"},
 			{Action: ActionDiscardChanges, Keys: []string{"D"}, Help: "discard the pending changes (in the preview)"},
+			{Action: ActionApplyOver, Keys: []string{"O"}, Help: "apply over the current values (in the preview, after a conflict)"},
 			{Action: ActionAddAccount, Keys: []string{"a"}, Help: "add Account"},
 			{Action: ActionRemoveAccount, Keys: []string{"X"}, Help: "remove Account"},
 			{Action: ActionRelistZones, Keys: []string{"L"}, Help: "re-list the Account's Zones"},
