@@ -163,6 +163,10 @@ func (m *Model) handle(a Action) tea.Cmd {
 		return nil
 	}
 
+	if a != ActionUp && a != ActionDown {
+		m.search[m.focus].typing = false // the filter stays; keys are actions again
+	}
+
 	switch a {
 	case ActionHelp:
 		m.help = true

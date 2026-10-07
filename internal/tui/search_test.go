@@ -35,6 +35,21 @@ func TestEscClearsTheDomainsSearchAndRestoresAllZones(t *testing.T) {
 	h.assertShows("No cached Records for example.org")
 }
 
+func TestEnterOpensTheHighlightedMatchAndKeepsTheFilter(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	h := newHarness(t, s)
+	h.press("/", "e", "x", "down", "enter")
+
+	h.assertShows("No cached Records for example.org", "/ex")
+	h.assertHides("two.tv")
+
+	// Enter leaves the search input: keys are actions again.
+	h.press("k", "enter")
+	h.assertShows("192.0.2.10", "/ex")
+}
+
 func TestKeysTypedIntoSearchDoNotTriggerActions(t *testing.T) {
 	s, _ := openStore(t)
 	seedCache(t, s)
