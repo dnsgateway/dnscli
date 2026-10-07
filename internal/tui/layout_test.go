@@ -25,6 +25,22 @@ func (h *harness) assertFits(w, ht int) {
 	}
 }
 
+func TestPaneScrollsToKeepTheCursorVisible(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	h := newHarness(t, s)
+	h.send(tea.WindowSizeMsg{Width: 120, Height: 6}) // the Domains pane has room for one row
+
+	h.assertShows("example.com")
+	h.assertHides("example.org", "two.tv")
+
+	h.press("j", "j")
+
+	h.assertShows("two.tv")
+	h.assertHides("example.com", "example.org")
+}
+
 func TestViewFitsSmallTerminals(t *testing.T) {
 	for _, size := range [][2]int{{80, 24}, {40, 8}, {20, 4}, {10, 3}, {1, 1}} {
 		w, ht := size[0], size[1]

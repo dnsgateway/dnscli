@@ -69,24 +69,26 @@ func clip(s string, w, h int) string {
 }
 
 func (m *Model) domainLines(w, h int) []string {
-	lines := make([]string, len(m.zones))
+	start, end := window(len(m.zones), m.cursor[paneDomains], h)
 
-	for i, z := range m.zones {
+	var lines []string
+	for i := start; i < end; i++ {
 		// Every Zone is cached and unconfirmed until freshness lands, so all are dimmed.
-		lines[i] = m.row(paneDomains, i, " "+z.Name, w, staleStyle)
+		lines = append(lines, m.row(paneDomains, i, " "+m.zones[i].Name, w, staleStyle))
 	}
 
-	return scroll(lines, m.cursor[paneDomains], h)
+	return lines
 }
 
 func (m *Model) accountLines(w, h int) []string {
-	lines := make([]string, len(m.accounts))
+	start, end := window(len(m.accounts), m.cursor[paneAccounts], h)
 
-	for i, a := range m.accounts {
-		lines[i] = m.row(paneAccounts, i, " "+a.Label(), w, lipgloss.NewStyle())
+	var lines []string
+	for i := start; i < end; i++ {
+		lines = append(lines, m.row(paneAccounts, i, " "+m.accounts[i].Label(), w, lipgloss.NewStyle()))
 	}
 
-	return scroll(lines, m.cursor[paneAccounts], h)
+	return lines
 }
 
 func (m *Model) recordLines(w, h int) []string {
@@ -116,12 +118,15 @@ func (m *Model) recordLines(w, h int) []string {
 	cols := recordColumns(w)
 	header := headerStyle.Render(cols.format("Name", "Type", "Content", "TTL"))
 
-	lines := make([]string, len(m.records))
-	for i, r := range m.records {
-		lines[i] = m.row(paneRecords, i, cols.format(r.Name, r.Type, r.Value, strconv.FormatUint(uint64(r.TTL), 10)), w, staleStyle)
+	lines := []string{header}
+
+	start, end := window(len(m.records), m.cursor[paneRecords], h-1)
+	for i := start; i < end; i++ {
+		r := m.records[i]
+		lines = append(lines, m.row(paneRecords, i, cols.format(r.Name, r.Type, r.Value, strconv.FormatUint(uint64(r.TTL), 10)), w, staleStyle))
 	}
 
-	return append([]string{header}, scroll(lines, m.cursor[paneRecords], h-1)...)
+	return lines
 }
 
 // row renders one list item. The cursor row is drawn in reverse video in
@@ -162,15 +167,17 @@ func (c columns) format(name, typ, content, ttl string) string {
 	return " " + cell(name, c.name) + " " + cell(typ, c.typ) + " " + cell(content, c.content) + " " + cell(ttl, c.ttl)
 }
 
-// scroll returns the window of lines of height h that keeps cursor visible.
-func scroll(lines []string, cursor, h int) []string {
-	if h <= 0 || len(lines) <= h {
-		return lines
+// window returns the range [start, end) of n list items that fits in h rows
+// and keeps cursor visible, so only the visible rows are rendered.
+func window(n, cursor, h int) (start, end int) {
+	h = max(h, 1) // a box always has at least one row
+	if n <= h {
+		return 0, n
 	}
 
-	start := min(max(cursor-h+1, 0), len(lines)-h)
+	start = min(max(cursor-h+1, 0), n-h)
 
-	return lines[start : start+h]
+	return start, start + h
 }
 
 func (m *Model) statusLine() string {
