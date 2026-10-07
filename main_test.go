@@ -62,6 +62,7 @@ type fakeKeychain struct{}
 
 func (fakeKeychain) Store([]byte) ([]byte, error) { return nil, errors.New("unused") }
 func (fakeKeychain) Load([]byte) ([]byte, error)  { return nil, errors.New("unused") }
+func (fakeKeychain) Delete([]byte) error          { return errors.New("unused") }
 
 func TestTheKeychainIsTheDefaultUnsealMethodOnMacOS(t *testing.T) {
 	withKeychain := unsealMethods(fakeKeychain{})
