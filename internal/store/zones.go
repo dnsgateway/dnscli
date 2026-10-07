@@ -346,6 +346,10 @@ func joinNames(names []string) string {
 
 // splitNames reads a list stored by joinNames; nil when empty.
 func splitNames(s string) []string {
+	if s == "" {
+		return nil
+	}
+
 	return strings.Fields(s)
 }
 
