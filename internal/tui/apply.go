@@ -276,19 +276,21 @@ func (m *Model) changesApplied(msg changesAppliedMsg) tea.Cmd {
 
 	applied := len(msg.sent.Changes) - failed
 
-	switch {
-	case failed > 0:
-		m.notice = notice{text: fmt.Sprintf("Applied %d of %d changes to %s; %d failed and are still pending: %v",
-			applied, len(msg.sent.Changes), z.Name, failed, first), err: true}
-	case !msg.saved:
-		m.notice = notice{text: fmt.Sprintf("Applied %s to %s. Refresh (%s) needed: they could not be cached: %v",
-			changeCount(applied), z.Name, m.keys.keysFor(ActionRefresh), msg.err), err: true}
-	case msg.uncached > 0:
-		m.notice = notice{text: fmt.Sprintf("Applied %s to %s. Refresh (%s) needed: the Provider did not return the IDs of %d to cache.",
-			changeCount(applied), z.Name, m.keys.keysFor(ActionRefresh), msg.uncached), err: true}
-	default:
-		m.notice = notice{text: fmt.Sprintf("Applied %s to %s.", changeCount(applied), z.Name)}
+	text := fmt.Sprintf("Applied %s to %s.", changeCount(applied), z.Name)
+	if failed > 0 {
+		text = fmt.Sprintf("Applied %d of %d changes to %s; %d failed and are still pending: %v.",
+			applied, len(msg.sent.Changes), z.Name, failed, first)
 	}
+
+	switch {
+	case !msg.saved:
+		text += fmt.Sprintf(" Refresh (%s) needed: they could not be cached: %v", m.keys.keysFor(ActionRefresh), msg.err)
+	case msg.uncached > 0:
+		text += fmt.Sprintf(" Refresh (%s) needed: the Provider did not return the IDs of %d to cache.",
+			m.keys.keysFor(ActionRefresh), msg.uncached)
+	}
+
+	m.notice = notice{text: text, err: failed > 0 || !msg.saved || msg.uncached > 0}
 
 	if p != nil && p.zoneID == msg.zoneID && m.pendingOf(msg.zoneID) == nil {
 		m.preview = nil

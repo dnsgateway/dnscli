@@ -139,6 +139,25 @@ func TestAnApplyTheCacheCannotTakeLeavesTheZoneNeedingARefresh(t *testing.T) {
 	h.assertHides("Add Record")
 }
 
+func TestAPartialApplyTheCacheCannotTakeSaysBoth(t *testing.T) {
+	f := refreshZones()
+	h := openValidated(t, f)
+	h.buildChangeset()
+
+	f.FailChanges(func(c dns.Change) error {
+		if c.Kind == dns.ChangeDelete {
+			return errors.New("record is locked")
+		}
+
+		return nil
+	})
+	h.applyDroppingTheZone()
+
+	// The preview stays open on the failed change, with the whole notice.
+	h.assertShows("Changes to work.example", "Applied 2 of 3 changes to work.example; 1 failed and",
+		"record is locked", "could not be cached", "Refresh (r) needed")
+}
+
 func TestARecordWithoutAProviderIDCannotBeChanged(t *testing.T) {
 	f := fake.New().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial},
 		dns.Record{Type: "TXT", Name: "work.example", Value: "first", TTL: 300},
