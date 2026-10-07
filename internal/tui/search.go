@@ -23,6 +23,12 @@ func (m *Model) startSearch() {
 	m.search[m.focus].typing = true
 }
 
+// clearSearch clears the focused pane's search filter and leaves search.
+func (m *Model) clearSearch() {
+	m.search[m.focus] = search{}
+	m.cursor[m.focus] = 0
+}
+
 // typeIntoSearch sends a typed key to the focused pane's search input, and
 // reports whether it did. Keys that are not text still reach actions.
 func (m *Model) typeIntoSearch(msg tea.KeyMsg) bool {

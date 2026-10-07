@@ -20,6 +20,21 @@ func TestSlashInDomainsFiltersZonesByNameAsTheUserTypes(t *testing.T) {
 	h.assertHides("example.com", "two.tv")
 }
 
+func TestEscClearsTheDomainsSearchAndRestoresAllZones(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	h := newHarness(t, s)
+	h.press("/", "t", "w", "o", "esc")
+
+	h.assertShows("example.com", "example.org", "two.tv")
+	h.assertHides("/two")
+
+	// Search is left too: keys are actions again.
+	h.press("j", "enter")
+	h.assertShows("No cached Records for example.org")
+}
+
 func TestKeysTypedIntoSearchDoNotTriggerActions(t *testing.T) {
 	s, _ := openStore(t)
 	seedCache(t, s)

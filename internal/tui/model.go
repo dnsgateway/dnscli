@@ -178,6 +178,8 @@ func (m *Model) handle(a Action) tea.Cmd {
 		return m.selectItem()
 	case ActionSearch:
 		m.startSearch()
+	case ActionClose:
+		m.clearSearch()
 	}
 
 	return nil
