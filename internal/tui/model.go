@@ -62,6 +62,11 @@ type Model struct {
 	// visibleRecords are the Records the Records pane lists, after its search.
 	visibleRecords []dns.Record
 
+	// fresh is each Zone's freshness this session, by Zone ID.
+	fresh map[int64]*zoneFreshness
+	// checks schedules the Serial Checks.
+	checks serialChecks
+
 	// addForm is the add-Account dialog; nil when closed.
 	addForm *addAccountForm
 	// notice is the latest background result shown in the status bar.
@@ -190,6 +195,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for p := range paneCount {
 			m.cursor[p] = min(m.cursor[p], max(m.itemCount(p)-1, 0))
 		}
+
+		return m, m.queueSerialChecks()
+	case serialCheckedMsg:
+		return m, m.serialChecked(msg)
 	case unsealedMsg:
 		return m, m.unsealed(msg)
 	case accountAddedMsg:
