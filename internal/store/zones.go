@@ -15,7 +15,8 @@ import (
 // PutZone inserts a Zone, or updates the existing Zone with the same
 // Account and zone name, and returns it as stored, with its ID set.
 // A zero Serial or RefreshedAt, or no Nameservers, keeps the cached value,
-// so relisting an Account's Zones does not forget their last Refresh.
+// so relisting an Account's Zones does not forget their last Refresh. The
+// Zone Status is never written here; it keeps the cached one.
 func (s *Store) PutZone(ctx context.Context, z dns.Zone) (dns.Zone, error) {
 	return putZone(ctx, s.db, z)
 }
@@ -27,8 +28,8 @@ type queryRower interface {
 
 func putZone(ctx context.Context, db queryRower, z dns.Zone) (dns.Zone, error) {
 	var (
-		refreshed int64
-		ns        string
+		refreshed, statusAt int64
+		ns                  string
 	)
 
 	err := db.QueryRowContext(ctx, `
@@ -39,14 +40,15 @@ func putZone(ctx context.Context, db queryRower, z dns.Zone) (dns.Zone, error) {
 			soa_serial       = IIF(excluded.soa_serial = 0, soa_serial, excluded.soa_serial),
 			refreshed_at     = IIF(excluded.refreshed_at = 0, refreshed_at, excluded.refreshed_at),
 			nameservers      = IIF(excluded.nameservers = '', nameservers, excluded.nameservers)
-		RETURNING id, soa_serial, refreshed_at, nameservers`,
+		RETURNING id, soa_serial, refreshed_at, dnssec, hsts, status_at, nameservers`,
 		z.AccountID, z.Name, z.ProviderID, z.Serial, unixOrZero(z.RefreshedAt), joinNames(z.Nameservers),
-	).Scan(&z.ID, &z.Serial, &refreshed, &ns)
+	).Scan(&z.ID, &z.Serial, &refreshed, &z.Status.DNSSEC, &z.Status.HSTS, &statusAt, &ns)
 	if err != nil {
 		return dns.Zone{}, fmt.Errorf("put zone %s: %w", z.Name, err)
 	}
 
 	z.RefreshedAt = timeOrZero(refreshed)
+	z.StatusAt = timeOrZero(statusAt)
 	z.Nameservers = splitNames(ns)
 
 	return z, nil
@@ -154,7 +156,8 @@ func accountZones(ctx context.Context, conn *sql.Conn, accountID int64) (map[str
 // Zones returns every cached Zone, ordered by zone name and then Account.
 func (s *Store) Zones(ctx context.Context) ([]dns.Zone, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT z.id, z.account_id, z.name, z.provider_zone_id, z.soa_serial, z.refreshed_at, z.nameservers
+		SELECT z.id, z.account_id, z.name, z.provider_zone_id, z.soa_serial, z.refreshed_at,
+			z.dnssec, z.hsts, z.status_at, z.nameservers
 		FROM zones z JOIN accounts a ON a.id = z.account_id
 		ORDER BY z.name, a.provider, a.name`)
 	if err != nil {
@@ -166,16 +169,18 @@ func (s *Store) Zones(ctx context.Context) ([]dns.Zone, error) {
 
 	for rows.Next() {
 		var (
-			z         dns.Zone
-			refreshed int64
-			ns        string
+			z                   dns.Zone
+			refreshed, statusAt int64
+			ns                  string
 		)
 
-		if err := rows.Scan(&z.ID, &z.AccountID, &z.Name, &z.ProviderID, &z.Serial, &refreshed, &ns); err != nil {
+		if err := rows.Scan(&z.ID, &z.AccountID, &z.Name, &z.ProviderID, &z.Serial, &refreshed,
+			&z.Status.DNSSEC, &z.Status.HSTS, &statusAt, &ns); err != nil {
 			return nil, fmt.Errorf("list zones: %w", err)
 		}
 
 		z.RefreshedAt = timeOrZero(refreshed)
+		z.StatusAt = timeOrZero(statusAt)
 		z.Nameservers = splitNames(ns)
 
 		out = append(out, z)
@@ -206,7 +211,9 @@ var ErrZoneNotCached = errors.New("the Zone is no longer cached")
 // SaveRefresh stores the result of a Refresh in one transaction: it
 // replaces the Zone's cached Records and sets its SOA serial and its last
 // Refresh time. A zero serial, when the Provider did not report one, keeps
-// the cached serial, as PutZone does. It returns the Zone as stored.
+// the cached serial, as PutZone does. It also stores z's Zone Status when
+// z.StatusAt is set, and keeps the cached one when it is zero, such as
+// when the Refresh could not read it. It returns the Zone as stored.
 //
 // It returns ErrZoneNotCached unless the cache still has that very Zone:
 // the same ID, Account, zone name and Provider zone ID. A Zone removed
@@ -218,14 +225,20 @@ func (s *Store) SaveRefresh(ctx context.Context, z dns.Zone, records []dns.Recor
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	var refreshed int64
+	var refreshed, statusAt int64
 
 	err = tx.QueryRowContext(ctx, `
-		UPDATE zones SET soa_serial = IIF(?1 = 0, soa_serial, ?1), refreshed_at = ?2
+		UPDATE zones SET
+			soa_serial   = IIF(?1 = 0, soa_serial, ?1),
+			refreshed_at = ?2,
+			dnssec       = IIF(?7 = 0, dnssec, ?8),
+			hsts         = IIF(?7 = 0, hsts, ?9),
+			status_at    = IIF(?7 = 0, status_at, ?7)
 		WHERE id = ?3 AND account_id = ?4 AND name = ?5 AND provider_zone_id = ?6
-		RETURNING soa_serial, refreshed_at`,
+		RETURNING soa_serial, refreshed_at, dnssec, hsts, status_at`,
 		serial, unixOrZero(at), z.ID, z.AccountID, z.Name, z.ProviderID,
-	).Scan(&z.Serial, &refreshed)
+		unixOrZero(z.StatusAt), z.Status.DNSSEC, z.Status.HSTS,
+	).Scan(&z.Serial, &refreshed, &z.Status.DNSSEC, &z.Status.HSTS, &statusAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrZoneNotCached
 	}
@@ -235,6 +248,7 @@ func (s *Store) SaveRefresh(ctx context.Context, z dns.Zone, records []dns.Recor
 	}
 
 	z.RefreshedAt = timeOrZero(refreshed)
+	z.StatusAt = timeOrZero(statusAt)
 
 	if err := replaceRecords(ctx, tx, z.ID, records); err != nil {
 		return dns.Zone{}, fmt.Errorf("save refresh: %w", err)

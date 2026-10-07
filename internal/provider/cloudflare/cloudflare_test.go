@@ -34,6 +34,11 @@ type cfAPI struct {
 	zones    []map[string]any
 	records  map[string][]map[string]any // by zone ID
 	export   map[string]string           // BIND export by zone ID
+	dnssec   map[string]string           // DNSSEC status by zone ID
+	hsts     map[string]bool             // HSTS enabled by zone ID
+	// forbidden are the paths answered 403, as for a token that lacks
+	// the permission.
+	forbidden []string
 	// fail, when set, answers every request instead of the scripted data.
 	fail http.HandlerFunc
 
@@ -92,12 +97,45 @@ func (api *cfAPI) handler(t *testing.T) http.Handler {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte(api.export[r.PathValue("zone")]))
 	})
+	mux.HandleFunc("GET /client/v4/zones/{zone}/dnssec", func(w http.ResponseWriter, r *http.Request) {
+		writeResult(w, map[string]any{
+			"status":              api.dnssec[r.PathValue("zone")],
+			"algorithm":           "13",
+			"digest_type":         "2",
+			"flags":               257,
+			"key_tag":             42,
+			"modified_on":         "2024-01-02T03:04:05.000000Z",
+			"dnssec_multi_signer": false,
+		})
+	})
+	mux.HandleFunc("GET /client/v4/zones/{zone}/settings/security_header", func(w http.ResponseWriter, r *http.Request) {
+		writeResult(w, map[string]any{
+			"id": "security_header",
+			"value": map[string]any{
+				"strict_transport_security": map[string]any{
+					"enabled":            api.hsts[r.PathValue("zone")],
+					"max_age":            86400,
+					"include_subdomains": true,
+					"preload":            false,
+					"nosniff":            true,
+				},
+			},
+			"editable":    true,
+			"modified_on": "2024-01-02T03:04:05.000000Z",
+		})
+	})
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		api.record(r.URL.Path + "?page=" + r.URL.Query().Get("page"))
 
 		if got := r.Header.Get("Authorization"); got != "Bearer "+testToken {
 			t.Errorf("Authorization = %q, want the Account's API token", got)
+		}
+
+		if slices.Contains(api.forbidden, r.URL.Path) {
+			writeErrors(w, http.StatusForbidden, 9109, "Unauthorized to access requested resource")
+
+			return
 		}
 
 		if api.fail != nil {
@@ -149,6 +187,16 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// writeResult writes a single result in the v4 envelope.
+func writeResult(w http.ResponseWriter, result any) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success":  true,
+		"errors":   []any{},
+		"messages": []any{},
+		"result":   result,
+	})
 }
 
 func writeErrors(w http.ResponseWriter, status, code int, message string) {
@@ -250,7 +298,7 @@ func TestNameserversAreTheOnesCloudflareAssignedToTheAccountsZones(t *testing.T)
 	}
 }
 
-func TestApplyAndZoneStatusAreNotImplementedYet(t *testing.T) {
+func TestApplyIsNotImplementedYet(t *testing.T) {
 	api := &cfAPI{}
 	p := newProvider(t, api)
 	zone := dns.Zone{Name: "example.com", ProviderID: "z1"}
@@ -259,12 +307,90 @@ func TestApplyAndZoneStatusAreNotImplementedYet(t *testing.T) {
 		t.Errorf("Apply err = %v, want provider.ErrNotImplemented", err)
 	}
 
-	if _, err := p.ZoneStatus(context.Background(), zone); !errors.Is(err, provider.ErrNotImplemented) {
-		t.Errorf("ZoneStatus err = %v, want provider.ErrNotImplemented", err)
-	}
-
 	if n := len(api.Requests()); n != 0 {
 		t.Errorf("made %d requests, want none", n)
+	}
+}
+
+func TestZoneStatusReadsDNSSECAndHSTSFromTheZoneSettings(t *testing.T) {
+	tests := []struct {
+		dnssec string
+		hsts   bool
+		want   dns.ZoneStatus
+	}{
+		{"active", true, dns.ZoneStatus{DNSSEC: dns.On, HSTS: dns.On}},
+		{"disabled", false, dns.ZoneStatus{DNSSEC: dns.Off, HSTS: dns.Off}},
+		// Neither signed nor unsigned yet.
+		{"pending", false, dns.ZoneStatus{DNSSEC: dns.Unknown, HSTS: dns.Off}},
+		{"pending-disabled", true, dns.ZoneStatus{DNSSEC: dns.Unknown, HSTS: dns.On}},
+		{"error", true, dns.ZoneStatus{DNSSEC: dns.Unknown, HSTS: dns.On}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.dnssec, func(t *testing.T) {
+			api := &cfAPI{dnssec: map[string]string{"z1": tt.dnssec}, hsts: map[string]bool{"z1": tt.hsts}}
+			p := newProvider(t, api)
+
+			got, err := p.ZoneStatus(context.Background(), dns.Zone{Name: "example.com", ProviderID: "z1"})
+			if err != nil {
+				t.Fatalf("ZoneStatus: %v", err)
+			}
+
+			if got != tt.want {
+				t.Errorf("ZoneStatus = %+v, want %+v", got, tt.want)
+			}
+
+			want := []string{"/client/v4/zones/z1/dnssec?page=", "/client/v4/zones/z1/settings/security_header?page="}
+			if reqs := api.Requests(); !slices.Equal(reqs, want) {
+				t.Errorf("requests = %q, want %q", reqs, want)
+			}
+		})
+	}
+}
+
+func TestZoneStatusSettingsTheTokenMayNotReadAreUnknown(t *testing.T) {
+	tests := []struct {
+		name      string
+		forbidden []string
+		want      dns.ZoneStatus
+	}{
+		{"DNSSEC", []string{"/client/v4/zones/z1/dnssec"}, dns.ZoneStatus{DNSSEC: dns.Unknown, HSTS: dns.On}},
+		{"HSTS", []string{"/client/v4/zones/z1/settings/security_header"}, dns.ZoneStatus{DNSSEC: dns.On, HSTS: dns.Unknown}},
+		{"both", []string{"/client/v4/zones/z1/dnssec", "/client/v4/zones/z1/settings/security_header"}, dns.ZoneStatus{}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			api := &cfAPI{
+				dnssec:    map[string]string{"z1": "active"},
+				hsts:      map[string]bool{"z1": true},
+				forbidden: tt.forbidden,
+			}
+			p := newProvider(t, api)
+
+			got, err := p.ZoneStatus(context.Background(), dns.Zone{Name: "example.com", ProviderID: "z1"})
+			if err != nil {
+				t.Fatalf("ZoneStatus: %v", err)
+			}
+
+			if got != tt.want {
+				t.Errorf("ZoneStatus = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestZoneStatusErrorsOtherThanAMissingPermissionAreTypedErrors(t *testing.T) {
+	api := &cfAPI{fail: func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", "60")
+		writeErrors(w, http.StatusTooManyRequests, 971, "Please wait and consider throttling your request speed")
+	}}
+	p := newProvider(t, api)
+
+	_, err := p.ZoneStatus(context.Background(), dns.Zone{Name: "example.com", ProviderID: "z1"})
+
+	if !errors.Is(err, provider.ErrRateLimited) {
+		t.Fatalf("err = %v, want provider.ErrRateLimited", err)
 	}
 }
 

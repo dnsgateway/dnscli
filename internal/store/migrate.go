@@ -57,7 +57,13 @@ var migrations = []string{
 		wrapped BLOB NOT NULL  -- the data key, wrapped by the method
 	);
 	`,
-	// 3: Zone nameservers for the Delegation and the Live Zone (ticket 14).
+	// 3: the cached Provider-side Zone Status.
+	`
+	ALTER TABLE zones ADD COLUMN dnssec    INTEGER NOT NULL DEFAULT 0; -- dns.Setting: 0 unknown, 1 off, 2 on
+	ALTER TABLE zones ADD COLUMN hsts      INTEGER NOT NULL DEFAULT 0; -- dns.Setting
+	ALTER TABLE zones ADD COLUMN status_at INTEGER NOT NULL DEFAULT 0; -- unix seconds, 0 = never read
+	`,
+	// 4: Zone nameservers for the Delegation and the Live Zone.
 	`
 	ALTER TABLE zones ADD COLUMN nameservers TEXT NOT NULL DEFAULT ''; -- space-separated; '' = unknown
 	`,
