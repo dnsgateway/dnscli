@@ -89,6 +89,26 @@ func TestARefreshFallsBackToTheDelegatedNameserversForTheSerial(t *testing.T) {
 	}
 }
 
+func TestARefreshDoesNotAskTheDelegatedNameserversOfAZoneNameInSeveralAccounts(t *testing.T) {
+	r := &fakeResolver{
+		soaAt: map[string]uint32{"work.example": 2026100799},
+		ns:    map[string][]string{"work.example": {"a.ns.example.net", "b.ns.example.net"}},
+	}
+	h, _, _ := newRefreshHarnessWith(t, serialZones(nil), tui.Deps{Resolver: r})
+
+	// Another Account has work.example too: the Delegation may name its
+	// nameservers, which serve another copy of the zone.
+	h.fillAddAccount("lab", "lab-token")
+	h.assertShows("work.example · cloudfla")
+
+	h.press("enter")
+	h.assertShows("validated this session")
+
+	if q := r.soaAtQueries(); len(q) != 0 {
+		t.Fatalf("SOA queries to the nameservers = %+v, want none", q)
+	}
+}
+
 func TestARefreshWhoseSerialQueryFailsKeepsTheCachedSerial(t *testing.T) {
 	r := &fakeResolver{soaAtErrs: map[string]error{"work.example": errors.New("i/o timeout")}}
 	h, s, _ := newRefreshHarnessWith(t, serialZones(zoneNS), tui.Deps{Resolver: r})

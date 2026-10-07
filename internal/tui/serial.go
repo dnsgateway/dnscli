@@ -22,11 +22,12 @@ type serialQuery struct {
 
 // serialQueryFor returns the query for a Zone's serial: at the nameservers
 // its Provider assigned it, else at its Delegation as this session
-// resolved it.
+// resolved it. A zone name in several Accounts has no fallback: its
+// Delegation may name another copy's nameservers.
 func (m *Model) serialQueryFor(z dns.Zone) serialQuery {
 	q := serialQuery{resolver: m.deps.Resolver, servers: z.Nameservers}
 
-	if len(q.servers) == 0 {
+	if len(q.servers) == 0 && !m.shared[nameKey(z.Name)] {
 		if d, ok := m.delegations[nameKey(z.Name)]; ok && d.state == lookupDone {
 			q.servers = d.ns
 		}
