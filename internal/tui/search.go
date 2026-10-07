@@ -79,7 +79,7 @@ func (m *Model) typeIntoSearch(msg tea.KeyMsg) bool {
 	switch msg.Type {
 	case tea.KeyRunes, tea.KeySpace:
 		s.query += string(msg.Runes)
-	case tea.KeyBackspace:
+	case tea.KeyBackspace, tea.KeyCtrlH: // some terminals send ^H for Backspace
 		r := []rune(s.query)
 		s.query = string(r[:max(len(r)-1, 0)])
 	default:

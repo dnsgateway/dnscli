@@ -82,6 +82,18 @@ func TestBackspaceWidensTheSearch(t *testing.T) {
 	h.assertHides("example.com")
 }
 
+// Some terminals send ^H for Backspace.
+func TestCtrlHWidensTheSearchLikeBackspace(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	h := newHarness(t, s)
+	h.press("/", "e", "x", "x", "ctrl+h")
+
+	h.assertShows("/ex", "example.com", "example.org")
+	h.assertHides("/exx", "two.tv")
+}
+
 // example.com's seeded Records:
 //
 //	example.com      A      192.0.2.10
