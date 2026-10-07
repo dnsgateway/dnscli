@@ -30,6 +30,8 @@ type zoneFreshness struct {
 	check freshness
 	// liveSerial is the serial the resolver returned.
 	liveSerial uint32
+	// cachedSerial is the cached serial liveSerial was compared with.
+	cachedSerial uint32
 	// checkErr is why the Serial Check failed.
 	checkErr error
 }
@@ -48,8 +50,12 @@ type checkQueue struct {
 	running int
 }
 
-// queueSerialChecks queues a Serial Check for every Zone this session has
-// not checked yet, and starts as many as the limit allows.
+// queueSerialChecks runs after each cache (re)load. It queues a Serial
+// Check for every Zone this session has not checked yet, and again for
+// every Zone whose check failed: once per reload, never from a check's own
+// result, so a failing resolver is not asked in a loop. A Zone whose cached
+// serial changed is compared again with the serial its check returned.
+// It starts as many checks as the limit allows.
 func (m *Model) queueSerialChecks() tea.Cmd {
 	if m.deps.Resolver == nil {
 		return nil
@@ -60,15 +66,30 @@ func (m *Model) queueSerialChecks() tea.Cmd {
 	}
 
 	for _, z := range m.zones {
-		if _, ok := m.fresh[z.ID]; ok {
-			continue
-		}
+		f, ok := m.fresh[z.ID]
 
-		m.fresh[z.ID] = &zoneFreshness{}
-		m.checks.queue = append(m.checks.queue, z.ID)
+		switch {
+		case !ok:
+			m.fresh[z.ID] = &zoneFreshness{}
+			m.checks.queue = append(m.checks.queue, z.ID)
+		case f.check == freshError:
+			*f = zoneFreshness{}
+			m.checks.queue = append(m.checks.queue, z.ID)
+		case (f.check == freshHintCurrent || f.check == freshHintStale) && f.cachedSerial != z.Serial:
+			*f = compareSerials(f.liveSerial, z.Serial)
+		}
 	}
 
 	return m.startSerialChecks()
+}
+
+// compareSerials judges the resolver's serial against the cached one.
+func compareSerials(live, cached uint32) zoneFreshness {
+	if cached != 0 && live == cached {
+		return zoneFreshness{check: freshHintCurrent, liveSerial: live, cachedSerial: cached}
+	}
+
+	return zoneFreshness{check: freshHintStale, liveSerial: live, cachedSerial: cached}
 }
 
 // startSerialChecks starts queued Serial Checks up to the concurrency limit.
@@ -115,10 +136,8 @@ func (m *Model) serialChecked(msg serialCheckedMsg) tea.Cmd {
 	case !ok || !cached:
 	case msg.err != nil:
 		*f = zoneFreshness{check: freshError, checkErr: msg.err}
-	case z.Serial != 0 && msg.serial == z.Serial:
-		*f = zoneFreshness{check: freshHintCurrent, liveSerial: msg.serial}
 	default:
-		*f = zoneFreshness{check: freshHintStale, liveSerial: msg.serial}
+		*f = compareSerials(msg.serial, z.Serial)
 	}
 
 	return m.startSerialChecks()

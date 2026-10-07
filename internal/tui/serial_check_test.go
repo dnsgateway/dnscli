@@ -10,6 +10,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/sergelogvinov/dnscli/internal/provider"
+	"github.com/sergelogvinov/dnscli/internal/provider/fake"
 	"github.com/sergelogvinov/dnscli/internal/store"
 	"github.com/sergelogvinov/dnscli/internal/tui"
 )
@@ -142,6 +144,72 @@ func TestADifferingSerialMarksTheZonePossiblyStale(t *testing.T) {
 	// two.tv has no cached serial, so nothing can match it.
 	h.press("j", "j", "enter")
 	h.assertShows("resolver serial 7, none cached: possibly stale")
+}
+
+// newSerialCheckHarness starts a session on the seeded cache with Serial
+// Checks against r and a fake Provider, so a test can reload the cache by
+// adding an Account.
+func newSerialCheckHarness(t *testing.T, s *store.Store, r tui.Resolver) *harness {
+	t.Helper()
+
+	return newHarnessWith(t, s, tui.Deps{
+		Providers:    provider.Registry{"cloudflare": fake.New().New},
+		UnsealMethod: fastPassphrase(),
+		Resolver:     r,
+	})
+}
+
+// reloadCache makes the session reload the cache, as adding an Account does.
+func (h *harness) reloadCache() {
+	h.t.Helper()
+
+	h.fillAddAccount("lab", "lab-token")
+	h.typeText(passphrase)
+	h.press("tab")
+	h.typeText(passphrase)
+	h.press("enter")
+	h.assertShows("cloudflare.lab")
+}
+
+func TestAChangedCachedSerialIsComparedAgainOnReload(t *testing.T) {
+	s, path := openStore(t)
+	seedCache(t, s)
+
+	h := newSerialCheckHarness(t, s, &fakeResolver{serials: map[string]uint32{"example.com": 2026100702}})
+	if row := h.domainRow("example.com"); !strings.Contains(row, "!") {
+		t.Fatalf("example.com row = %q, want the possibly-stale marker", row)
+	}
+
+	// Another session refreshed example.com meanwhile.
+	execSQL(t, path, `UPDATE zones SET soa_serial = 2026100702 WHERE name = 'example.com'`)
+	h.reloadCache()
+
+	if row := h.domainRow("example.com"); !strings.Contains(row, "≈") {
+		t.Fatalf("example.com row = %q, want the hint-current marker for the new cached serial", row)
+	}
+}
+
+func TestAFailedSerialCheckRunsAgainOnReload(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	r := &fakeResolver{
+		serials: map[string]uint32{"example.com": 2026100701},
+		errs:    map[string]error{"example.com": errors.New("i/o timeout")},
+	}
+	h := newSerialCheckHarness(t, s, r)
+
+	if row := h.domainRow("example.com"); !strings.Contains(row, "?") {
+		t.Fatalf("example.com row = %q, want the failed-check marker", row)
+	}
+
+	// The resolver answers again.
+	delete(r.errs, "example.com")
+	h.reloadCache()
+
+	if row := h.domainRow("example.com"); !strings.Contains(row, "≈") {
+		t.Fatalf("example.com row = %q, want the failed check run again", row)
+	}
 }
 
 func TestAFailingSerialCheckMarksTheZoneAndShowsTheError(t *testing.T) {
