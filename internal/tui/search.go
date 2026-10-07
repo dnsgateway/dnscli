@@ -26,8 +26,13 @@ func (m *Model) startSearch() {
 	m.search[m.focus].typing = true
 }
 
-// clearSearch clears the focused pane's search filter and leaves search.
+// clearSearch clears the focused pane's search filter and leaves search. It
+// does nothing when the pane has no search, so the cursor stays put.
 func (m *Model) clearSearch() {
+	if m.search[m.focus] == (search{}) {
+		return
+	}
+
 	m.search[m.focus] = search{}
 	m.cursor[m.focus] = 0
 	m.syncDomainsQuery()

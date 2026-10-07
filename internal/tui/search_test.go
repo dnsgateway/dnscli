@@ -39,6 +39,16 @@ func TestEscClearsTheDomainsSearchAndRestoresAllZones(t *testing.T) {
 	h.assertShows("No cached Records for example.org")
 }
 
+func TestEscWithoutASearchKeepsTheCursor(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	h := newHarness(t, s)
+	h.press("j", "esc", "enter")
+
+	h.assertShows("No cached Records for example.org")
+}
+
 func TestEnterOpensTheHighlightedMatchAndKeepsTheFilter(t *testing.T) {
 	s, _ := openStore(t)
 	seedCache(t, s)
