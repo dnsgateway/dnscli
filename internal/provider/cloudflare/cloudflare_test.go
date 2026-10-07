@@ -182,6 +182,25 @@ func TestZonesListsEveryPage(t *testing.T) {
 	}
 }
 
+func TestNameserversAreTheOnesCloudflareAssignedToTheAccountsZones(t *testing.T) {
+	api := &cfAPI{pageSize: 1, zones: []map[string]any{
+		cfZone("z1", "example.com", "bob.ns.cloudflare.com", "ada.ns.cloudflare.com"),
+		cfZone("z2", "example.net", "ada.ns.cloudflare.com", "bob.ns.cloudflare.com"),
+		cfZone("z3", "example.org", "cruz.ns.cloudflare.com", "ada.ns.cloudflare.com"),
+	}}
+	p := newProvider(t, api)
+
+	ns, err := p.Nameservers(context.Background())
+	if err != nil {
+		t.Fatalf("Nameservers: %v", err)
+	}
+
+	want := []string{"ada.ns.cloudflare.com", "bob.ns.cloudflare.com", "cruz.ns.cloudflare.com"}
+	if !slices.Equal(ns, want) {
+		t.Errorf("Nameservers = %v, want %v", ns, want)
+	}
+}
+
 func cfRecord(id, typ, name, content string, ttl int, proxiable, proxied bool) map[string]any {
 	return map[string]any{
 		"id":          id,

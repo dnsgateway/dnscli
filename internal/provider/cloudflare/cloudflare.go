@@ -78,9 +78,7 @@ var _ provider.Provider = (*Provider)(nil)
 
 // Zones implements provider.Provider.
 func (p *Provider) Zones(ctx context.Context) ([]dns.Zone, error) {
-	all, err := listAll(ctx, zonesPerPage, func(opts ...option.RequestOption) (*pagination.V4PagePaginationArray[zones.Zone], error) {
-		return p.zones.List(ctx, zones.ZoneListParams{}, opts...)
-	})
+	all, err := p.listZones(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -91,6 +89,12 @@ func (p *Provider) Zones(ctx context.Context) ([]dns.Zone, error) {
 	}
 
 	return out, nil
+}
+
+func (p *Provider) listZones(ctx context.Context) ([]zones.Zone, error) {
+	return listAll(ctx, zonesPerPage, func(opts ...option.RequestOption) (*pagination.V4PagePaginationArray[zones.Zone], error) {
+		return p.zones.List(ctx, zones.ZoneListParams{}, opts...)
+	})
 }
 
 // listAll reads every page of a v4 list. It pages by hand, rather than with
@@ -260,7 +264,21 @@ func (p *Provider) ZoneStatus(ctx context.Context, zone dns.Zone) (dns.ZoneStatu
 	return dns.ZoneStatus{}, errors.New("todo")
 }
 
-// Nameservers implements provider.Provider.
+// Nameservers implements provider.Provider. Cloudflare assigns nameservers
+// per Zone, usually the same pair across an Account, so the Account
+// expects every nameserver assigned to any of its Zones, sorted.
 func (p *Provider) Nameservers(ctx context.Context) ([]string, error) {
-	return nil, errors.New("todo")
+	all, err := p.listZones(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	var ns []string
+	for _, z := range all {
+		ns = append(ns, z.NameServers...)
+	}
+
+	slices.Sort(ns)
+
+	return slices.Compact(ns), nil
 }
