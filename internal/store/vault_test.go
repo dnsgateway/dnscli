@@ -57,7 +57,7 @@ func TestAnotherKeySlotNeedsAnEnrolledDataKeyAndReplacesItsMethodsSlot(t *testin
 
 	keychain := vault.Slot{Method: "keychain", Params: []byte("{}"), Wrapped: []byte{1}}
 
-	if _, err := s.EnrollKeySlot(ctx, keychain); !errors.Is(err, store.ErrNotEnrolled) {
+	if _, _, err := s.EnrollKeySlot(ctx, keychain); !errors.Is(err, store.ErrNotEnrolled) {
 		t.Fatalf("EnrollKeySlot without a data key = %v, want ErrNotEnrolled", err)
 	}
 
@@ -67,7 +67,7 @@ func TestAnotherKeySlotNeedsAnEnrolledDataKeyAndReplacesItsMethodsSlot(t *testin
 
 	for _, wrapped := range []byte{1, 2} {
 		keychain.Wrapped = []byte{wrapped}
-		if _, err := s.EnrollKeySlot(ctx, keychain); err != nil {
+		if _, _, err := s.EnrollKeySlot(ctx, keychain); err != nil {
 			t.Fatalf("EnrollKeySlot: %v", err)
 		}
 	}
@@ -75,5 +75,29 @@ func TestAnotherKeySlotNeedsAnEnrolledDataKeyAndReplacesItsMethodsSlot(t *testin
 	slots, err := s.KeySlots(ctx)
 	if err != nil || len(slots) != 2 || slots[0].Method != "passphrase" || slots[1].Method != "keychain" || slots[1].Wrapped[0] != 2 {
 		t.Fatalf("key slots = %+v, %v; want the passphrase and the latest keychain slot", slots, err)
+	}
+}
+
+func TestEnrollingAnotherKeySlotReturnsTheSlotsItReplaced(t *testing.T) {
+	s := open(t, filepath.Join(t.TempDir(), "dnscli.db"))
+	ctx := context.Background()
+
+	if _, err := s.EnrollFirstKeySlot(ctx, vault.Slot{Method: "passphrase", Params: []byte("{}"), Wrapped: []byte{0}}); err != nil {
+		t.Fatal(err)
+	}
+
+	first, replaced, err := s.EnrollKeySlot(ctx, vault.Slot{Method: "keychain", Params: []byte(`{"item":"old"}`), Wrapped: []byte{1}})
+	if err != nil || len(replaced) != 0 {
+		t.Fatalf("first keychain slot: replaced %+v, %v; want nothing replaced", replaced, err)
+	}
+
+	_, replaced, err = s.EnrollKeySlot(ctx, vault.Slot{Method: "keychain", Params: []byte(`{"item":"new"}`), Wrapped: []byte{2}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The caller cleans up what a replaced slot referenced, such as its Keychain item.
+	if len(replaced) != 1 || replaced[0].ID != first.ID || string(replaced[0].Params) != `{"item":"old"}` {
+		t.Fatalf("replaced = %+v, want only the first keychain slot %+v", replaced, first)
 	}
 }

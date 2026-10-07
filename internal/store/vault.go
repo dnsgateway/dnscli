@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 
@@ -81,14 +82,17 @@ var ErrNotEnrolled = errors.New("no Unseal Method is enrolled yet")
 // EnrollKeySlot stores another key slot, which must wrap the existing data
 // key, and returns it with its ID set. It replaces the earlier key slots of
 // the same Unseal Method, so a method can be enrolled again, such as after
-// its Keychain item was lost. It returns ErrNotEnrolled when no key slot
-// exists: the first one goes through EnrollFirstKeySlot.
-func (s *Store) EnrollKeySlot(ctx context.Context, slot vault.Slot) (vault.Slot, error) {
+// its Keychain item was lost, and returns those replaced slots so the
+// caller can clean up what they referenced. It returns ErrNotEnrolled when
+// no key slot exists: the first one goes through EnrollFirstKeySlot.
+func (s *Store) EnrollKeySlot(ctx context.Context, slot vault.Slot) (vault.Slot, []vault.Slot, error) {
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
-		return vault.Slot{}, fmt.Errorf("enroll key slot: %w", err)
+		return vault.Slot{}, nil, fmt.Errorf("enroll key slot: %w", err)
 	}
 	defer conn.Close()
+
+	var replaced []vault.Slot
 
 	err = writeLocked(ctx, conn, func() error {
 		var exists bool
@@ -100,7 +104,12 @@ func (s *Store) EnrollKeySlot(ctx context.Context, slot vault.Slot) (vault.Slot,
 			return ErrNotEnrolled
 		}
 
-		if _, err := conn.ExecContext(ctx, `DELETE FROM key_slots WHERE method = ?`, slot.Method); err != nil {
+		rows, err := conn.QueryContext(ctx, `DELETE FROM key_slots WHERE method = ? RETURNING id, method, params, wrapped`, slot.Method)
+		if err != nil {
+			return err
+		}
+
+		if replaced, err = scanKeySlots(rows); err != nil {
 			return err
 		}
 
@@ -114,10 +123,10 @@ func (s *Store) EnrollKeySlot(ctx context.Context, slot vault.Slot) (vault.Slot,
 		return err
 	})
 	if err != nil {
-		return vault.Slot{}, fmt.Errorf("enroll key slot: %w", err)
+		return vault.Slot{}, nil, fmt.Errorf("enroll key slot: %w", err)
 	}
 
-	return slot, nil
+	return slot, replaced, nil
 }
 
 // KeySlots returns every enrolled key slot, oldest first.
@@ -126,6 +135,17 @@ func (s *Store) KeySlots(ctx context.Context) ([]vault.Slot, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list key slots: %w", err)
 	}
+
+	out, err := scanKeySlots(rows)
+	if err != nil {
+		return nil, fmt.Errorf("list key slots: %w", err)
+	}
+
+	return out, nil
+}
+
+// scanKeySlots reads and closes rows of id, method, params, wrapped.
+func scanKeySlots(rows *sql.Rows) ([]vault.Slot, error) {
 	defer rows.Close()
 
 	var out []vault.Slot
@@ -133,11 +153,15 @@ func (s *Store) KeySlots(ctx context.Context) ([]vault.Slot, error) {
 	for rows.Next() {
 		var slot vault.Slot
 		if err := rows.Scan(&slot.ID, &slot.Method, &slot.Params, &slot.Wrapped); err != nil {
-			return nil, fmt.Errorf("list key slots: %w", err)
+			return nil, err
 		}
 
 		out = append(out, slot)
 	}
 
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return out, rows.Close()
 }

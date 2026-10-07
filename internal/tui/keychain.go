@@ -62,7 +62,7 @@ func (m *Model) keychainKey(msg tea.KeyMsg) tea.Cmd {
 				return keychainEnrolledMsg{err: err}
 			}
 
-			if _, err := store.EnrollKeySlot(ctx, slot); err != nil {
+			if _, _, err := store.EnrollKeySlot(ctx, slot); err != nil {
 				return keychainEnrolledMsg{err: err}
 			}
 
