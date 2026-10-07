@@ -97,15 +97,19 @@ func (c Config) New(_ dns.Account, token string) (provider.Provider, error) {
 	}
 
 	return &Provider{
-		zones:   zones.NewZoneService(opts...),
-		records: cfdns.NewRecordService(opts...),
+		zones:    zones.NewZoneService(opts...),
+		settings: zones.NewSettingService(opts...),
+		records:  cfdns.NewRecordService(opts...),
+		dnssec:   cfdns.NewDNSSECService(opts...),
 	}, nil
 }
 
 // Provider is one Cloudflare Account.
 type Provider struct {
-	zones   *zones.ZoneService
-	records *cfdns.RecordService
+	zones    *zones.ZoneService
+	settings *zones.SettingService
+	records  *cfdns.RecordService
+	dnssec   *cfdns.DNSSECService
 }
 
 var _ provider.Provider = (*Provider)(nil)
@@ -298,9 +302,90 @@ func (p *Provider) Apply(context.Context, dns.Changeset) (provider.ApplyResult, 
 	return provider.ApplyResult{}, fmt.Errorf("cloudflare: apply a Changeset: %w", provider.ErrNotImplemented)
 }
 
-// ZoneStatus implements provider.Provider. Not implemented yet.
-func (p *Provider) ZoneStatus(context.Context, dns.Zone) (dns.ZoneStatus, error) {
-	return dns.ZoneStatus{}, fmt.Errorf("cloudflare: read Zone Status: %w", provider.ErrNotImplemented)
+// ZoneStatus implements provider.Provider. DNSSEC comes from the Zone's
+// DNSSEC status and HSTS from its security_header setting. A setting the
+// API token lacks the permission to read (HTTP 403) is unknown.
+func (p *Provider) ZoneStatus(ctx context.Context, zone dns.Zone) (dns.ZoneStatus, error) {
+	var (
+		status dns.ZoneStatus
+		err    error
+	)
+
+	if status.DNSSEC, err = p.dnssecStatus(ctx, zone); err != nil {
+		return dns.ZoneStatus{}, err
+	}
+
+	if status.HSTS, err = p.hstsStatus(ctx, zone); err != nil {
+		return dns.ZoneStatus{}, err
+	}
+
+	return status, nil
+}
+
+func (p *Provider) dnssecStatus(ctx context.Context, zone dns.Zone) (dns.Setting, error) {
+	var params cfdns.DNSSECGetParams
+	params.ZoneID.Value, params.ZoneID.Present = zone.ProviderID, true
+
+	var raw *http.Response
+
+	res, err := p.dnssec.Get(ctx, params, option.WithResponseInto(&raw))
+	if err != nil {
+		return settingError(err, raw)
+	}
+
+	// Pending, pending-disabled and error are neither signed nor unsigned.
+	switch res.Status {
+	case cfdns.DNSSECStatusActive:
+		return dns.On, nil
+	case cfdns.DNSSECStatusDisabled:
+		return dns.Off, nil
+	}
+
+	return dns.Unknown, nil
+}
+
+// securityHeader is the part of the security_header setting dnscli reads.
+// It is decoded from the raw JSON: cloudflare-go decodes a setting's value
+// into a union of every setting's value.
+type securityHeader struct {
+	Value struct {
+		StrictTransportSecurity struct {
+			Enabled bool `json:"enabled"`
+		} `json:"strict_transport_security"`
+	} `json:"value"`
+}
+
+func (p *Provider) hstsStatus(ctx context.Context, zone dns.Zone) (dns.Setting, error) {
+	var params zones.SettingGetParams
+	params.ZoneID.Value, params.ZoneID.Present = zone.ProviderID, true
+
+	var raw *http.Response
+
+	res, err := p.settings.Get(ctx, "security_header", params, option.WithResponseInto(&raw))
+	if err != nil {
+		return settingError(err, raw)
+	}
+
+	var h securityHeader
+	if err := json.Unmarshal([]byte(res.JSON.RawJSON()), &h); err != nil {
+		return dns.Unknown, fmt.Errorf("cloudflare: decode security_header setting: %w", err)
+	}
+
+	if h.Value.StrictTransportSecurity.Enabled {
+		return dns.On, nil
+	}
+
+	return dns.Off, nil
+}
+
+// settingError makes a setting the API token may not read unknown, and
+// any other failure an error.
+func settingError(err error, res *http.Response) (dns.Setting, error) {
+	if res != nil && res.StatusCode == http.StatusForbidden {
+		return dns.Unknown, nil
+	}
+
+	return dns.Unknown, apiError(err, res)
 }
 
 // Nameservers implements provider.Provider. Cloudflare assigns nameservers
