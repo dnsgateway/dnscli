@@ -353,7 +353,7 @@ func apply(ctx context.Context, s *store.Store, key *vault.Key, newProvider prov
 	}
 
 	if res.Serial == 0 && applied {
-		if serial := q.serial(ctx, cs.Zone.Name); serialNewer(serial, cs.Zone.Serial) {
+		if serial, _ := q.serial(ctx, cs.Zone.Name); serialNewer(serial, cs.Zone.Serial) {
 			res.Serial = serial
 		}
 	}

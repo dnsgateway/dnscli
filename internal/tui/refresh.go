@@ -62,6 +62,9 @@ type zoneRefreshedMsg struct {
 	// statusErr is why the Zone Status could not be read, when the
 	// Refresh succeeded without it.
 	statusErr error
+	// serialFailed is true when the Zone's nameservers were asked for its
+	// serial and did not answer.
+	serialFailed bool
 }
 
 // validatedZone reports whether a Zone is a Validated Zone: Refreshed
@@ -186,9 +189,10 @@ func (m *Model) refreshCmd(z dns.Zone, a dns.Account, r *zoneRefresh) tea.Cmd {
 	q := m.serialQueryFor(z)
 
 	return func() tea.Msg {
-		stored, caps, statusErr, err := refresh(ctx, s, key, newProvider, a, z, q, now)
+		res := refresh(ctx, s, key, newProvider, a, z, q, now)
 
-		return zoneRefreshedMsg{zoneID: z.ID, state: r, zone: stored, caps: caps, err: err, statusErr: statusErr}
+		return zoneRefreshedMsg{zoneID: z.ID, state: r, zone: res.zone, caps: res.caps, err: res.err,
+			statusErr: res.statusErr, serialFailed: res.serialFailed}
 	}
 }
 
@@ -202,10 +206,29 @@ type zoneStatusRead struct {
 	err    error
 }
 
+// serialRead is the result of a query for a Zone's serial.
+type serialRead struct {
+	serial uint32
+	failed bool
+}
+
+// refreshResult is the result of refresh.
+type refreshResult struct {
+	// zone is the Zone as stored.
+	zone dns.Zone
+	// caps is what the Zone's Provider takes.
+	caps providerCaps
+	// statusErr is why the Zone Status could not be read.
+	statusErr error
+	// serialFailed is true when the Zone's nameservers did not answer.
+	serialFailed bool
+	err          error
+}
+
 // refresh reads a Zone's Records and, alongside them, its Zone Status from
-// its Provider, and replaces the cached copy with them, with the SOA
-// serial and the Refresh time, in one transaction. It returns the Zone as
-// stored, and what its Provider takes.
+// its Provider and its serial from its nameservers, and replaces the cached
+// copy with them, with the SOA serial and the Refresh time, in one
+// transaction. It returns the Zone as stored, and what its Provider takes.
 //
 // The serial is the one the Provider reports, else the one q gets from the
 // Zone's nameservers. Without either, the cached serial is kept.
@@ -213,13 +236,13 @@ type zoneStatusRead struct {
 // A Zone Status that cannot be read does not fail the Refresh: the cached
 // one is kept, and shows as older than the Refresh. Why it could not be
 // read is returned as statusErr.
-func refresh(ctx context.Context, s *store.Store, key *vault.Key, newProvider provider.Constructor, a dns.Account, z dns.Zone, q serialQuery, now func() time.Time) (stored dns.Zone, caps providerCaps, statusErr, err error) {
+func refresh(ctx context.Context, s *store.Store, key *vault.Key, newProvider provider.Constructor, a dns.Account, z dns.Zone, q serialQuery, now func() time.Time) refreshResult {
 	p, err := accountProvider(ctx, s, key, newProvider, a)
 	if err != nil {
-		return dns.Zone{}, caps, nil, err
+		return refreshResult{err: err}
 	}
 
-	caps = capsOf(p)
+	res := refreshResult{caps: capsOf(p)}
 
 	statusCtx, cancel := context.WithTimeout(ctx, zoneStatusTimeout)
 	defer cancel()
@@ -231,13 +254,29 @@ func refresh(ctx context.Context, s *store.Store, key *vault.Key, newProvider pr
 		read <- zoneStatusRead{status: status, err: err}
 	}()
 
+	// The serial query bounds itself by serialQueryTimeout.
+	serialCtx, cancelSerial := context.WithCancel(ctx)
+	defer cancelSerial()
+
+	queried := make(chan serialRead, 1)
+
+	go func() {
+		serial, failed := q.serial(serialCtx, z.Name)
+		queried <- serialRead{serial: serial, failed: failed}
+	}()
+
 	rs, err := p.Records(ctx, z)
 	if err != nil {
-		return dns.Zone{}, caps, nil, err
+		res.err = err
+
+		return res
 	}
 
+	answer := <-queried
+	res.serialFailed = answer.failed
+
 	if rs.Serial == 0 {
-		rs.Serial = q.serial(ctx, z.Name)
+		rs.Serial = answer.serial
 	}
 
 	status := <-read
@@ -248,9 +287,10 @@ func refresh(ctx context.Context, s *store.Store, key *vault.Key, newProvider pr
 		z.Status, z.StatusAt = status.status, at
 	}
 
-	stored, err = s.SaveRefresh(ctx, z, rs.Records, rs.Serial, at)
+	res.statusErr = status.err
+	res.zone, res.err = s.SaveRefresh(ctx, z, rs.Records, rs.Serial, at)
 
-	return stored, caps, status.err, err
+	return res
 }
 
 // accountProvider builds the Provider for an Account with its API token,
@@ -287,6 +327,10 @@ func (m *Model) zoneRefreshed(msg zoneRefreshedMsg) tea.Cmd {
 	r, ok := m.refreshes[msg.zoneID]
 	if !ok || r != msg.state {
 		return m.startRefreshes()
+	}
+
+	if msg.err == nil {
+		m.serialQueried(msg.zoneID, msg.serialFailed)
 	}
 
 	if msg.err != nil {

@@ -7,6 +7,7 @@ package tui
 import (
 	"context"
 	"slices"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -75,6 +76,9 @@ type Model struct {
 	refreshes map[int64]*zoneRefresh
 	// refreshQueue schedules the Refreshes.
 	refreshQueue zoneQueue
+	// serialFailed is when each Zone's nameservers last failed to answer
+	// the query for its serial, by Zone ID.
+	serialFailed map[int64]time.Time
 	// delegations is each zone name's Delegation this session, by nameKey.
 	delegations map[string]*delegation
 	// lookups schedules the Delegation lookups, by nameKey.
