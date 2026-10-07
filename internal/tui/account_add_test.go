@@ -210,6 +210,106 @@ func TestOneUnsealPerSessionUnlocksEveryAccount(t *testing.T) {
 	}
 }
 
+func TestTheAddAccountDialogTypesKeysThatAreBoundToActions(t *testing.T) {
+	s, _ := openStore(t)
+	h := newAccountHarness(t, s, workZones())
+
+	// q quits, ? opens help, j moves and a adds an Account outside the dialog.
+	h.press("a", "tab")
+	h.typeText("qja?")
+
+	if h.quit {
+		t.Fatal("q in the Name field quit the app")
+	}
+
+	h.assertShows("qja?")
+	h.assertHides("toggle help")
+
+	h.press("backspace")
+	h.assertShows("qja")
+	h.assertHides("qja?")
+
+	// Esc cancels: nothing is stored and no Unseal is asked for.
+	h.press("esc")
+	h.assertHides("Add Account", "Choose a passphrase")
+
+	if accounts, _ := s.Accounts(context.Background()); len(accounts) != 0 {
+		t.Fatalf("a cancelled dialog stored %+v", accounts)
+	}
+
+	h.press("a", "ctrl+c")
+
+	if !h.quit {
+		t.Fatal("Ctrl+C did not quit from the dialog")
+	}
+}
+
+func TestTheAddAccountDialogRefusesIncompleteInput(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	h := newAccountHarness(t, s, fake.New())
+
+	h.fillAddAccount("", "t")
+	h.assertShows("Enter a name for the Account.")
+
+	h.press("esc")
+	h.fillAddAccount("home", "")
+	h.assertShows("Enter the API token.")
+
+	h.press("esc")
+	h.fillAddAccount("work", "t")
+	h.assertShows("cloudflare.work already exists.")
+	h.assertHides("Passphrase")
+}
+
+func TestMismatchedPassphrasesAreNotEnrolled(t *testing.T) {
+	s, _ := openStore(t)
+	h := newAccountHarness(t, s, workZones())
+
+	h.fillAddAccount("work", token)
+	h.typeText(passphrase)
+	h.press("tab")
+	h.typeText("correct horsE")
+	h.press("enter")
+
+	h.assertShows("do not match", "sealed · read-only")
+
+	if slots, _ := s.KeySlots(context.Background()); len(slots) != 0 {
+		t.Fatalf("mismatched passphrases enrolled %+v", slots)
+	}
+}
+
+func TestFailedZoneDiscoveryIsShownAndKeepsTheAccount(t *testing.T) {
+	s, _ := openStore(t)
+	f := workZones()
+	f.Fail(fake.OpZones, errors.New("API is down"))
+	h := newAccountHarness(t, s, f)
+
+	h.fillAddAccount("work", token)
+	h.typeText(passphrase)
+	h.press("tab")
+	h.typeText(passphrase)
+	h.press("enter")
+
+	h.assertShows("cloudflare.work", "Zone discovery for cloudflare.work failed", "API is down")
+	h.assertHides("work.example")
+}
+
+func TestWithoutProviderTypesNoAccountCanBeAdded(t *testing.T) {
+	s, _ := openStore(t)
+	h := newHarnessWith(t, s, tui.Deps{UnsealMethod: fastPassphrase()})
+
+	h.fillAddAccount("work", token)
+
+	h.assertShows("No Provider types are available")
+	h.assertHides("Choose a passphrase")
+}
+
+func TestThePassphraseIsNotStored(t *testing.T) {
+	_, path := enrollFirstAccount(t)
+
+	assertNotInDatabase(t, path, passphrase)
+}
+
 // assertNotInDatabase checks that text appears nowhere in the database
 // files, including the WAL.
 func assertNotInDatabase(t *testing.T, path, text string) {
