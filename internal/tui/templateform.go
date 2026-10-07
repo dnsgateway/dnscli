@@ -228,8 +228,15 @@ func (m *Model) submitTemplateForm() tea.Cmd {
 		used[j] = true
 		of[i] = rows[j]
 
-		if rows[j].change >= 0 {
+		switch {
+		case rows[j].change >= 0:
 			f.conflicts = append(f.conflicts, describeRecord(z.Name, rows[j].rec))
+		case rows[j].base.ProviderID == "":
+			// Without its Provider ID, it cannot be changed at the Provider.
+			f.err = fmt.Sprintf("Nothing was staged: %s would change %s, which has no Provider ID, so dnscli cannot change it.",
+				t.Name, describeRecord(z.Name, rows[j].rec))
+
+			return nil
 		}
 	}
 

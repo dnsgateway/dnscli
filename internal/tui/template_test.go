@@ -314,6 +314,18 @@ func TestATemplateKeepsAChangeTheUserStagedThatItAgreesWith(t *testing.T) {
 	}
 }
 
+func TestATemplateDoesNotChangeARecordWithoutAProviderID(t *testing.T) {
+	noID := dns.Record{Type: "TXT", Name: "work.example", Value: "v=spf1 mx -all", TTL: 3600}
+	f := fake.New().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial}, mailRecords[0], noID)
+	h := openValidatedShowing(t, f, "v=spf1 mx -all")
+
+	h.openTemplate(parkedDomain)
+	h.enter(parkedFields)
+
+	h.assertShows("Apply a Template", "Nothing was staged", "no Provider ID")
+	h.assertHides("pending change")
+}
+
 func TestTheWriteGateRefusesTemplatesOnAStaleZone(t *testing.T) {
 	f := refreshZones()
 	h, _, _ := newRefreshHarness(t, f)
