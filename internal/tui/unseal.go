@@ -47,10 +47,23 @@ func (m *Model) sealed() bool {
 
 // withSecrets runs next, which needs Account secrets, once the session is
 // unsealed. A sealed session first prompts for Unseal: Unseal is deferred
-// until the first action that needs a secret.
+// until the first action that needs a secret. An Unseal prompt that is
+// already open is kept: next runs after the same Unseal, with the action
+// already waiting for it.
 func (m *Model) withSecrets(next func() tea.Cmd) tea.Cmd {
 	if !m.sealed() {
 		return next()
+	}
+
+	if m.unseal != nil {
+		waiting := m.afterUnseal
+		m.afterUnseal = next
+
+		if waiting != nil {
+			m.afterUnseal = func() tea.Cmd { return tea.Batch(waiting(), next()) }
+		}
+
+		return nil
 	}
 
 	m.afterUnseal = next

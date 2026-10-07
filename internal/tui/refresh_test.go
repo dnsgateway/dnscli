@@ -364,6 +364,30 @@ func TestARestartStartsEveryZoneNotValidatedAndSelectingPromptsForUnseal(t *test
 	}
 }
 
+func TestARefreshThatNeedsUnsealWaitsForThePromptAlreadyOpen(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	f := refreshZones()
+	h := newAccountHarness(t, s, f)
+
+	// The Zone's cached Records load while the user asks to remove the
+	// Account, which opens the Unseal prompt first.
+	load := h.pressHolding("enter")
+	h.press("tab", "X")
+	h.assertShows("Unseal")
+	h.run(load)
+
+	h.unsealWith(passphrase)
+
+	h.assertShows("Remove Account", "cloudflare.work")
+
+	h.press("esc")
+	h.assertShows("validated this session")
+
+	if n := recordsCalls(f, "zw1"); n != 1 {
+		t.Fatalf("Records calls = %d after Unseal, want 1", n)
+	}
+}
+
 func TestCancellingUnsealLeavesTheZoneStaleWithItsCache(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
 	f := refreshZones()
