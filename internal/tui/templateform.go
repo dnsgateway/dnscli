@@ -31,6 +31,9 @@ type templateForm struct {
 	// conflicts describe the pending changes the Template would change,
 	// which stopped it.
 	conflicts []string
+	// warning says what the Template would weaken, such as the Zone's
+	// DMARC policy; a second Enter stages it anyway.
+	warning string
 }
 
 // openTemplateForm opens the Template dialog for the open Zone, past the
@@ -48,14 +51,10 @@ func (m *Model) openTemplateForm() tea.Cmd {
 	}
 
 	f := &templateForm{zone: z, templates: template.Builtin(), values: map[string]template.Values{}}
+	_, current := m.pendingRecords()
 
 	for _, t := range f.templates {
-		v := template.Values{}
-		for _, p := range t.Params {
-			v[p.Name] = p.Default
-		}
-
-		f.values[t.Name] = v
+		f.values[t.Name] = t.Prefill(z.Name, current)
 	}
 
 	m.templateForm = f
@@ -92,6 +91,7 @@ func (m *Model) templateFormKey(msg tea.KeyMsg) tea.Cmd {
 		v := values[p.Name]
 		if m.keys.typeInto(&v, msg) {
 			values[p.Name] = v
+			f.warning = ""
 
 			return nil
 		}
@@ -116,11 +116,12 @@ func (m *Model) templateFormKey(msg tea.KeyMsg) tea.Cmd {
 		case !ok:
 			n := len(f.templates)
 			f.pick = (f.pick + step + n) % n
-			f.err, f.conflicts = "", nil
+			f.err, f.conflicts, f.warning = "", nil, ""
 		case p.Choices != nil:
 			n := len(p.Choices)
 			i := max(slices.Index(p.Choices, values[p.Name]), 0)
 			values[p.Name] = p.Choices[(i+step+n)%n]
+			f.warning = ""
 		}
 	case ActionSelect:
 		if f.field < fields-1 {
@@ -140,7 +141,8 @@ func (m *Model) templateFormKey(msg tea.KeyMsg) tea.Cmd {
 // Changeset. The Template merges with the pending changes but never
 // overrides one: if it would change a Record the user has a pending change
 // for, or bring back one staged for deletion, it stages nothing and lists
-// those changes.
+// those changes. If it would weaken something, such as the Zone's DMARC
+// policy, it says so first and stages on a second Enter.
 func (m *Model) submitTemplateForm() tea.Cmd {
 	f := m.templateForm
 	f.err, f.conflicts = "", nil
@@ -160,19 +162,7 @@ func (m *Model) submitTemplateForm() tea.Cmd {
 
 	t := f.template()
 
-	// The Records as they will be once the pending Changeset is applied,
-	// with the rows they show on.
-	var (
-		rows    []recordRow
-		current []dns.Record
-	)
-
-	for _, row := range m.rows {
-		if row.kind != dns.ChangeDelete {
-			rows = append(rows, row)
-			current = append(current, row.rec)
-		}
-	}
+	rows, current := m.pendingRecords()
 
 	changes, err := t.Changes(z.Name, current, f.values[t.Name], m.templateTTL(z.ID))
 	if err != nil {
@@ -248,6 +238,12 @@ func (m *Model) submitTemplateForm() tea.Cmd {
 		return nil
 	}
 
+	if w := t.Warning(z.Name, current, f.values[t.Name]); w != "" && w != f.warning {
+		f.warning = w
+
+		return nil
+	}
+
 	for i, c := range changes {
 		switch c.Kind {
 		case dns.ChangeAdd:
@@ -263,6 +259,24 @@ func (m *Model) submitTemplateForm() tea.Cmd {
 	m.templateForm = nil
 
 	return nil
+}
+
+// pendingRecords are the open Zone's Records as they will be once its
+// pending Changeset is applied, with the rows they show on.
+func (m *Model) pendingRecords() ([]recordRow, []dns.Record) {
+	var (
+		rows    []recordRow
+		current []dns.Record
+	)
+
+	for _, row := range m.rows {
+		if row.kind != dns.ChangeDelete {
+			rows = append(rows, row)
+			current = append(current, row.rec)
+		}
+	}
+
+	return rows, current
 }
 
 // templateTTL is the TTL of the Records a Template adds to a Zone: the
@@ -319,6 +333,12 @@ func (m *Model) templateFormView() string {
 		for _, l := range wrapNote(errorStyle, c, noteWidth-2) {
 			notes = append(notes, "  "+l)
 		}
+	}
+
+	if f.warning != "" {
+		notes = append(notes, "")
+		notes = append(notes, wrapNote(hintStaleStyle, f.warning+" Press "+m.keys.keysFor(ActionSelect)+
+			" again to add it to the Changeset anyway.", noteWidth)...)
 	}
 
 	notes = append(notes, "", hintStyle.Render(m.keys.keysFor(ActionNextPane)+" next field · "+

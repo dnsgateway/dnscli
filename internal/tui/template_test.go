@@ -125,7 +125,9 @@ func TestGoogleMailTemplateReplacesSPFAndDMARCInsteadOfAddingThem(t *testing.T) 
 
 	h.openTemplate(googleMail)
 	h.assertShows("‹ Google mail ›", "DMARC policy", "DKIM selector", "google", "DKIM key")
-	h.enter(googleFields)
+	h.press("tab", "tab")
+	h.typeText("dmarc@work.example")
+	h.enter(googleFields - 2)
 
 	h.assertShows("3 pending changes")
 	h.press("p", "enter")
@@ -134,7 +136,7 @@ func TestGoogleMailTemplateReplacesSPFAndDMARCInsteadOfAddingThem(t *testing.T) 
 	want := []dns.Change{
 		modifyTo(mailRecords[1], "1 smtp.google.com", 1),
 		modifyTo(mailRecords[2], "v=spf1 include:_spf.google.com ~all", 1),
-		modifyTo(mailRecords[3], "v=DMARC1; p=none", 1),
+		modifyTo(mailRecords[3], "v=DMARC1; p=reject; rua=mailto:dmarc@work.example", 1),
 	}
 
 	calls := applyCalls(f)
@@ -171,7 +173,7 @@ func TestGoogleMailTemplateTakesADMARCPolicyAndADKIMKey(t *testing.T) {
 	h := openValidatedShowing(t, f, "v=spf1 mx -all")
 
 	h.openTemplate(googleMail)
-	h.press("tab", "down", "down") // DMARC policy: none → quarantine → reject
+	h.press("tab") // DMARC policy: prefilled from the Zone's DMARC
 	h.assertShows("‹ reject ›")
 	h.press("tab")
 	h.typeText("dmarc@work.example")
@@ -251,7 +253,6 @@ func TestProtonMailTemplateAsksForItsTokenAndDKIMTargets(t *testing.T) {
 		addOf("CNAME", "protonmail._domainkey.work.example", "protonmail.domainkey.dx.domains.proton.ch", 3600),
 		addOf("CNAME", "protonmail2._domainkey.work.example", "protonmail2.domainkey.dx.domains.proton.ch", 3600),
 		addOf("CNAME", "protonmail3._domainkey.work.example", "protonmail3.domainkey.dx.domains.proton.ch", 3600),
-		modifyTo(mailRecords[3], "v=DMARC1; p=none", 3600),
 	}
 
 	calls := applyCalls(f)
@@ -352,4 +353,75 @@ func TestTheWriteGateRefusesTemplatesInASealedSession(t *testing.T) {
 
 	h.assertShows("The session is sealed and read-only")
 	h.assertHides("Apply a Template")
+}
+
+func TestAMailTemplateKeepsTheZonesDMARCUnlessItIsEdited(t *testing.T) {
+	hardened := dns.Record{ProviderID: "rm4", Type: "TXT", Name: "_dmarc.work.example",
+		Value: "v=DMARC1; p=quarantine; sp=reject; rua=mailto:a@work.example; adkim=s", TTL: 3600}
+	f := fake.New().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial},
+		mailRecords[0], mailRecords[1], mailRecords[2], hardened)
+	h := openValidatedShowing(t, f, "v=spf1 mx -all")
+
+	h.openTemplate(googleMail)
+	h.assertShows("DMARC policy      quarantine", "mailto:a@work.example")
+	h.enter(googleFields)
+
+	h.assertShows("2 pending changes")
+	h.press("p", "enter")
+
+	want := []dns.Change{
+		modifyTo(mailRecords[1], "1 smtp.google.com", 3600),
+		modifyTo(mailRecords[2], "v=spf1 include:_spf.google.com ~all", 3600),
+	}
+
+	calls := applyCalls(f)
+	if len(calls) != 1 || !reflect.DeepEqual(calls[0].Changes, want) {
+		t.Fatalf("Apply calls = %+v\nwant changes %+v", calls, want)
+	}
+}
+
+func TestAWeakerDMARCPolicyNeedsASecondEnter(t *testing.T) {
+	f := mailZones()
+	h := openValidatedShowing(t, f, "v=spf1 mx -all")
+
+	h.openTemplate(googleMail)
+	h.press("tab", "down") // DMARC policy: reject → none
+	h.assertShows("‹ none ›")
+	h.enter(googleFields - 1)
+
+	h.assertShows("Apply a Template", "The DMARC policy of work.example is reject: none is", "Press Enter again")
+	h.assertHides("pending change")
+
+	h.press("enter")
+	h.assertHides("Apply a Template")
+	h.assertShows("3 pending changes")
+	h.press("p", "enter")
+
+	want := []dns.Change{
+		modifyTo(mailRecords[1], "1 smtp.google.com", 3600),
+		modifyTo(mailRecords[2], "v=spf1 include:_spf.google.com ~all", 3600),
+		modifyTo(mailRecords[3], "v=DMARC1; p=none", 3600),
+	}
+
+	calls := applyCalls(f)
+	if len(calls) != 1 || !reflect.DeepEqual(calls[0].Changes, want) {
+		t.Fatalf("Apply calls = %+v\nwant changes %+v", calls, want)
+	}
+}
+
+func TestEditingAfterTheWeakerPolicyWarningAsksAgain(t *testing.T) {
+	h := openValidatedShowing(t, mailZones(), "v=spf1 mx -all")
+
+	h.openTemplate(googleMail)
+	h.press("tab", "down", "down") // DMARC policy: reject → none → quarantine
+	h.enter(googleFields - 1)
+	h.assertShows("is reject: quarantine")
+
+	// Changing the policy, even back to the one warned of, warns again
+	// before anything is staged.
+	h.press("shift+tab", "shift+tab", "shift+tab", "up", "down")
+	h.assertShows("‹ quarantine ›")
+	h.enter(googleFields - 1)
+	h.assertShows("Apply a Template", "is reject: quarantine")
+	h.assertHides("pending change")
 }
