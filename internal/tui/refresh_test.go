@@ -15,6 +15,7 @@ import (
 	"github.com/sergelogvinov/dnscli/internal/provider"
 	"github.com/sergelogvinov/dnscli/internal/provider/fake"
 	"github.com/sergelogvinov/dnscli/internal/store"
+	"github.com/sergelogvinov/dnscli/internal/tui"
 )
 
 // Records of work.example as the Provider has them now, and as an older
@@ -45,8 +46,19 @@ func refreshZones() *fake.Provider {
 func newRefreshHarness(t *testing.T, f *fake.Provider) (*harness, *store.Store, string) {
 	t.Helper()
 
+	return newRefreshHarnessWith(t, f, tui.Deps{})
+}
+
+// newRefreshHarnessWith is newRefreshHarness with extra dependencies;
+// Providers and UnsealMethod are filled in.
+func newRefreshHarnessWith(t *testing.T, f *fake.Provider, deps tui.Deps) (*harness, *store.Store, string) {
+	t.Helper()
+
+	deps.Providers = provider.Registry{"cloudflare": f.New}
+	deps.UnsealMethod = fastPassphrase()
+
 	s, path := openStore(t)
-	h := newAccountHarness(t, s, f)
+	h := newHarnessWith(t, s, deps)
 	h.fillAddAccount("work", token)
 	h.typeText(passphrase)
 	h.press("tab")
@@ -225,5 +237,65 @@ func TestARateLimitedRefreshShowsWhenToRetryAndIsNotRetriedOnItsOwn(t *testing.T
 
 	if n := recordsCalls(f, "zw1"); n != 1 {
 		t.Fatalf("Records calls = %d, want 1: a rate-limited Refresh must not be retried automatically", n)
+	}
+}
+
+func TestRefreshesOfOneZoneAreSingleFlight(t *testing.T) {
+	f := refreshZones()
+	h, s, _ := newRefreshHarness(t, f)
+
+	refresh := h.step(h.pressHolding("enter"))
+	h.assertShows("refreshing…")
+
+	// Retrying, and opening the Zone again, while its Refresh is in flight
+	// start no second one.
+	h.press("r", "enter")
+	h.assertShows("refreshing…", "203.0.113.9")
+
+	if n := recordsCalls(f, "zw1"); n != 0 {
+		t.Fatalf("Records calls = %d before the held Refresh ran, want 0", n)
+	}
+
+	h.run(refresh)
+
+	h.assertShows("validated this session", "203.0.113.20")
+
+	if n := recordsCalls(f, "zw1"); n != 1 {
+		t.Fatalf("Records calls = %d, want 1", n)
+	}
+
+	if got := cachedRecordValues(t, s, "work.example"); len(got) != 2 {
+		t.Fatalf("cached records = %q", got)
+	}
+
+	// Once it has finished, the Zone can be Refreshed again.
+	h.press("r")
+
+	if n := recordsCalls(f, "zw1"); n != 2 {
+		t.Fatalf("Records calls = %d after another retry, want 2", n)
+	}
+}
+
+func TestRefreshesRunWithBoundedConcurrency(t *testing.T) {
+	f := refreshZones()
+	h, _, _ := newRefreshHarnessWith(t, f, tui.Deps{Refreshes: 1})
+
+	first := h.step(h.pressHolding("enter")) // work.example
+	h.press("j", "enter")                    // work.test waits for a free slot
+
+	h.assertMarker("work.example", "↻")
+	h.assertMarker("work.test", "↻")
+
+	if n := recordsCalls(f, "zw2"); n != 0 {
+		t.Fatalf("work.test Records calls = %d while the limit is taken, want 0", n)
+	}
+
+	h.run(first)
+
+	h.assertMarker("work.example", "✓")
+	h.assertMarker("work.test", "✓")
+
+	if n := recordsCalls(f, "zw2"); n != 1 {
+		t.Fatalf("work.test Records calls = %d, want 1", n)
 	}
 }
