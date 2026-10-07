@@ -140,10 +140,15 @@ func (m *Model) row(p pane, i int, text string, w int, style lipgloss.Style) str
 		text = "›" + strings.TrimPrefix(text, " ")
 	}
 
-	text = ansi.Truncate(text, w, "…")
-	text += strings.Repeat(" ", max(w-lipgloss.Width(text), 0))
+	return style.Render(fit(text, w))
+}
 
-	return style.Render(text)
+// fit truncates s to w columns, marking the cut with …, and pads it with
+// spaces to exactly w columns.
+func fit(s string, w int) string {
+	s = ansi.Truncate(s, w, "…")
+
+	return s + strings.Repeat(" ", max(w-lipgloss.Width(s), 0))
 }
 
 type columns struct{ name, typ, ttl, content int }
@@ -158,13 +163,7 @@ func recordColumns(w int) columns {
 }
 
 func (c columns) format(name, typ, content, ttl string) string {
-	cell := func(s string, w int) string {
-		s = ansi.Truncate(s, w, "…")
-
-		return s + strings.Repeat(" ", max(w-lipgloss.Width(s), 0))
-	}
-
-	return " " + cell(name, c.name) + " " + cell(typ, c.typ) + " " + cell(content, c.content) + " " + cell(ttl, c.ttl)
+	return " " + fit(name, c.name) + " " + fit(typ, c.typ) + " " + fit(content, c.content) + " " + fit(ttl, c.ttl)
 }
 
 // window returns the range [start, end) of n list items that fits in h rows
@@ -253,10 +252,7 @@ func box(title string, lines []string, w, h int, focused bool) string {
 			line = lines[i]
 		}
 
-		line = ansi.Truncate(line, innerW, "…")
-		line += strings.Repeat(" ", max(innerW-lipgloss.Width(line), 0))
-
-		sb.WriteString("\n" + style.Render(b.Left) + line + style.Render(b.Right))
+		sb.WriteString("\n" + style.Render(b.Left) + fit(line, innerW) + style.Render(b.Right))
 	}
 
 	sb.WriteString("\n" + style.Render(b.BottomLeft+strings.Repeat(b.Bottom, innerW)+b.BottomRight))

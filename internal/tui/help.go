@@ -47,8 +47,8 @@ func overlay(bg, fg string, width, height int) string {
 		}
 
 		bl := bgLines[row]
-		left := ansi.Truncate(bl, x, "")
-		left += strings.Repeat(" ", max(x-lipgloss.Width(left), 0))
+		// Cut without an ellipsis: the cut edge sits against the overlay's border.
+		left := fit(ansi.Truncate(bl, x, ""), x)
 		right := ansi.TruncateLeft(bl, x+fgW, "")
 
 		bgLines[row] = left + fl + right
