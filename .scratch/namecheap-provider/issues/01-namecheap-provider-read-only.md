@@ -6,16 +6,26 @@
 
 **Status:** ready-for-agent
 
-- [ ] `namecheap` is registered next to `cloudflare` and `godaddy`; an Account is labelled `namecheap.<name>`. No change to the Provider interface, the domain types, the Store schema or the TUI
-- [ ] The adapter talks to the Namecheap XML API over plain `net/http` and `encoding/xml`, with a `Config` that takes an optional base URL (tests, sandbox) and HTTP client; the default client has a per-request timeout
-- [ ] The constructor refuses a token without exactly three non-empty parts, or whose CLIENTIP is not an IPv4 address, with an error that shows the expected shape
-- [ ] Every request carries `ApiUser` and `UserName` (both the API user), `ApiKey`, `ClientIp` and `Command`; no request goes to a third party to discover the public IP
-- [ ] Zones are read from `namecheap.domains.getList` page by page (page size 100) until every domain is read, keeping only domains whose `IsOurDNS` is true. ProviderID is the domain name; a Zone's Nameservers stay nil
-- [ ] `Nameservers` returns `dns1.registrar-servers.com` and `dns2.registrar-servers.com`, sorted
-- [ ] A zone name splits into SLD (first label) and TLD (the rest), e.g. `example.co.uk` → `example` + `co.uk`
-- [ ] Records come from `namecheap.domains.dns.getHosts`: names become absolute (`@` is the apex), MX puts `MXPref` first in the value, TTL is taken as given (1799, Namecheap's "Automatic", stays 1799), ProviderID is the `HostId`, and URL, URL301, FRAME, ALIAS and MXE hosts are kept with their Namecheap type name. RecordSet.Serial is 0
-- [ ] TTLRange is 60–60000; no AutoTTL, no ProxyFlag
-- [ ] ZoneStatus is DNSSEC and HSTS Unknown with no error
-- [ ] `Status="ERROR"` responses (sent with HTTP 200) become a Provider APIError whose messages are `Number: text`. Auth errors (bad key or user, API access disabled, IP not whitelisted) map to ErrUnauthorized, unknown domain to ErrNotFound, too many requests to ErrRateLimited. Non-2xx statuses use the existing status-based classification. Rate limits are reported, never waited out; RetryAfter stays zero
-- [ ] Apply returns an error for every change saying Namecheap writes are not supported yet, and sends nothing
-- [ ] Seam 2 tests against an `httptest` server cover: malformed tokens, the auth parameters on every request, getList paging and the `IsOurDNS` filter, Nameservers, SLD/TLD splitting for a two-label and a multi-label TLD, record decoding (absolute names, apex, MX priority, HostId, Namecheap-only types), error-number mapping with number and text in the message, and ZoneStatus
+- [x] `namecheap` is registered next to `cloudflare` and `godaddy`; an Account is labelled `namecheap.<name>`. No change to the Provider interface, the domain types, the Store schema or the TUI
+- [x] The adapter talks to the Namecheap XML API over plain `net/http` and `encoding/xml`, with a `Config` that takes an optional base URL (tests, sandbox) and HTTP client; the default client has a per-request timeout
+- [x] The constructor refuses a token without exactly three non-empty parts, or whose CLIENTIP is not an IPv4 address, with an error that shows the expected shape
+- [x] Every request carries `ApiUser` and `UserName` (both the API user), `ApiKey`, `ClientIp` and `Command`; no request goes to a third party to discover the public IP
+- [x] Zones are read from `namecheap.domains.getList` page by page (page size 100) until every domain is read, keeping only domains whose `IsOurDNS` is true. ProviderID is the domain name; a Zone's Nameservers stay nil
+- [x] `Nameservers` returns `dns1.registrar-servers.com` and `dns2.registrar-servers.com`, sorted
+- [x] A zone name splits into SLD (first label) and TLD (the rest), e.g. `example.co.uk` → `example` + `co.uk`
+- [x] Records come from `namecheap.domains.dns.getHosts`: names become absolute (`@` is the apex), MX puts `MXPref` first in the value, TTL is taken as given (1799, Namecheap's "Automatic", stays 1799), ProviderID is the `HostId`, and URL, URL301, FRAME, ALIAS and MXE hosts are kept with their Namecheap type name. RecordSet.Serial is 0
+- [x] TTLRange is 60–60000; no AutoTTL, no ProxyFlag
+- [x] ZoneStatus is DNSSEC and HSTS Unknown with no error
+- [x] `Status="ERROR"` responses (sent with HTTP 200) become a Provider APIError whose messages are `Number: text`. Auth errors (bad key or user, API access disabled, IP not whitelisted) map to ErrUnauthorized, unknown domain to ErrNotFound, too many requests to ErrRateLimited. Non-2xx statuses use the existing status-based classification. Rate limits are reported, never waited out; RetryAfter stays zero
+- [x] Apply returns an error for every change saying Namecheap writes are not supported yet, and sends nothing
+- [x] Seam 2 tests against an `httptest` server cover: malformed tokens, the auth parameters on every request, getList paging and the `IsOurDNS` filter, Nameservers, SLD/TLD splitting for a two-label and a multi-label TLD, record decoding (absolute names, apex, MX priority, HostId, Namecheap-only types), error-number mapping with number and text in the message, and ZoneStatus
+
+## Comments
+
+- 2026-10-07: Implemented test-first (Seam 2, `internal/provider/namecheap`), registered in `cmd/dnscli/main.go`.
+  - Every command is a form-encoded POST to the endpoint, not a GET. The API key stays out of the URL, so it can't leak through a `net/http` error that quotes the URL (a test checks this). Namecheap accepts POST for every command. `Config.BaseURL` is the full endpoint (`…/xml.response`), so the sandbox URL works as-is.
+  - Record values follow the other adapters: CNAME, NS, ALIAS and MX targets lose their trailing dot. Ticket 02 must not send these Records back as the "untouched" hosts. It should resend the raw getHosts hosts, as the spec says.
+  - getList paging stops at a short page, or at the page that reaches `TotalItems`.
+  - Error numbers: unauthorized is 1010101, 1010102, 1011100, 1011102, 1011150, 1017101, 1017105, 1017150, 1017411, 1050900; not found is 2019166, 2016166; rate limited is 500000. They come from Namecheap's global error list and third-party clients. Confirm them in the manual pass. The first number with a known kind sets the kind. An `ERROR` answer is an APIError with StatusCode 200, so its message reads `(HTTP 200 OK)`. A non-2xx answer carries no messages: Namecheap's error pages are not XML.
+  - SRV and any other type come back with Namecheap's Address as-is, with no MXPref in front. Check SRV's shape in the manual pass.
+  - Apply fails every change with `namecheap: writing records is not implemented yet` (wraps `provider.ErrNotImplemented`). It returns no top-level error and sends nothing.

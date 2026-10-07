@@ -20,6 +20,7 @@ import (
 	"github.com/sergelogvinov/dnscli/internal/provider"
 	"github.com/sergelogvinov/dnscli/internal/provider/cloudflare"
 	"github.com/sergelogvinov/dnscli/internal/provider/godaddy"
+	"github.com/sergelogvinov/dnscli/internal/provider/namecheap"
 	"github.com/sergelogvinov/dnscli/internal/resolver"
 	"github.com/sergelogvinov/dnscli/internal/store"
 	"github.com/sergelogvinov/dnscli/internal/tui"
@@ -34,6 +35,7 @@ const unsealEnv = "DNSCLI_UNSEAL"
 var providers = provider.Registry{
 	"cloudflare": cloudflare.Config{}.New,
 	"godaddy":    godaddy.Config{}.New,
+	"namecheap":  namecheap.Config{}.New,
 }
 
 // unsealMethods are the Unseal Methods a build supports, by name: the

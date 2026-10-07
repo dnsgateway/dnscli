@@ -1,0 +1,604 @@
+package namecheap_test
+
+// Seam 2: the Namecheap Provider against an httptest server that speaks
+// the Namecheap XML API's request parameters and response shapes.
+
+import (
+	"context"
+	"encoding/xml"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"reflect"
+	"slices"
+	"strconv"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/sergelogvinov/dnscli/internal/dns"
+	"github.com/sergelogvinov/dnscli/internal/provider"
+	"github.com/sergelogvinov/dnscli/internal/provider/namecheap"
+)
+
+const testToken = "apiuser:apikey:192.0.2.10"
+
+// ncDomain is one domain of the scripted Account.
+type ncDomain struct {
+	Name   string
+	OurDNS bool
+}
+
+// ncHost is one host of a domain, as getHosts answers it.
+type ncHost struct {
+	ID, Name, Type, Address string
+	MXPref, TTL             int
+}
+
+// ncError is one error of an ERROR response.
+type ncError struct {
+	Number int
+	Text   string
+}
+
+// ncAPI is a scripted Namecheap XML API. getList pages domains PageSize at
+// a time by Page, from 1; getHosts answers a domain's whole host list.
+type ncAPI struct {
+	domains []ncDomain
+	hosts   map[string][]ncHost // by domain
+
+	// fail, when it returns errors, answers the request with Status="ERROR".
+	fail func(command string) []ncError
+
+	mu sync.Mutex
+	// requests records each request's parameters, query and form.
+	requests []url.Values
+}
+
+// Requests returns each request's parameters, in order.
+func (api *ncAPI) Requests() []url.Values {
+	api.mu.Lock()
+	defer api.mu.Unlock()
+
+	return slices.Clone(api.requests)
+}
+
+// Commands returns each request's Command, in order.
+func (api *ncAPI) Commands() []string {
+	var out []string
+	for _, r := range api.Requests() {
+		out = append(out, r.Get("Command"))
+	}
+
+	return out
+}
+
+func newProvider(t *testing.T, api *ncAPI) provider.Provider {
+	t.Helper()
+
+	srv := httptest.NewServer(api.handler(t))
+	t.Cleanup(srv.Close)
+
+	p, err := namecheap.Config{BaseURL: srv.URL + "/xml.response"}.New(
+		dns.Account{ID: 1, Provider: "namecheap", Name: "main"}, testToken)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	return p
+}
+
+func (api *ncAPI) handler(t *testing.T) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/xml.response" {
+			t.Errorf("request to %s, want /xml.response", r.URL.Path)
+		}
+
+		if err := r.ParseForm(); err != nil {
+			t.Errorf("ParseForm: %v", err)
+		}
+
+		api.mu.Lock()
+		api.requests = append(api.requests, r.Form)
+		api.mu.Unlock()
+
+		cmd := r.Form.Get("Command")
+
+		if api.fail != nil {
+			if errs := api.fail(cmd); len(errs) > 0 {
+				writeErrors(w, errs...)
+
+				return
+			}
+		}
+
+		switch cmd {
+		case "namecheap.domains.getList":
+			api.getList(w, r)
+		case "namecheap.domains.dns.getHosts":
+			api.getHosts(w, r)
+		default:
+			writeErrors(w, ncError{1010104, "Command " + cmd + " is invalid"})
+		}
+	})
+}
+
+func (api *ncAPI) getList(w http.ResponseWriter, r *http.Request) {
+	size, err := strconv.Atoi(r.Form.Get("PageSize"))
+	if err != nil || size < 10 || size > 100 {
+		size = 20
+	}
+
+	page, err := strconv.Atoi(r.Form.Get("Page"))
+	if err != nil || page < 1 {
+		page = 1
+	}
+
+	start := min((page-1)*size, len(api.domains))
+
+	var b strings.Builder
+
+	b.WriteString(`<DomainGetListResult>`)
+
+	for _, d := range api.domains[start:min(start+size, len(api.domains))] {
+		fmt.Fprintf(&b, `<Domain ID="%d" Name="%s" User="apiuser" Created="02/15/2024" Expires="02/15/2027" IsExpired="false" IsLocked="false" AutoRenew="true" WhoisGuard="ENABLED" IsPremium="false" IsOurDNS="%t"/>`,
+			len(d.Name), d.Name, d.OurDNS)
+	}
+
+	fmt.Fprintf(&b, `</DomainGetListResult><Paging><TotalItems>%d</TotalItems><CurrentPage>%d</CurrentPage><PageSize>%d</PageSize></Paging>`,
+		len(api.domains), page, size)
+
+	writeOK(w, "namecheap.domains.getList", b.String())
+}
+
+func (api *ncAPI) getHosts(w http.ResponseWriter, r *http.Request) {
+	domain := r.Form.Get("SLD") + "." + r.Form.Get("TLD")
+
+	hosts, ok := api.hosts[domain]
+	if !ok {
+		writeErrors(w, ncError{2019166, "Domain not found"})
+
+		return
+	}
+
+	var b strings.Builder
+
+	fmt.Fprintf(&b, `<DomainDNSGetHostsResult Domain="%s" EmailType="MX" IsUsingOurDNS="true">`, domain)
+
+	for _, h := range hosts {
+		fmt.Fprintf(&b, `<host HostId="%s" Name="%s" Type="%s" Address="%s" MXPref="%d" TTL="%d" AssociatedAppTitle="" FriendlyName="" IsActive="true" IsDDNSEnabled="false"/>`,
+			h.ID, xmlEscape(h.Name), h.Type, xmlEscape(h.Address), h.MXPref, h.TTL)
+	}
+
+	b.WriteString(`</DomainDNSGetHostsResult>`)
+
+	writeOK(w, "namecheap.domains.dns.getHosts", b.String())
+}
+
+func xmlEscape(s string) string {
+	var b strings.Builder
+
+	_ = xml.EscapeText(&b, []byte(s))
+
+	return b.String()
+}
+
+// writeOK answers a command with Status="OK" and its CommandResponse body.
+func writeOK(w http.ResponseWriter, command, body string) {
+	w.Header().Set("Content-Type", "text/xml")
+	_, _ = fmt.Fprintf(w, `<?xml version="1.0" encoding="utf-8"?>
+<ApiResponse Status="OK" xmlns="http://api.namecheap.com/xml.response">
+  <Errors />
+  <Warnings />
+  <RequestedCommand>%s</RequestedCommand>
+  <CommandResponse Type="%s">%s</CommandResponse>
+  <Server>PHX01APIEXT01</Server>
+  <GMTTimeDifference>--5:00</GMTTimeDifference>
+  <ExecutionTime>0.01</ExecutionTime>
+</ApiResponse>`, command, command, body)
+}
+
+// writeErrors answers with Status="ERROR" and HTTP 200, as Namecheap does.
+func writeErrors(w http.ResponseWriter, errs ...ncError) {
+	var b strings.Builder
+	for _, e := range errs {
+		fmt.Fprintf(&b, `<Error Number="%d">%s</Error>`, e.Number, xmlEscape(e.Text))
+	}
+
+	w.Header().Set("Content-Type", "text/xml")
+	_, _ = fmt.Fprintf(w, `<?xml version="1.0" encoding="utf-8"?>
+<ApiResponse Status="ERROR" xmlns="http://api.namecheap.com/xml.response">
+  <Errors>%s</Errors>
+  <Warnings />
+  <RequestedCommand />
+  <Server>PHX01APIEXT01</Server>
+  <GMTTimeDifference>--5:00</GMTTimeDifference>
+  <ExecutionTime>0.01</ExecutionTime>
+</ApiResponse>`, b.String())
+}
+
+func TestNewRefusesATokenThatIsNotUserKeyAndClientIP(t *testing.T) {
+	for _, token := range []string{
+		"",
+		"apiuser:apikey",
+		":apikey:192.0.2.10",
+		"apiuser::192.0.2.10",
+		"apiuser:apikey:",
+		"apiuser:apikey:192.0.2.10:extra",
+		"apiuser:apikey:not-an-ip",
+		"apiuser:apikey:2001:db8::1",
+		"apiuser:apikey:::ffff:192.0.2.10",
+		"apiuser:apikey:192.0.2",
+	} {
+		_, err := (namecheap.Config{}).New(dns.Account{Provider: "namecheap", Name: "main"}, token)
+		if err == nil {
+			t.Errorf("New(%q) took a token that is not APIUSER:APIKEY:CLIENTIP", token)
+
+			continue
+		}
+
+		if !strings.Contains(err.Error(), "APIUSER:APIKEY:CLIENTIP") {
+			t.Errorf("New(%q) = %q, want the error to show the token's shape", token, err)
+		}
+	}
+}
+
+func TestEveryRequestCarriesTheTokensAuthParameters(t *testing.T) {
+	api := &ncAPI{
+		domains: []ncDomain{{"example.com", true}},
+		hosts:   map[string][]ncHost{"example.com": {{ID: "1", Name: "@", Type: "A", Address: "192.0.2.1", TTL: 1800}}},
+	}
+	p := newProvider(t, api)
+
+	if _, err := p.Zones(context.Background()); err != nil {
+		t.Fatalf("Zones: %v", err)
+	}
+
+	if _, err := p.Records(context.Background(), example); err != nil {
+		t.Fatalf("Records: %v", err)
+	}
+
+	want := map[string]string{"ApiUser": "apiuser", "UserName": "apiuser", "ApiKey": "apikey", "ClientIp": "192.0.2.10"}
+
+	reqs := api.Requests()
+	if len(reqs) != 2 {
+		t.Fatalf("requests = %v, want one getList and one getHosts", api.Commands())
+	}
+
+	for _, r := range reqs {
+		for k, v := range want {
+			if got := r.Get(k); got != v {
+				t.Errorf("%s request: %s = %q, want %q", r.Get("Command"), k, got, v)
+			}
+		}
+	}
+}
+
+var example = dns.Zone{Name: "example.com", ProviderID: "example.com"}
+
+func TestZonesAreTheDomainsOnNamecheapDNSOnEveryPage(t *testing.T) {
+	api := &ncAPI{}
+
+	var want []string
+
+	for i := range 205 {
+		d := ncDomain{Name: fmt.Sprintf("d%03d.example", i), OurDNS: i%7 != 3}
+		api.domains = append(api.domains, d)
+
+		if d.OurDNS {
+			want = append(want, d.Name+"="+d.Name)
+		}
+	}
+
+	zones, err := newProvider(t, api).Zones(context.Background())
+	if err != nil {
+		t.Fatalf("Zones: %v", err)
+	}
+
+	var got []string
+
+	for _, z := range zones {
+		got = append(got, z.Name+"="+z.ProviderID)
+
+		if z.Nameservers != nil {
+			t.Errorf("Zone %s has nameservers %v, want nil", z.Name, z.Nameservers)
+		}
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Zones = %v,\nwant %v", got, want)
+	}
+
+	var pages []string
+	for _, r := range api.Requests() {
+		pages = append(pages, r.Get("Command")+" page "+r.Get("Page")+" of "+r.Get("PageSize"))
+	}
+
+	wantPages := []string{
+		"namecheap.domains.getList page 1 of 100",
+		"namecheap.domains.getList page 2 of 100",
+		"namecheap.domains.getList page 3 of 100",
+	}
+	if !reflect.DeepEqual(pages, wantPages) {
+		t.Errorf("requests = %v, want %v", pages, wantPages)
+	}
+}
+
+func TestZonesOfAnAccountWithNoDomainsAreNone(t *testing.T) {
+	api := &ncAPI{}
+
+	zones, err := newProvider(t, api).Zones(context.Background())
+	if err != nil {
+		t.Fatalf("Zones: %v", err)
+	}
+
+	if len(zones) != 0 {
+		t.Errorf("Zones = %v, want none", zones)
+	}
+
+	if got := api.Commands(); len(got) != 1 {
+		t.Errorf("requests = %v, want one getList", got)
+	}
+}
+
+func TestRecordsAddressTheDomainBySLDAndTLD(t *testing.T) {
+	for _, c := range []struct{ zone, sld, tld string }{
+		{"example.com", "example", "com"},
+		{"example.co.uk", "example", "co.uk"},
+	} {
+		api := &ncAPI{hosts: map[string][]ncHost{c.zone: nil}}
+
+		if _, err := newProvider(t, api).Records(context.Background(), dns.Zone{Name: c.zone, ProviderID: c.zone}); err != nil {
+			t.Fatalf("Records(%s): %v", c.zone, err)
+		}
+
+		r := api.Requests()[0]
+		if r.Get("Command") != "namecheap.domains.dns.getHosts" || r.Get("SLD") != c.sld || r.Get("TLD") != c.tld {
+			t.Errorf("Records(%s) sent %s SLD=%q TLD=%q, want getHosts SLD=%q TLD=%q",
+				c.zone, r.Get("Command"), r.Get("SLD"), r.Get("TLD"), c.sld, c.tld)
+		}
+	}
+}
+
+func TestRecordsHaveAbsoluteNamesThePriorityFirstAndTheHostID(t *testing.T) {
+	api := &ncAPI{hosts: map[string][]ncHost{"example.com": {
+		{ID: "11", Name: "@", Type: "A", Address: "192.0.2.1", TTL: 1799},
+		{ID: "12", Name: "www", Type: "CNAME", Address: "example.com.", TTL: 1800},
+		{ID: "13", Name: "@", Type: "MX", Address: "mx1.example.net.", MXPref: 10, TTL: 3600},
+		{ID: "14", Name: "@", Type: "TXT", Address: "v=spf1 include:_spf.example.net ~all", TTL: 1799},
+		{ID: "15", Name: "sub", Type: "NS", Address: "ns1.example.net.", TTL: 1800},
+		{ID: "16", Name: "@", Type: "CAA", Address: `0 issue "letsencrypt.org"`, TTL: 1800},
+		{ID: "17", Name: "*.dev", Type: "AAAA", Address: "2001:db8::1", TTL: 60},
+		{ID: "18", Name: "go", Type: "URL", Address: "https://example.org/", TTL: 1800},
+		{ID: "19", Name: "old", Type: "URL301", Address: "https://example.org/new", TTL: 1800},
+		{ID: "20", Name: "frame", Type: "FRAME", Address: "https://example.org/", TTL: 1800},
+		{ID: "21", Name: "alias", Type: "ALIAS", Address: "target.example.net.", TTL: 300},
+		{ID: "22", Name: "@", Type: "MXE", Address: "192.0.2.25", TTL: 1800},
+	}}}
+
+	set, err := newProvider(t, api).Records(context.Background(), example)
+	if err != nil {
+		t.Fatalf("Records: %v", err)
+	}
+
+	want := []dns.Record{
+		{ProviderID: "11", Type: "A", Name: "example.com", Value: "192.0.2.1", TTL: 1799},
+		{ProviderID: "12", Type: "CNAME", Name: "www.example.com", Value: "example.com", TTL: 1800},
+		{ProviderID: "13", Type: "MX", Name: "example.com", Value: "10 mx1.example.net", TTL: 3600},
+		{ProviderID: "14", Type: "TXT", Name: "example.com", Value: "v=spf1 include:_spf.example.net ~all", TTL: 1799},
+		{ProviderID: "15", Type: "NS", Name: "sub.example.com", Value: "ns1.example.net", TTL: 1800},
+		{ProviderID: "16", Type: "CAA", Name: "example.com", Value: `0 issue "letsencrypt.org"`, TTL: 1800},
+		{ProviderID: "17", Type: "AAAA", Name: "*.dev.example.com", Value: "2001:db8::1", TTL: 60},
+		{ProviderID: "18", Type: "URL", Name: "go.example.com", Value: "https://example.org/", TTL: 1800},
+		{ProviderID: "19", Type: "URL301", Name: "old.example.com", Value: "https://example.org/new", TTL: 1800},
+		{ProviderID: "20", Type: "FRAME", Name: "frame.example.com", Value: "https://example.org/", TTL: 1800},
+		{ProviderID: "21", Type: "ALIAS", Name: "alias.example.com", Value: "target.example.net", TTL: 300},
+		{ProviderID: "22", Type: "MXE", Name: "example.com", Value: "192.0.2.25", TTL: 1800},
+	}
+	if !reflect.DeepEqual(set.Records, want) {
+		t.Errorf("Records =\n%v\nwant\n%v", set.Records, want)
+	}
+
+	if set.Serial != 0 {
+		t.Errorf("Serial = %d, want 0: Namecheap does not report it", set.Serial)
+	}
+}
+
+func TestErrorAnswersAreTypedErrorsWithTheirNumbers(t *testing.T) {
+	cases := []struct {
+		name string
+		errs []ncError
+		kind error // nil: classified by nothing
+		msg  string
+	}{
+		{"bad key", []ncError{{1011102, "Parameter APIKey is invalid"}}, provider.ErrUnauthorized, "1011102: Parameter APIKey is invalid"},
+		{"bad user", []ncError{{1011100, "Parameter APIUser is invalid"}}, provider.ErrUnauthorized, "1011100: Parameter APIUser is invalid"},
+		{"API access disabled", []ncError{{1017101, "API access has not been enabled"}}, provider.ErrUnauthorized, "1017101: API access has not been enabled"},
+		{"IP not whitelisted", []ncError{{1011150, "Invalid request IP: 198.51.100.7"}}, provider.ErrUnauthorized, "1011150: Invalid request IP: 198.51.100.7"},
+		{"unknown domain", []ncError{{2019166, "Domain not found"}}, provider.ErrNotFound, "2019166: Domain not found"},
+		{"not the Account's domain", []ncError{{2016166, "Domain is not associated with your account"}}, provider.ErrNotFound, "2016166: Domain is not associated with your account"},
+		{"rate limited", []ncError{{500000, "Too many requests"}}, provider.ErrRateLimited, "500000: Too many requests"},
+		{"other", []ncError{{3050900, "Unknown error"}, {2030280, "TLD is not supported"}}, nil, "3050900: Unknown error; 2030280: TLD is not supported"},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			api := &ncAPI{
+				hosts: map[string][]ncHost{"example.com": nil},
+				fail:  func(string) []ncError { return c.errs },
+			}
+
+			_, err := newProvider(t, api).Records(context.Background(), example)
+
+			var apiErr *provider.APIError
+			if !errors.As(err, &apiErr) {
+				t.Fatalf("err = %v, want an APIError", err)
+			}
+
+			for _, kind := range []error{provider.ErrUnauthorized, provider.ErrNotFound, provider.ErrRateLimited} {
+				if errors.Is(err, kind) != (kind == c.kind) {
+					t.Errorf("errors.Is(%v, %v) = %v", err, kind, kind != c.kind)
+				}
+			}
+
+			if apiErr.RetryAfter != 0 {
+				t.Errorf("RetryAfter = %v, want zero: Namecheap does not say", apiErr.RetryAfter)
+			}
+
+			if !strings.Contains(err.Error(), c.msg) {
+				t.Errorf("err = %q, want it to hold %q", err, c.msg)
+			}
+		})
+	}
+}
+
+func TestHTTPErrorStatusesAreClassifiedByStatus(t *testing.T) {
+	cases := []struct {
+		status int
+		kind   error
+	}{
+		{http.StatusTooManyRequests, provider.ErrRateLimited},
+		{http.StatusUnauthorized, provider.ErrUnauthorized},
+		{http.StatusBadGateway, nil},
+	}
+
+	for _, c := range cases {
+		t.Run(strconv.Itoa(c.status), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(c.status)
+				_, _ = w.Write([]byte(`<html>error</html>`))
+			}))
+			t.Cleanup(srv.Close)
+
+			p, err := namecheap.Config{BaseURL: srv.URL}.New(dns.Account{Provider: "namecheap", Name: "main"}, testToken)
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+
+			_, err = p.Zones(context.Background())
+
+			var apiErr *provider.APIError
+			if !errors.As(err, &apiErr) || apiErr.StatusCode != c.status {
+				t.Fatalf("err = %v, want an APIError with HTTP %d", err, c.status)
+			}
+
+			for _, kind := range []error{provider.ErrUnauthorized, provider.ErrNotFound, provider.ErrRateLimited} {
+				if errors.Is(err, kind) != (kind == c.kind) {
+					t.Errorf("errors.Is(%v, %v) = %v", err, kind, kind != c.kind)
+				}
+			}
+
+			if apiErr.RetryAfter != 0 {
+				t.Errorf("RetryAfter = %v, want zero", apiErr.RetryAfter)
+			}
+		})
+	}
+}
+
+func TestErrorsNeverCarryTheAPIKey(t *testing.T) {
+	api := &ncAPI{fail: func(string) []ncError { return []ncError{{1011102, "Parameter APIKey is invalid"}} }}
+
+	_, err := newProvider(t, api).Zones(context.Background())
+	if err == nil || strings.Contains(err.Error(), "apikey") {
+		t.Errorf("err = %v, want an error without the API key", err)
+	}
+
+	p, err := namecheap.Config{BaseURL: "http://127.0.0.1:1/xml.response"}.New(dns.Account{Provider: "namecheap", Name: "main"}, testToken)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if _, err := p.Zones(context.Background()); err == nil || strings.Contains(err.Error(), "apikey") {
+		t.Errorf("unreachable API: err = %v, want an error without the API key", err)
+	}
+}
+
+func TestNameserversAreNamecheapsDNSSortedWithoutAsking(t *testing.T) {
+	api := &ncAPI{}
+
+	ns, err := newProvider(t, api).Nameservers(context.Background())
+	if err != nil {
+		t.Fatalf("Nameservers: %v", err)
+	}
+
+	if want := []string{"dns1.registrar-servers.com", "dns2.registrar-servers.com"}; !reflect.DeepEqual(ns, want) {
+		t.Errorf("Nameservers = %v, want %v", ns, want)
+	}
+
+	if got := api.Commands(); len(got) != 0 {
+		t.Errorf("Nameservers sent %v, want no request", got)
+	}
+}
+
+func TestZoneStatusIsUnknownWithoutAsking(t *testing.T) {
+	api := &ncAPI{}
+
+	status, err := newProvider(t, api).ZoneStatus(context.Background(), example)
+	if err != nil {
+		t.Fatalf("ZoneStatus: %v", err)
+	}
+
+	if status != (dns.ZoneStatus{DNSSEC: dns.Unknown, HSTS: dns.Unknown}) {
+		t.Errorf("ZoneStatus = %+v, want DNSSEC and HSTS unknown", status)
+	}
+
+	if got := api.Commands(); len(got) != 0 {
+		t.Errorf("ZoneStatus sent %v: getHosts reports neither setting", got)
+	}
+}
+
+func TestNamecheapTakesTTLsFrom60To60000WithoutAutomaticOrProxy(t *testing.T) {
+	p := newProvider(t, &ncAPI{})
+
+	if got, want := provider.TTLRangeOf(p), (dns.TTLRange{Min: 60, Max: 60000}); got != want {
+		t.Errorf("TTL range = %+v, want %+v", got, want)
+	}
+
+	if provider.AutoTTLOf(p) || provider.ProxiableTypesOf(p) != nil {
+		t.Error("Namecheap has no automatic TTL and no proxy")
+	}
+}
+
+func TestApplyRefusesEveryChangeAndSendsNothing(t *testing.T) {
+	api := &ncAPI{hosts: map[string][]ncHost{"example.com": {
+		{ID: "11", Name: "@", Type: "A", Address: "192.0.2.1", TTL: 1800},
+	}}}
+
+	before := dns.Record{ProviderID: "11", Type: "A", Name: "example.com", Value: "192.0.2.1", TTL: 1800}
+	after := dns.Record{Type: "A", Name: "example.com", Value: "192.0.2.2", TTL: 1800}
+
+	changes := []dns.Change{
+		{Kind: dns.ChangeAdd, After: after},
+		{Kind: dns.ChangeModify, Before: before, After: after},
+		{Kind: dns.ChangeDelete, Before: before},
+	}
+
+	res, err := newProvider(t, api).Apply(context.Background(), dns.Changeset{Zone: example, Changes: changes})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	if len(res.Results) != len(changes) {
+		t.Fatalf("results = %v, want one per change", res.Results)
+	}
+
+	for i, r := range res.Results {
+		if !reflect.DeepEqual(r.Change, changes[i]) {
+			t.Errorf("result %d is for %+v, want %+v", i, r.Change, changes[i])
+		}
+
+		if !errors.Is(r.Err, provider.ErrNotImplemented) || !strings.Contains(r.Err.Error(), "namecheap") {
+			t.Errorf("result %d: err = %v, want Namecheap writes not supported yet", i, r.Err)
+		}
+
+		if !reflect.DeepEqual(r.Record, dns.Record{}) {
+			t.Errorf("result %d: Record = %+v, want none", i, r.Record)
+		}
+	}
+
+	if got := api.Commands(); len(got) != 0 {
+		t.Errorf("Apply sent %v, want nothing", got)
+	}
+}
