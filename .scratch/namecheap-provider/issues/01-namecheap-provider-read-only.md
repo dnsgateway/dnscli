@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] `namecheap` is registered next to `cloudflare` and `godaddy`; an Account is labelled `namecheap.<name>`. No change to the Provider interface, the domain types, the Store schema or the TUI
 - [x] The adapter talks to the Namecheap XML API over plain `net/http` and `encoding/xml`, with a `Config` that takes an optional base URL (tests, sandbox) and HTTP client; the default client has a per-request timeout
