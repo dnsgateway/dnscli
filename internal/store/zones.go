@@ -198,40 +198,45 @@ var ErrZoneNotCached = errors.New("the Zone is no longer cached")
 // SaveRefresh stores the result of a Refresh in one transaction: it
 // replaces the Zone's cached Records and sets its SOA serial and its last
 // Refresh time. A zero serial, when the Provider did not report one, keeps
-// the cached serial, as PutZone does.
+// the cached serial, as PutZone does. It returns the Zone as stored.
 //
 // It returns ErrZoneNotCached unless the cache still has that very Zone:
 // the same ID, Account, zone name and Provider zone ID. A Zone removed
 // while its Refresh was in flight may have handed its ID to a new one.
-func (s *Store) SaveRefresh(ctx context.Context, z dns.Zone, records []dns.Record, serial uint32, at time.Time) error {
+func (s *Store) SaveRefresh(ctx context.Context, z dns.Zone, records []dns.Record, serial uint32, at time.Time) (dns.Zone, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("save refresh: %w", err)
+		return dns.Zone{}, fmt.Errorf("save refresh: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	res, err := tx.ExecContext(ctx, `
+	var refreshed int64
+
+	err = tx.QueryRowContext(ctx, `
 		UPDATE zones SET soa_serial = IIF(?1 = 0, soa_serial, ?1), refreshed_at = ?2
-		WHERE id = ?3 AND account_id = ?4 AND name = ?5 AND provider_zone_id = ?6`,
-		serial, unixOrZero(at), z.ID, z.AccountID, z.Name, z.ProviderID)
-	if err != nil {
-		return fmt.Errorf("save refresh: %w", err)
+		WHERE id = ?3 AND account_id = ?4 AND name = ?5 AND provider_zone_id = ?6
+		RETURNING soa_serial, refreshed_at`,
+		serial, unixOrZero(at), z.ID, z.AccountID, z.Name, z.ProviderID,
+	).Scan(&z.Serial, &refreshed)
+	if errors.Is(err, sql.ErrNoRows) {
+		err = ErrZoneNotCached
 	}
 
-	n, err := res.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("save refresh: %w", err)
+		return dns.Zone{}, fmt.Errorf("save refresh: %w", err)
 	}
 
-	if n == 0 {
-		return fmt.Errorf("save refresh: %w", ErrZoneNotCached)
-	}
+	z.RefreshedAt = timeOrZero(refreshed)
 
 	if err := replaceRecords(ctx, tx, z.ID, records); err != nil {
-		return fmt.Errorf("save refresh: %w", err)
+		return dns.Zone{}, fmt.Errorf("save refresh: %w", err)
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return dns.Zone{}, fmt.Errorf("save refresh: %w", err)
+	}
+
+	return z, nil
 }
 
 // replaceRecords replaces a Zone's cached Records inside tx.

@@ -83,12 +83,20 @@ func (m *Model) queueSerialChecks() tea.Cmd {
 		case f.check == freshError:
 			*f = zoneFreshness{}
 			m.checks.queue = append(m.checks.queue, z.ID)
-		case (f.check == freshHintCurrent || f.check == freshHintStale) && f.cachedSerial != z.Serial:
-			*f = compareSerials(f.liveSerial, z.Serial)
+		default:
+			f.recompare(z.Serial)
 		}
 	}
 
 	return m.startSerialChecks()
+}
+
+// recompare judges a finished Serial Check again against a changed cached
+// serial.
+func (f *zoneFreshness) recompare(cached uint32) {
+	if (f.check == freshHintCurrent || f.check == freshHintStale) && f.cachedSerial != cached {
+		*f = compareSerials(f.liveSerial, cached)
+	}
 }
 
 // compareSerials judges the resolver's serial against the cached one.

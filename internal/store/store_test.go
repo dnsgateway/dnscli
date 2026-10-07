@@ -187,7 +187,7 @@ func TestARefreshOfAZoneWhoseIDWasReusedIsRefused(t *testing.T) {
 	}
 
 	stale := []dns.Record{{ProviderID: "r1", Type: "A", Name: "example.com", Value: "192.0.2.1", TTL: 300}}
-	if err := s.SaveRefresh(ctx, old, stale, 2026100701, time.Now()); !errors.Is(err, store.ErrZoneNotCached) {
+	if _, err := s.SaveRefresh(ctx, old, stale, 2026100701, time.Now()); !errors.Is(err, store.ErrZoneNotCached) {
 		t.Fatalf("save refresh of the removed Zone: %v, want ErrZoneNotCached", err)
 	}
 

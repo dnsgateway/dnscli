@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -37,7 +38,10 @@ type zoneRefreshedMsg struct {
 	// state is the Refresh state the Refresh was started for. A Zone
 	// forgotten meanwhile has none, or a new one if its ID was reused.
 	state *zoneRefresh
-	err   error
+	// zone is the Zone as the Refresh stored it, with its serial and
+	// Refresh time.
+	zone dns.Zone
+	err  error
 }
 
 // validatedZone reports whether a Zone is a Validated Zone: Refreshed
@@ -157,21 +161,24 @@ func (m *Model) refreshCmd(z dns.Zone, a dns.Account, r *zoneRefresh) tea.Cmd {
 	ctx, s, key, newProvider, now := m.ctx, m.deps.Store, m.key, m.deps.Providers[a.Provider], m.deps.now
 
 	return func() tea.Msg {
-		return zoneRefreshedMsg{zoneID: z.ID, state: r, err: refresh(ctx, s, key, newProvider, a, z, now)}
+		stored, err := refresh(ctx, s, key, newProvider, a, z, now)
+
+		return zoneRefreshedMsg{zoneID: z.ID, state: r, zone: stored, err: err}
 	}
 }
 
 // refresh reads a Zone's Records from its Provider and replaces the cached
-// copy with them, with the SOA serial and the Refresh time, in one transaction.
-func refresh(ctx context.Context, s *store.Store, key *vault.Key, newProvider provider.Constructor, a dns.Account, z dns.Zone, now func() time.Time) error {
+// copy with them, with the SOA serial and the Refresh time, in one
+// transaction. It returns the Zone as stored.
+func refresh(ctx context.Context, s *store.Store, key *vault.Key, newProvider provider.Constructor, a dns.Account, z dns.Zone, now func() time.Time) (dns.Zone, error) {
 	p, err := accountProvider(ctx, s, key, newProvider, a)
 	if err != nil {
-		return err
+		return dns.Zone{}, err
 	}
 
 	rs, err := p.Records(ctx, z)
 	if err != nil {
-		return err
+		return dns.Zone{}, err
 	}
 
 	return s.SaveRefresh(ctx, z, rs.Records, rs.Serial, now())
@@ -202,7 +209,7 @@ func accountProvider(ctx context.Context, s *store.Store, key *vault.Key, newPro
 }
 
 // zoneRefreshed records a Refresh result and starts the next queued one.
-// A success reloads the cache, and the open Zone's Records with it. The
+// A success updates the Zone in place, and reloads the open Zone's Records. The
 // result of a Zone forgotten meanwhile, such as with its Account, is
 // dropped: it usually failed with store.ErrZoneNotCached.
 func (m *Model) zoneRefreshed(msg zoneRefreshedMsg) tea.Cmd {
@@ -225,13 +232,37 @@ func (m *Model) zoneRefreshed(msg zoneRefreshedMsg) tea.Cmd {
 	}
 
 	*r = zoneRefresh{validated: true}
+	m.updateZone(msg.zone)
 
-	cmds := []tea.Cmd{m.loadCache, m.startRefreshes()}
+	cmds := []tea.Cmd{m.startRefreshes()}
 	if m.open != nil && m.open.ID == msg.zoneID {
 		cmds = append(cmds, m.reloadRecords(msg.zoneID))
 	}
 
 	return tea.Batch(cmds...)
+}
+
+// updateZone replaces a cached Zone, such as with the serial and Refresh
+// time a Refresh stored, everywhere the session holds it. A changed serial
+// is compared again with the one its Serial Check returned.
+func (m *Model) updateZone(z dns.Zone) {
+	i := slices.IndexFunc(m.zones, func(c dns.Zone) bool { return c.ID == z.ID })
+	if i < 0 {
+		return
+	}
+
+	m.zones[i] = z
+	m.zoneByID[z.ID] = z
+
+	if m.open != nil && m.open.ID == z.ID {
+		m.open = &z
+	}
+
+	if f, ok := m.fresh[z.ID]; ok {
+		f.recompare(z.Serial)
+	}
+
+	m.refilter(paneDomains)
 }
 
 // describe explains a Zone's Refresh state in the status bar; empty when
