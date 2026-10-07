@@ -169,6 +169,18 @@ func (h *harness) press(keys ...string) {
 	}
 }
 
+// pressHolding sends one key press but holds back the command it returns, so
+// a test can see the state while that background work is in flight.
+// Pass the result to run to finish the work.
+func (h *harness) pressHolding(k string) tea.Cmd {
+	h.t.Helper()
+
+	m, cmd := h.model.Update(keyMsg(k))
+	h.model = m
+
+	return cmd
+}
+
 func keyMsg(k string) tea.KeyMsg {
 	switch k {
 	case "tab":

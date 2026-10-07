@@ -86,6 +86,10 @@ func (m *Model) recordLines(w, h int) []string {
 		}
 	case m.open == nil:
 		return []string{"", fmt.Sprintf("  Press %s on a Zone to see its cached Records.", m.keys.keysFor(ActionSelect))}
+	case m.recordsLoading:
+		return []string{"", hintStyle.Render("  loading…")}
+	case m.recordsErr != nil:
+		return []string{"", errorStyle.Render("  Could not read Records for " + m.open.Name + ".")}
 	case len(m.records) == 0:
 		return []string{"", "  No cached Records for " + m.open.Name + "."}
 	}
@@ -154,6 +158,8 @@ func (m *Model) statusLine() string {
 	switch {
 	case m.err != nil:
 		return errorStyle.Render(" " + m.err.Error())
+	case m.recordsErr != nil:
+		return errorStyle.Render(" " + m.recordsErr.Error())
 	case !m.loaded:
 		return statusStyle.Render(" loading cache…")
 	case m.open != nil:

@@ -36,13 +36,15 @@ type Model struct {
 	help          bool // help overlay shown
 
 	loaded   bool
-	err      error
+	err      error // reading Accounts and Zones failed
 	accounts []dns.Account
 	zones    []dns.Zone
 
 	// open is the Zone whose Records are shown; nil until the user opens one.
-	open    *dns.Zone
-	records []dns.Record
+	open           *dns.Zone
+	recordsLoading bool
+	recordsErr     error // reading the open Zone's Records failed
+	records        []dns.Record
 }
 
 // New builds the model. All background work derives its context from ctx,
@@ -124,7 +126,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil // the user has moved on to another Zone
 		}
 
-		m.err = msg.err
+		m.recordsLoading = false
+		m.recordsErr = msg.err
 		m.records = msg.records
 		m.cursor[paneRecords] = 0
 	case tea.KeyMsg:
@@ -202,6 +205,8 @@ func (m *Model) selectItem() tea.Cmd {
 	z := m.zones[m.cursor[paneDomains]]
 	m.open = &z
 	m.records = nil
+	m.recordsLoading = true
+	m.recordsErr = nil
 
 	return m.loadRecords(z.ID)
 }

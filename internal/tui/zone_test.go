@@ -102,6 +102,38 @@ func TestMovingWithinRecordsPaneHighlightsTheRecord(t *testing.T) {
 	}
 }
 
+func TestRecordsPaneShowsLoadingWhileRecordsAreRead(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	h := newHarness(t, s)
+	pending := h.pressHolding("enter")
+
+	h.assertShows("loading")
+	h.assertHides("No cached Records")
+
+	h.run(pending)
+
+	h.assertShows("192.0.2.10")
+	h.assertHides("loading")
+}
+
+func TestRecordsReadFailureIsShownInTheRecordsPane(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	h := newHarness(t, s)
+
+	if err := s.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	h.press("enter")
+
+	h.assertShows("Could not read Records", "list records")
+	h.assertHides("No cached Records")
+}
+
 func TestMovingInOnePaneLeavesOthersAlone(t *testing.T) {
 	s, _ := openStore(t)
 	seedCache(t, s)
