@@ -60,6 +60,12 @@ func New(ctx context.Context, deps Deps) *Model {
 	}
 }
 
+// Context is the app's root context. All background work derives from it,
+// and it is cancelled when the user quits.
+func (m *Model) Context() context.Context {
+	return m.ctx
+}
+
 // cacheLoadedMsg carries the cached data read from the Store at startup.
 type cacheLoadedMsg struct {
 	accounts []dns.Account
@@ -130,8 +136,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // handle performs a user Action.
 func (m *Model) handle(a Action) tea.Cmd {
+	if a == ActionQuit {
+		m.cancel()
+
+		return tea.Quit
+	}
+
 	if m.help {
-		// The help overlay captures every Action except closing it.
+		// The help overlay captures every other Action except closing it.
 		switch a {
 		case ActionHelp, ActionClose:
 			m.help = false

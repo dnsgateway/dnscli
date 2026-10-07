@@ -29,7 +29,9 @@ func run() error {
 		return fmt.Errorf("create database directory: %w", err)
 	}
 
-	ctx := context.Background()
+	// Quitting cancels the model's own context; this also covers abnormal exits.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	s, err := store.Open(ctx, *dbPath)
 	if err != nil {
