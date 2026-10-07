@@ -4,7 +4,7 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] Apply first reads the current host list and `EmailType` with getHosts. That read, not the cached Records, is what the changes are applied to
 - [x] Each change's Before is matched by its content ProviderID (type, lower-cased name, TTL, value) when it has one, otherwise by (type, name, value). *(Was: by HostId; changed in review, see Comments.)* A Before that is not in the current list fails the whole Changeset with a conflict, and setHosts is not called
