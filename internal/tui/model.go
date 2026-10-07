@@ -176,6 +176,10 @@ func (m *Model) handle(a Action) tea.Cmd {
 		m.move(+1)
 	case ActionSelect:
 		return m.selectItem()
+	case ActionAllAccounts:
+		f := m.filter
+		f.account = 0
+		m.setFilter(f)
 	}
 
 	return nil

@@ -20,3 +20,13 @@ func TestSelectingAnAccountShowsOnlyItsZones(t *testing.T) {
 	h.assertShows("example.org")
 	h.assertHides("example.com", "two.tv")
 }
+
+func TestClearingTheAccountFilterShowsTheZonesOfEveryAccount(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	h := newHarness(t, s)
+	h.press("tab", "enter", "*")
+
+	h.assertShows("example.com", "two.tv", "example.org")
+}
