@@ -283,3 +283,51 @@ func TestAZoneThatReusesARemovedZonesIDGetsItsOwnSerialCheck(t *testing.T) {
 		t.Fatalf("home.example row = %q, want its own failed Serial Check", row)
 	}
 }
+
+func TestAZoneThatReusesARemovedZonesIDIsNotValidated(t *testing.T) {
+	f := refreshZones()
+	h, s, _ := newRefreshHarness(t, f)
+	refreshed := zoneID(t, s, "work.example")
+
+	h.press("enter")
+	h.assertMarker("work.example", "✓")
+
+	h.press("esc", "tab", "X")
+	h.typeText("cloudflare.work")
+	h.press("enter")
+	h.assertShows("Removed cloudflare.work.")
+
+	// The emptied table hands the re-listed work.example the ID it had.
+	h.fillAddAccount("work", token)
+	h.assertShows("cloudflare.work", "work.example")
+
+	if id := zoneID(t, s, "work.example"); id != refreshed {
+		t.Fatalf("work.example has ID %d; the test needs it to reuse ID %d", id, refreshed)
+	}
+
+	if row := h.domainRow("work.example"); strings.Contains(row, "✓") {
+		t.Fatalf("work.example row = %q: the re-added Zone inherited the validated Refresh", row)
+	}
+}
+
+func TestARefreshThatFinishesAfterItsAccountWasRemovedIsDropped(t *testing.T) {
+	f := refreshZones()
+	h, s, _ := newRefreshHarness(t, f)
+
+	refresh := h.step(h.pressHolding("enter"))
+	h.assertShows("refreshing…")
+
+	h.press("esc", "tab", "X")
+	h.typeText("cloudflare.work")
+	h.press("enter")
+	h.assertShows("Removed cloudflare.work.")
+
+	h.run(refresh)
+
+	h.assertShows("Removed cloudflare.work.")
+	h.assertHides("work.example", "refreshing…", "Refresh failed", "validated this session")
+
+	if names := zoneNames(t, s); len(names) != 0 {
+		t.Fatalf("the late Refresh brought back Zones: %v", names)
+	}
+}

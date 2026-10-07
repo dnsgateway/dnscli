@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -13,8 +14,9 @@ import (
 // It is held in memory only and never persisted.
 //
 // Only a Validated Zone may be edited. A Serial Check is a hint (ADR-0001),
-// so none of its states ever makes a Zone editable; the refreshing and
-// validated states arrive with Refresh.
+// so none of its states ever makes a Zone editable. The refreshing,
+// validated and Refresh error states are a zoneRefresh, which outranks
+// these hints wherever both would show.
 type freshness int
 
 const (
@@ -43,11 +45,17 @@ type serialCheckedMsg struct {
 	err    error
 }
 
-// checkQueue schedules Serial Checks with bounded concurrency. Results
-// arrive as serialCheckedMsg, and each one lets the next queued check start.
-type checkQueue struct {
-	queue   []int64 // Zone IDs waiting for a Serial Check
+// zoneQueue schedules background work per Zone, such as Serial Checks or
+// Refreshes, with bounded concurrency. Each result message lets the next
+// queued Zone start.
+type zoneQueue struct {
+	queue   []int64 // Zone IDs waiting for their turn
 	running int
+}
+
+// drop removes a Zone from the queue, such as one that left the cache.
+func (q *zoneQueue) drop(id int64) {
+	q.queue = slices.DeleteFunc(q.queue, func(queued int64) bool { return queued == id })
 }
 
 // queueSerialChecks runs after each cache (re)load. It queues a Serial

@@ -125,10 +125,13 @@ func (m *Model) accountRemoved(msg accountRemovedMsg) tea.Cmd {
 }
 
 // forgetZones drops what this session knows about Zones that left the
-// cache: a later Zone may reuse an ID, and an open one has no Records left.
+// cache: a later Zone may reuse an ID, so it must not inherit freshness or
+// a validated Refresh, and an open one has no Records left.
 func (m *Model) forgetZones(ids []int64) {
 	for _, id := range ids {
 		delete(m.fresh, id)
+		delete(m.refreshes, id)
+		m.refreshQueue.drop(id)
 
 		if m.open != nil && m.open.ID == id {
 			m.open = nil

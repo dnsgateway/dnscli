@@ -216,25 +216,7 @@ func (m *Model) discoverZones(a dns.Account, relist bool) tea.Cmd {
 // discover lists an Account's Zones from its Provider and makes its cached
 // Zones match them. A Provider error leaves the cache untouched.
 func discover(ctx context.Context, s *store.Store, key *vault.Key, newProvider provider.Constructor, a dns.Account) (int, store.ZoneSync, error) {
-	if newProvider == nil {
-		return 0, store.ZoneSync{}, fmt.Errorf("Provider type %q is not available in this build", a.Provider)
-	}
-
-	sealed, err := s.AccountSecret(ctx, a.ID)
-	if err != nil {
-		return 0, store.ZoneSync{}, err
-	}
-
-	if sealed == nil {
-		return 0, store.ZoneSync{}, errors.New("this Account has no API token")
-	}
-
-	token, err := key.Open(sealed, secretLabel(a))
-	if err != nil {
-		return 0, store.ZoneSync{}, err
-	}
-
-	p, err := newProvider(a, string(token))
+	p, err := accountProvider(ctx, s, key, newProvider, a)
 	if err != nil {
 		return 0, store.ZoneSync{}, err
 	}
