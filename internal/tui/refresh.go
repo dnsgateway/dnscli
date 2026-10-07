@@ -167,9 +167,12 @@ func (m *Model) refreshCmd(z dns.Zone, a dns.Account, r *zoneRefresh) tea.Cmd {
 	}
 }
 
-// refresh reads a Zone's Records from its Provider and replaces the cached
-// copy with them, with the SOA serial and the Refresh time, in one
-// transaction. It returns the Zone as stored.
+// refresh reads a Zone's Records and Zone Status from its Provider and
+// replaces the cached copy with them, with the SOA serial and the Refresh
+// time, in one transaction. It returns the Zone as stored.
+//
+// A Zone Status that cannot be read does not fail the Refresh: the cached
+// one is kept, and shows as older than the Refresh.
 func refresh(ctx context.Context, s *store.Store, key *vault.Key, newProvider provider.Constructor, a dns.Account, z dns.Zone, now func() time.Time) (dns.Zone, error) {
 	p, err := accountProvider(ctx, s, key, newProvider, a)
 	if err != nil {
@@ -181,7 +184,14 @@ func refresh(ctx context.Context, s *store.Store, key *vault.Key, newProvider pr
 		return dns.Zone{}, err
 	}
 
-	return s.SaveRefresh(ctx, z, rs.Records, rs.Serial, now())
+	at := now()
+
+	z.Status, z.StatusAt = dns.ZoneStatus{}, time.Time{}
+	if status, err := p.ZoneStatus(ctx, z); err == nil {
+		z.Status, z.StatusAt = status, at
+	}
+
+	return s.SaveRefresh(ctx, z, rs.Records, rs.Serial, at)
 }
 
 // accountProvider builds the Provider for an Account with its API token,

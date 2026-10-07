@@ -34,7 +34,7 @@ func (m *Model) View() string {
 	}
 
 	rightW := m.width - leftW
-	bodyH := max(m.height-1, 0)
+	bodyH := max(m.height-2, 0) // the status bar takes two rows
 	domainsH := min(max(bodyH*2/3, 3), bodyH)
 	accountsH := bodyH - domainsH
 
@@ -241,9 +241,23 @@ func window(n, cursor, h int) (start, end int) {
 	return start, start + h
 }
 
-// statusBar renders the status line with the session state at its right
-// edge. A terminal too narrow for both keeps the status line.
+// statusBar renders the status bar: the open Zone's Zone Status row, then
+// the status line with the session state at its right edge. A terminal
+// too narrow for both keeps the status line.
 func (m *Model) statusBar() string {
+	return m.zoneStatusRow() + "\n" + m.statusLineRow()
+}
+
+// zoneStatusRow is the open Zone's Zone Status; blank when no Zone is open.
+func (m *Model) zoneStatusRow() string {
+	if !m.loaded || m.open == nil {
+		return ""
+	}
+
+	return ansi.Truncate(" "+renderZoneStatus(m.zoneStatusItems(*m.open)), m.width, "…")
+}
+
+func (m *Model) statusLineRow() string {
 	tag := sealedStyle.Render("sealed · read-only ")
 	if !m.sealed() {
 		tag = statusStyle.Render("unsealed ")
