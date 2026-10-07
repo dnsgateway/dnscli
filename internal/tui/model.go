@@ -114,6 +114,8 @@ type Model struct {
 	applying map[int64]bool
 	// recordForm adds or edits a Record; nil when closed.
 	recordForm *recordForm
+	// templateForm applies a Template; nil when closed.
+	templateForm *templateForm
 	// preview shows a pending Changeset; nil when closed.
 	preview *changesetPreview
 
@@ -332,6 +334,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.recordFormKey(msg)
 		}
 
+		if m.templateForm != nil {
+			return m, m.templateFormKey(msg)
+		}
+
 		if m.preview != nil {
 			return m, m.previewKey(msg)
 		}
@@ -417,6 +423,8 @@ func (m *Model) handle(a Action) tea.Cmd {
 		return m.recordAction(a)
 	case ActionPreviewChanges:
 		return m.previewChanges()
+	case ActionApplyTemplate:
+		return m.openTemplateForm()
 	}
 
 	return nil

@@ -65,6 +65,8 @@ func (m *Model) View() string {
 		view = overlay(view, m.removeAccountView(), m.width, m.height)
 	case m.recordForm != nil:
 		view = overlay(view, m.recordFormView(), m.width, m.height)
+	case m.templateForm != nil:
+		view = overlay(view, m.templateFormView(), m.width, m.height)
 	case m.preview != nil:
 		view = overlay(view, m.previewView(), m.width, m.height)
 	case m.delegationOf != "":

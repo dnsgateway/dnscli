@@ -91,9 +91,6 @@ func (t Template) resolve(given Values) (Values, error) {
 			err = fmt.Errorf("the %s is one of %s, not %q", p.Label, strings.Join(p.Choices, ", "), v)
 		case p.check != nil:
 			v, err = p.check(v)
-			if err != nil {
-				err = fmt.Errorf("the %s: %w", p.Label, err)
-			}
 		}
 
 		if err != nil {

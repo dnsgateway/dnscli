@@ -61,6 +61,10 @@ const (
 	// conflict, rebases the conflicting changes onto the Records as the
 	// Provider has them now, and applies the Changeset.
 	ActionApplyOver
+	// ActionApplyTemplate opens the Template dialog, which stages a
+	// built-in Template's Records into the open Zone's pending Changeset.
+	// Like editing, it obeys the write gate.
+	ActionApplyTemplate
 )
 
 // Binding maps one Action to its keys.
@@ -95,6 +99,7 @@ func DefaultShortcutProfile() ShortcutProfile {
 			{Action: ActionAddRecord, Keys: []string{"i"}, Help: "insert a new Record (Records pane)"},
 			{Action: ActionEditRecord, Keys: []string{"e"}, Help: "edit the Record (Records pane)"},
 			{Action: ActionDeleteRecord, Keys: []string{"d"}, Help: "delete the Record, or undo its change (Records pane)"},
+			{Action: ActionApplyTemplate, Keys: []string{"t"}, Help: "apply a Template, such as Google mail (Records pane)"},
 			{Action: ActionPreviewChanges, Keys: []string{"p"}, Help: "preview the pending changes, Enter applies"},
 			{Action: ActionDiscardChanges, Keys: []string{"D"}, Help: "discard the pending changes (in the preview)"},
 			{Action: ActionApplyOver, Keys: []string{"O"}, Help: "apply over the current values (in the preview, after a conflict)"},
