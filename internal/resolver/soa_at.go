@@ -78,14 +78,10 @@ func serverAddrs(ctx context.Context, server string) ([]string, error) {
 	return addrs, nil
 }
 
-// soaFrom sends the SOA query q to one nameserver address, retrying over
-// TCP when the UDP answer is truncated, and returns the serial of its
-// authoritative answer.
+// soaFrom sends the SOA query q to one nameserver address and returns the
+// serial of its authoritative answer.
 func soaFrom(ctx context.Context, addr string, q *mdns.Msg) (uint32, error) {
-	r, err := exchangeWith(ctx, "udp", addr, q)
-	if err == nil && r.Truncated {
-		r, err = exchangeWith(ctx, "tcp", addr, q)
-	}
+	r, err := exchangeAt(ctx, addr, q)
 
 	switch {
 	case err != nil:
@@ -96,10 +92,8 @@ func soaFrom(ctx context.Context, addr string, q *mdns.Msg) (uint32, error) {
 		return 0, errors.New("is not authoritative for the zone")
 	}
 
-	for _, rr := range r.Answer {
-		if soa, ok := rr.(*mdns.SOA); ok && strings.EqualFold(soa.Hdr.Name, q.Question[0].Name) {
-			return soa.Serial, nil
-		}
+	if serial, ok := soaSerialOf(r, q.Question[0].Name); ok {
+		return serial, nil
 	}
 
 	return 0, errors.New("gave no SOA record")

@@ -69,13 +69,22 @@ func (s *System) SOA(ctx context.Context, zone string) (uint32, error) {
 		return 0, err
 	}
 
-	for _, rr := range r.Answer {
-		if soa, ok := rr.(*mdns.SOA); ok && strings.EqualFold(soa.Hdr.Name, q.Question[0].Name) {
-			return soa.Serial, nil
-		}
+	if serial, ok := soaSerialOf(r, zone); ok {
+		return serial, nil
 	}
 
 	return 0, fmt.Errorf("no SOA record for %s", zone)
+}
+
+// soaSerialOf returns the serial of zone's SOA record in r's answer.
+func soaSerialOf(r *mdns.Msg, zone string) (uint32, bool) {
+	for _, rr := range r.Answer {
+		if soa, ok := rr.(*mdns.SOA); ok && strings.EqualFold(soa.Hdr.Name, mdns.Fqdn(zone)) {
+			return soa.Serial, true
+		}
+	}
+
+	return 0, false
 }
 
 // NS returns the nameservers the system resolver gives for zone.
@@ -122,12 +131,7 @@ func (s *System) exchange(ctx context.Context, q *mdns.Msg) (*mdns.Msg, error) {
 	var errs []error
 
 	for _, server := range config.Servers {
-		addr := net.JoinHostPort(server, config.Port)
-
-		r, err := exchangeWith(ctx, "udp", addr, q)
-		if err == nil && r.Truncated {
-			r, err = exchangeWith(ctx, "tcp", addr, q)
-		}
+		r, err := exchangeAt(ctx, net.JoinHostPort(server, config.Port), q)
 
 		switch {
 		case err != nil:
@@ -150,6 +154,17 @@ func (s *System) exchange(ctx context.Context, q *mdns.Msg) (*mdns.Msg, error) {
 	}
 
 	return nil, errors.Join(errs...)
+}
+
+// exchangeAt sends q to one nameserver address, retrying over TCP when
+// the UDP answer is truncated.
+func exchangeAt(ctx context.Context, addr string, q *mdns.Msg) (*mdns.Msg, error) {
+	r, err := exchangeWith(ctx, "udp", addr, q)
+	if err == nil && r.Truncated {
+		r, err = exchangeWith(ctx, "tcp", addr, q)
+	}
+
+	return r, err
 }
 
 func exchangeWith(ctx context.Context, network, addr string, q *mdns.Msg) (*mdns.Msg, error) {
