@@ -90,7 +90,7 @@ func (m *Model) domainLines(w, h int) []string {
 		// Stale Zones are dimmed. The markers show the Live Zone, then the
 		// Refresh, else the Serial Check hint.
 		z := m.visible[i]
-		lines = append(lines, m.row(paneDomains, i, " "+m.zoneLabel(z), w-3, m.zoneStyle(z.ID))+" "+m.liveMarker(z)+m.zoneMarker(z.ID))
+		lines = append(lines, m.row(paneDomains, i, " "+m.zoneLabel(z), w-3, m.zoneStyle(z.ID))+" "+m.liveMarker(z)+m.zoneMarker(z))
 	}
 
 	if len(m.visible) == 0 && len(m.zones) > 0 {
@@ -111,13 +111,28 @@ func (m *Model) zoneStyle(id int64) lipgloss.Style {
 
 // zoneMarker is the one-column marker drawn after a Zone: its Refresh
 // state once it has one, else its Serial Check hint, which never
-// contradicts a Refresh.
-func (m *Model) zoneMarker(id int64) string {
-	if marker := m.refreshOf(id).marker(); marker != "" {
+// contradicts a Refresh. A Zone that is not the Live Zone has no hint.
+func (m *Model) zoneMarker(z dns.Zone) string {
+	if marker := m.refreshOf(z.ID).marker(); marker != "" {
 		return marker
 	}
 
-	return m.freshnessOf(id).marker()
+	if !m.serialCheckApplies(z) {
+		return " "
+	}
+
+	return m.freshnessOf(z.ID).marker()
+}
+
+// noSerialCheck says why a Zone that is not the Live Zone shows no Serial
+// Check hint.
+const noSerialCheck = "no Serial Check: the resolver answers for the Live Zone"
+
+// serialCheckApplies reports whether a Zone's Serial Check says anything
+// about it. The resolver answers for the Live Zone, so the serial it
+// gives is not that of a Zone known not to be the Live Zone.
+func (m *Model) serialCheckApplies(z dns.Zone) bool {
+	return m.liveness(z) != liveNo
 }
 
 // zoneLabel names a Zone in the Domains pane. A zone name that exists in
@@ -307,6 +322,8 @@ func (m *Model) zoneStatus(z dns.Zone) string {
 	// A Refresh outranks the Serial Check hint, which is never shown next to it.
 	if refresh := m.refreshOf(z.ID).describe(m.keys.keysFor(ActionRefresh)); refresh != "" {
 		parts = append(parts, refresh)
+	} else if !m.serialCheckApplies(z) {
+		parts = append(parts, noSerialCheck)
 	} else if hint := m.freshnessOf(z.ID).describe(z.Serial); hint != "" {
 		parts = append(parts, hint)
 	}

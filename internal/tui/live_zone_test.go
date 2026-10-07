@@ -348,6 +348,34 @@ func TestAFailedDelegationLookupRunsAgainOnReload(t *testing.T) {
 
 var adaBob = []string{"ada.ns.cloudflare.com", "bob.ns.cloudflare.com"}
 
+func TestAZoneThatIsNotTheLiveZoneShowsNoSerialCheckVerdict(t *testing.T) {
+	s, _ := openStore(t)
+	seedSharedName(t, s)
+
+	// The resolver's serial is the Live Zone's: example.com in cloudflare.work.
+	// It happens to match the serial cached for cloudflare.personal.
+	h := newHarnessWith(t, s, tui.Deps{Resolver: &fakeResolver{
+		ns:      map[string][]string{"example.com": cruzDee},
+		serials: map[string]uint32{"example.com": 2026100701},
+	}})
+	h.send(tea.WindowSizeMsg{Width: 160, Height: 30})
+
+	if row := h.domainRow("example.com · cloudflare.personal"); strings.ContainsAny(row, "≈!") {
+		t.Fatalf("personal row = %q, want no Serial Check marker", row)
+	}
+
+	if row := h.domainRow("example.com · cloudflare.work"); !strings.Contains(row, "!") {
+		t.Fatalf("work row = %q, want the possibly-stale marker", row)
+	}
+
+	h.press("enter")
+	h.assertStatusBarShows("no Serial Check: the resolver answers for the Live Zone")
+	h.assertHides("serial matches")
+
+	h.press("j", "enter")
+	h.assertStatusBarShows("possibly stale")
+}
+
 func TestADelegationIsResolvedAgainOnReloadOnceItExpires(t *testing.T) {
 	s, _ := openStore(t)
 	seedCache(t, s)
