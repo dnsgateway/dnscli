@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -321,7 +322,12 @@ func (p *Provider) applyChange(ctx context.Context, zone dns.Zone, c dns.Change)
 	}
 
 	if c.Kind != dns.ChangeDelete {
-		body, err := json.Marshal(writeBody(c.After))
+		wb, err := writeBody(c.After)
+		if err != nil {
+			return dns.Record{}, err
+		}
+
+		body, err := json.Marshal(wb)
 		if err != nil {
 			return dns.Record{}, fmt.Errorf("cloudflare: encode record: %w", err)
 		}
@@ -375,23 +381,112 @@ type envelope struct {
 
 // recordBody is the body of a record create or update.
 type recordBody struct {
-	Type    string `json:"type"`
-	Name    string `json:"name"`
-	Content string `json:"content,omitempty"`
-	TTL     uint32 `json:"ttl"`
-	Proxied *bool  `json:"proxied,omitempty"`
+	Type     string  `json:"type"`
+	Name     string  `json:"name"`
+	Content  string  `json:"content,omitempty"`
+	Priority *uint64 `json:"priority,omitempty"`
+	Data     any     `json:"data,omitempty"`
+	TTL      uint32  `json:"ttl"`
+	Proxied  *bool   `json:"proxied,omitempty"`
 }
 
-// writeBody is the body that creates r, or updates a record to r.
-func writeBody(r dns.Record) recordBody {
-	b := recordBody{Type: r.Type, Name: r.Name, Content: r.Value, TTL: r.TTL}
+type srvData struct {
+	Priority uint64 `json:"priority"`
+	Weight   uint64 `json:"weight"`
+	Port     uint64 `json:"port"`
+	Target   string `json:"target"`
+}
+
+type uriData struct {
+	Weight uint64 `json:"weight"`
+	Target string `json:"target"`
+}
+
+type caaData struct {
+	Flags uint64 `json:"flags"`
+	Tag   string `json:"tag"`
+	Value string `json:"value"`
+}
+
+// writeBody is the body that creates r, or updates a record to r. It
+// undoes what decodeRecord does: the MX, SRV and URI priority leaves the
+// Value for its own field, and SRV, URI and CAA Records are written as
+// structured data, from which Cloudflare formats their content.
+func writeBody(r dns.Record) (recordBody, error) {
+	b := recordBody{Type: r.Type, Name: r.Name, TTL: r.TTL}
 
 	if v, ok := r.Extras[proxiedExtra]; ok {
 		proxied := v == "true"
 		b.Proxied = &proxied
 	}
 
-	return b
+	f := strings.Fields(r.Value)
+	bad := fmt.Errorf("cloudflare: %s value %q is not in presentation form", r.Type, r.Value)
+
+	var nums []uint64
+
+	// num parses the first n fields as numbers.
+	num := func(n int) bool {
+		if len(f) < n {
+			return false
+		}
+
+		for _, s := range f[:n] {
+			v, err := strconv.ParseUint(s, 10, 16)
+			if err != nil {
+				return false
+			}
+
+			nums = append(nums, v)
+		}
+
+		return true
+	}
+
+	switch r.Type {
+	case "MX":
+		if len(f) != 2 || !num(1) {
+			return b, bad
+		}
+
+		b.Priority, b.Content = &nums[0], f[1]
+	case "SRV":
+		if len(f) != 4 || !num(3) {
+			return b, bad
+		}
+
+		b.Priority = &nums[0]
+		b.Data = srvData{Priority: nums[0], Weight: nums[1], Port: nums[2], Target: f[3]}
+	case "URI":
+		if len(f) != 3 || !num(2) {
+			return b, bad
+		}
+
+		b.Priority = &nums[0]
+		b.Data = uriData{Weight: nums[1], Target: unquote(f[2])}
+	case "CAA":
+		if len(f) < 3 || !num(1) {
+			return b, bad
+		}
+
+		// The value is the rest of the Value, which may hold spaces.
+		rest := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(r.Value), f[0]))
+		rest = strings.TrimSpace(strings.TrimPrefix(rest, f[1]))
+		b.Data = caaData{Flags: nums[0], Tag: f[1], Value: unquote(rest)}
+	default:
+		b.Content = r.Value
+	}
+
+	return b, nil
+}
+
+// unquote strips the double quotes around a presentation-form string.
+func unquote(s string) string {
+	if len(s) >= 2 && strings.HasPrefix(s, `"`) && strings.HasSuffix(s, `"`) {
+		return s[1 : len(s)-1]
+	}
+
+	return s
 }
 
 // ZoneStatus implements provider.Provider. DNSSEC comes from the Zone's

@@ -603,6 +603,58 @@ func TestApplyFailsAChangeCloudflareDoesNotMarkAsSuccess(t *testing.T) {
 	}
 }
 
+func TestApplySplitsThePriorityAndDataOutOfTheValue(t *testing.T) {
+	cases := []struct {
+		typ, name, value string
+		body             map[string]any
+	}{
+		{"MX", "example.com", "10 mail.example.com", map[string]any{
+			"priority": 10.0, "content": "mail.example.com",
+		}},
+		{"SRV", "_sip._tcp.example.com", "20 5 5060 sip.example.com", map[string]any{
+			"priority": 20.0, "data": map[string]any{"priority": 20.0, "weight": 5.0, "port": 5060.0, "target": "sip.example.com"},
+		}},
+		{"URI", "_ftp._tcp.example.com", `10 1 "ftp://ftp.example.com/public"`, map[string]any{
+			"priority": 10.0, "data": map[string]any{"weight": 1.0, "target": "ftp://ftp.example.com/public"},
+		}},
+		{"CAA", "example.com", `0 issue "letsencrypt.org"`, map[string]any{
+			"data": map[string]any{"flags": 0.0, "tag": "issue", "value": "letsencrypt.org"},
+		}},
+	}
+
+	for _, c := range cases {
+		t.Run(c.typ, func(t *testing.T) {
+			api := &cfAPI{records: map[string][]map[string]any{"z1": {}}}
+			p := newProvider(t, api)
+			zone := dns.Zone{Name: "example.com", ProviderID: "z1"}
+
+			rec := dns.Record{Type: c.typ, Name: c.name, Value: c.value, TTL: 3600}
+			add := dns.Change{Kind: dns.ChangeAdd, After: rec}
+
+			res, err := p.Apply(context.Background(), dns.Changeset{Zone: zone, Changes: []dns.Change{add}})
+			if err != nil {
+				t.Fatalf("Apply: %v", err)
+			}
+
+			body := map[string]any{"type": c.typ, "name": c.name, "ttl": 3600.0}
+			maps.Copy(body, c.body)
+			assertWrites(t, api, []write{{Method: "POST", Path: "/client/v4/zones/z1/dns_records", Body: body}})
+
+			// The stored Record, and the Records listed afterwards, have the
+			// Value as it was written.
+			rec.ProviderID = "new1"
+			assertResults(t, res, []provider.ChangeResult{{Change: add, Record: rec}})
+
+			rs, err := p.Records(context.Background(), zone)
+			if err != nil {
+				t.Fatalf("Records: %v", err)
+			}
+
+			assertRecords(t, rs.Records, []dns.Record{rec})
+		})
+	}
+}
+
 func assertWrites(t *testing.T, api *cfAPI, want []write) {
 	t.Helper()
 
