@@ -127,8 +127,22 @@ func TestTheDatabasePathComesFromTheDBFlag(t *testing.T) {
 	}
 }
 
+func TestSerialCheckConcurrencyComesFromTheFlag(t *testing.T) {
+	getenv := func(string) string { return "" }
+
+	opts, err := parseOptions(nil, getenv, "linux", unsealMethods(nil), io.Discard)
+	if err != nil || opts.serialChecks != 8 {
+		t.Fatalf("default: parseOptions = %+v, %v; want 8 Serial Checks", opts, err)
+	}
+
+	opts, err = parseOptions([]string{"--serial-checks", "3"}, getenv, "linux", unsealMethods(nil), io.Discard)
+	if err != nil || opts.serialChecks != 3 {
+		t.Fatalf("flag: parseOptions = %+v, %v; want 3 Serial Checks", opts, err)
+	}
+}
+
 func TestAnInvalidCommandLinePrintsUsageAndExitsWithStatus2(t *testing.T) {
-	for _, args := range [][]string{{"--bogus"}, {"-db", "x.db"}, {"extra"}, {"--unseal", "yubikey"}} {
+	for _, args := range [][]string{{"--bogus"}, {"-db", "x.db"}, {"extra"}, {"--unseal", "yubikey"}, {"--serial-checks", "0"}} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			var stderr bytes.Buffer
 

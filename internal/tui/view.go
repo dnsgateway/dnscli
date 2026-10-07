@@ -83,8 +83,9 @@ func (m *Model) domainLines(w, h int) []string {
 	start, end := window(len(m.visible), m.cursor[paneDomains], h)
 
 	for i := start; i < end; i++ {
-		// Every Zone is cached and unconfirmed until freshness lands, so all are dimmed.
-		lines = append(lines, m.row(paneDomains, i, " "+m.zoneLabel(m.visible[i]), w, staleStyle))
+		// No Zone is validated yet, so all are dimmed; the marker is the Serial Check hint.
+		z := m.visible[i]
+		lines = append(lines, m.row(paneDomains, i, " "+m.zoneLabel(z), w-2, staleStyle)+" "+m.freshnessOf(z.ID).marker())
 	}
 
 	if len(m.visible) == 0 && len(m.zones) > 0 {
@@ -262,6 +263,10 @@ func (m *Model) zoneStatus(z dns.Zone) string {
 
 	if a, ok := m.account(z.AccountID); ok {
 		parts = append(parts, a.Label())
+	}
+
+	if hint := m.freshnessOf(z.ID).describe(z.Serial); hint != "" {
+		parts = append(parts, hint)
 	}
 
 	if z.RefreshedAt.IsZero() {

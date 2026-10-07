@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -22,9 +23,12 @@ type Deps struct {
 
 	// Providers builds a Provider for an Account from its Provider type.
 	Providers provider.Registry
-	// Resolver answers SOA and NS queries for Serial Checks and Delegation.
-	// Placeholder until Serial Checks land.
+	// Resolver is the system DNS resolver the Serial Checks ask. Nil runs
+	// no Serial Checks.
 	Resolver Resolver
+	// SerialChecks is how many Serial Checks may run at once. Defaults to
+	// DefaultSerialChecks.
+	SerialChecks int
 	// UnsealMethod is the session's Unseal Method. Defaults to the
 	// passphrase method with the default argon2id cost.
 	UnsealMethod vault.Method
@@ -38,8 +42,24 @@ type Deps struct {
 	Keychain vault.Method
 }
 
-// Resolver is the system DNS resolver used for Serial Checks. Not built yet.
-type Resolver interface{}
+// Resolver answers DNS queries through the system resolver. It is a
+// freshness hint only: a caching resolver can lag behind the Provider and
+// follows public Delegation (ADR-0001). Delegation (NS) lookups join it later.
+type Resolver interface {
+	// SOA returns the SOA serial the resolver gives for a zone name.
+	SOA(ctx context.Context, zone string) (serial uint32, err error)
+}
+
+// DefaultSerialChecks is the default limit on Serial Checks running at once.
+const DefaultSerialChecks = 8
+
+func (d Deps) serialChecks() int {
+	if d.SerialChecks < 1 {
+		return DefaultSerialChecks
+	}
+
+	return d.SerialChecks
+}
 
 func (d Deps) unsealMethod() vault.Method {
 	if d.UnsealMethod == nil {
