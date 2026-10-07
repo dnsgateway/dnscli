@@ -1,6 +1,9 @@
 package main
 
 import (
+	"bytes"
+	"io"
+	"strings"
 	"testing"
 )
 
@@ -31,7 +34,7 @@ func TestTheUnsealMethodComesFromTheFlagThenTheEnvironment(t *testing.T) {
 		{name: "single-dash long flag is refused", args: []string{"-db", "x.db"}, goos: "linux", wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			opts, err := parseOptions(tc.args, env(tc.env), tc.goos)
+			opts, err := parseOptions(tc.args, env(tc.env), tc.goos, io.Discard)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("parseOptions succeeded, want an error")
@@ -52,8 +55,36 @@ func TestTheUnsealMethodComesFromTheFlagThenTheEnvironment(t *testing.T) {
 }
 
 func TestTheDatabasePathComesFromTheDBFlag(t *testing.T) {
-	opts, err := parseOptions([]string{"--db", "/tmp/x.db"}, func(string) string { return "" }, "linux")
+	opts, err := parseOptions([]string{"--db", "/tmp/x.db"}, func(string) string { return "" }, "linux", io.Discard)
 	if err != nil || opts.dbPath != "/tmp/x.db" {
 		t.Fatalf("parseOptions = %+v, %v", opts, err)
+	}
+}
+
+func TestAnInvalidCommandLinePrintsUsageAndExitsWithStatus2(t *testing.T) {
+	for _, args := range [][]string{{"--bogus"}, {"-db", "x.db"}, {"extra"}, {"--unseal", "yubikey"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			var stderr bytes.Buffer
+
+			if code := runMain(args, func(string) string { return "" }, "linux", &stderr); code != 2 {
+				t.Fatalf("exit status = %d, want 2", code)
+			}
+
+			if out := stderr.String(); !strings.Contains(out, "dnscli: ") || !strings.Contains(out, "Usage:") || !strings.Contains(out, "--db") {
+				t.Fatalf("stderr does not show the error and usage:\n%s", out)
+			}
+		})
+	}
+}
+
+func TestHelpPrintsUsageAndExitsWithStatus0(t *testing.T) {
+	var stderr bytes.Buffer
+
+	if code := runMain([]string{"--help"}, func(string) string { return "" }, "linux", &stderr); code != 0 {
+		t.Fatalf("exit status = %d, want 0", code)
+	}
+
+	if !strings.Contains(stderr.String(), "--unseal") {
+		t.Fatalf("help does not show usage:\n%s", stderr.String())
 	}
 }

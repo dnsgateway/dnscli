@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -34,14 +35,28 @@ var unsealMethods = map[string]vault.Method{
 }
 
 func main() {
-	if err := run(); err != nil {
-		if errors.Is(err, pflag.ErrHelp) {
-			return
-		}
+	os.Exit(runMain(os.Args[1:], os.Getenv, runtime.GOOS, os.Stderr))
+}
 
-		fmt.Fprintf(os.Stderr, "dnscli: %v\n", err)
-		os.Exit(1)
+// runMain runs dnscli and returns its exit status: 2 for an invalid
+// command line, which also prints the usage, and 1 for any other error.
+func runMain(args []string, getenv func(string) string, goos string, stderr io.Writer) int {
+	opts, err := parseOptions(args, getenv, goos, stderr)
+
+	switch {
+	case errors.Is(err, pflag.ErrHelp):
+		return 0
+	case err != nil:
+		return 2
 	}
+
+	if err := run(opts); err != nil {
+		fmt.Fprintf(stderr, "dnscli: %v\n", err)
+
+		return 1
+	}
+
+	return 0
 }
 
 type options struct {
@@ -49,37 +64,52 @@ type options struct {
 	unseal vault.Method
 }
 
-// parseOptions reads the command line and the environment.
-func parseOptions(args []string, getenv func(string) string, goos string) (options, error) {
+// parseOptions reads the command line and the environment. When they are
+// invalid, it prints the error and the usage to stderr.
+func parseOptions(args []string, getenv func(string) string, goos string, stderr io.Writer) (options, error) {
 	fs := pflag.NewFlagSet("dnscli", pflag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		fmt.Fprintf(stderr, "Usage: dnscli [flags]\n\nFlags:\n%s", fs.FlagUsages())
+	}
 
 	dbPath := fs.String("db", defaultDBPath(), "path to the dnscli database (not a disposable cache: it holds your Accounts)")
 	unseal := fs.String("unseal", "", fmt.Sprintf("Unseal Method for this session: %s (default $%s, else %s)",
 		strings.Join(methodNames(), ", "), unsealEnv, defaultUnsealMethod(goos)))
 
-	if err := fs.Parse(args); err != nil {
-		return options{}, err
+	opts, err := func() (options, error) {
+		if err := fs.Parse(args); err != nil {
+			return options{}, err
+		}
+
+		if fs.NArg() > 0 {
+			return options{}, fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
+		}
+
+		name := *unseal
+		if name == "" {
+			name = getenv(unsealEnv)
+		}
+
+		if name == "" {
+			name = defaultUnsealMethod(goos)
+		}
+
+		m, ok := unsealMethods[name]
+		if !ok {
+			return options{}, fmt.Errorf("unknown Unseal Method %q (available: %s)", name, strings.Join(methodNames(), ", "))
+		}
+
+		return options{dbPath: *dbPath, unseal: m}, nil
+	}()
+
+	// pflag has already printed the usage for --help.
+	if err != nil && !errors.Is(err, pflag.ErrHelp) {
+		fmt.Fprintf(stderr, "dnscli: %v\n", err)
+		fs.Usage()
 	}
 
-	if fs.NArg() > 0 {
-		return options{}, fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
-	}
-
-	name := *unseal
-	if name == "" {
-		name = getenv(unsealEnv)
-	}
-
-	if name == "" {
-		name = defaultUnsealMethod(goos)
-	}
-
-	m, ok := unsealMethods[name]
-	if !ok {
-		return options{}, fmt.Errorf("unknown Unseal Method %q (available: %s)", name, strings.Join(methodNames(), ", "))
-	}
-
-	return options{dbPath: *dbPath, unseal: m}, nil
+	return opts, err
 }
 
 // defaultUnsealMethod is the macOS Keychain on macOS, once this build has
@@ -103,12 +133,7 @@ func methodNames() []string {
 	return names
 }
 
-func run() error {
-	opts, err := parseOptions(os.Args[1:], os.Getenv, runtime.GOOS)
-	if err != nil {
-		return err
-	}
-
+func run(opts options) error {
 	if err := os.MkdirAll(filepath.Dir(opts.dbPath), 0o700); err != nil {
 		return fmt.Errorf("create database directory: %w", err)
 	}
