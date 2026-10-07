@@ -202,6 +202,17 @@ func TestGoogleMail(t *testing.T) {
 			},
 		},
 		{
+			name:    "a whole DKIM TXT value whose key is broken over lines",
+			current: nil,
+			values:  template.Values{"dkim_key": "v=DKIM1; k=rsa; p=" + key[:10] + " \n\t" + key[10:30] + "\n" + key[30:]},
+			want: []dns.Change{
+				add("MX", "example.com", "1 smtp.google.com"),
+				add("TXT", "example.com", "v=spf1 include:_spf.google.com ~all"),
+				add("TXT", "_dmarc.example.com", "v=DMARC1; p=none"),
+				add("TXT", "google._domainkey.example.com", "v=DKIM1; k=rsa; p="+key),
+			},
+		},
+		{
 			name:    "a Zone with SPF, DMARC and another MX: they are replaced, the rest untouched",
 			current: []dns.Record{webA, otherTXT, oldSPF, oldDMARC, oldMX10, subSPF},
 			want: []dns.Change{

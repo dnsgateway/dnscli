@@ -443,9 +443,17 @@ func checkDKIMKey(v string) (string, error) {
 	v = unquote(v)
 
 	if len(v) >= 7 && strings.EqualFold(v[:7], "v=DKIM1") {
-		for _, tag := range strings.Split(v, ";") {
-			if k, ok := strings.CutPrefix(strings.TrimSpace(tag), "p="); ok && base64RE.MatchString(k) {
-				return v, nil
+		tags := strings.Split(v, ";")
+		for i, tag := range tags {
+			// A key copied from a console may be broken over lines.
+			lead := tag[:len(tag)-len(strings.TrimLeft(tag, " \t\r\n"))]
+			if k, ok := strings.CutPrefix(strings.TrimSpace(tag), "p="); ok {
+				k = strings.Join(strings.Fields(k), "")
+				if base64RE.MatchString(k) {
+					tags[i] = lead + "p=" + k
+
+					return strings.Join(tags, ";"), nil
+				}
 			}
 		}
 
