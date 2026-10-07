@@ -47,6 +47,26 @@ func TestZoneNameInSeveralAccountsIsShownWithItsAccount(t *testing.T) {
 	h.assertShows("example.com · cloudflare.personal", "example.com · cloudflare.work")
 }
 
+func TestZoneNamesDifferingOnlyInCaseOrTrailingDotAreTheSameName(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	accounts, err := s.Accounts(context.Background())
+	if err != nil {
+		t.Fatalf("accounts: %v", err)
+	}
+
+	for _, a := range accounts {
+		if a.Label() == "cloudflare.work" {
+			mustZone(t, s, dns.Zone{AccountID: a.ID, Name: "Example.COM.", ProviderID: "z4"})
+		}
+	}
+
+	h := newWideHarness(t, s)
+
+	h.assertShows("example.com · cloudflare.personal", "Example.COM. · cloudflare.work")
+}
+
 func TestZoneNameInOneAccountIsShownWithoutAnAccount(t *testing.T) {
 	s, _ := openStore(t)
 	seedCache(t, s)

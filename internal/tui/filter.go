@@ -38,20 +38,29 @@ func filterZones(zones []dns.Zone, f zoneFilter) []dns.Zone {
 	return out
 }
 
-// sharedNames returns the zone names that exist in more than one Account.
+// sharedNames returns the zone names, as nameKey keys, that exist in more
+// than one Account.
 func sharedNames(zones []dns.Zone) map[string]bool {
-	first := map[string]int64{} // zone name -> the first Account seen with it
+	first := map[string]int64{} // zone name key -> the first Account seen with it
 	shared := map[string]bool{}
 
 	for _, z := range zones {
-		a, seen := first[z.Name]
+		k := nameKey(z.Name)
+		a, seen := first[k]
+
 		switch {
 		case !seen:
-			first[z.Name] = z.AccountID
+			first[k] = z.AccountID
 		case a != z.AccountID:
-			shared[z.Name] = true
+			shared[k] = true
 		}
 	}
 
 	return shared
+}
+
+// nameKey normalises a zone name for comparison: DNS names ignore case, and
+// a trailing dot only marks the name as fully qualified.
+func nameKey(name string) string {
+	return strings.TrimSuffix(strings.ToLower(name), ".")
 }

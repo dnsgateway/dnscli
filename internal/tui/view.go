@@ -89,7 +89,7 @@ func (m *Model) domainLines(w, h int) []string {
 // zoneLabel names a Zone in the Domains pane. A zone name that exists in
 // several Accounts carries its Account, so the copies can be told apart.
 func (m *Model) zoneLabel(z dns.Zone) string {
-	if !m.shared[z.Name] {
+	if !m.shared[nameKey(z.Name)] {
 		return z.Name
 	}
 
