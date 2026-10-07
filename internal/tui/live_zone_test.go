@@ -294,6 +294,29 @@ func TestAFailedDelegationLookupRunsAgainOnReload(t *testing.T) {
 	h.assertLive("example.com", true)
 }
 
+func TestTheZoneStatusBarSaysWhetherTheOpenZoneIsTheLiveZone(t *testing.T) {
+	s, _ := openStore(t)
+	seedSharedName(t, s)
+
+	h := newHarnessWith(t, s, tui.Deps{Resolver: &fakeResolver{ns: map[string][]string{"example.com": cruzDee}}})
+	h.send(tea.WindowSizeMsg{Width: 160, Height: 30})
+
+	// example.com in cloudflare.personal, then in cloudflare.work.
+	h.press("enter")
+	h.assertStatusBarShows("not the Live Zone")
+
+	h.press("j", "enter")
+	h.assertStatusBarShows("· Live Zone")
+
+	if strings.Contains(h.statusBar(), "not the Live Zone") {
+		t.Fatalf("status bar = %q, want example.com in cloudflare.work shown as the Live Zone", h.statusBar())
+	}
+
+	// two.tv's Delegation lookup failed.
+	h.press("j", "j", "enter")
+	h.assertStatusBarShows("Live Zone unknown")
+}
+
 func TestAResolverFailureLeavesTheLiveZoneUnknownWithoutAnError(t *testing.T) {
 	s, _ := openStore(t)
 	seedSharedName(t, s)
