@@ -43,9 +43,36 @@ var migrations = []string{
 	`,
 }
 
+// migrate applies pending migrations in one write transaction. BEGIN IMMEDIATE
+// takes the write lock before the schema version is read, so two processes
+// opening a fresh database cannot both apply the same migration.
 func migrate(ctx context.Context, db *sql.DB) error {
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("migrate: %w", err)
+	}
+	defer conn.Close()
+
+	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return fmt.Errorf("migrate: %w", err)
+	}
+
+	if err := migrateLocked(ctx, conn); err != nil {
+		_, _ = conn.ExecContext(context.WithoutCancel(ctx), "ROLLBACK")
+
+		return err
+	}
+
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return fmt.Errorf("migrate: %w", err)
+	}
+
+	return nil
+}
+
+func migrateLocked(ctx context.Context, conn *sql.Conn) error {
 	var version int
-	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
+	if err := conn.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		return fmt.Errorf("read schema version: %w", err)
 	}
 
@@ -54,31 +81,13 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	}
 
 	for i := version; i < len(migrations); i++ {
-		if err := apply(ctx, db, i+1, migrations[i]); err != nil {
-			return err
+		if _, err := conn.ExecContext(ctx, migrations[i]); err != nil {
+			return fmt.Errorf("migration %d: %w", i+1, err)
 		}
-	}
 
-	return nil
-}
-
-func apply(ctx context.Context, db *sql.DB, version int, stmt string) error {
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("migration %d: %w", version, err)
-	}
-	defer tx.Rollback() //nolint:errcheck
-
-	if _, err := tx.ExecContext(ctx, stmt); err != nil {
-		return fmt.Errorf("migration %d: %w", version, err)
-	}
-
-	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", version)); err != nil {
-		return fmt.Errorf("migration %d: %w", version, err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("migration %d: %w", version, err)
+		if _, err := conn.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", i+1)); err != nil {
+			return fmt.Errorf("migration %d: %w", i+1, err)
+		}
 	}
 
 	return nil

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
@@ -50,6 +51,39 @@ func TestOpenUsesThePathVerbatim(t *testing.T) {
 				t.Fatalf("reopened database has accounts %+v", accounts)
 			}
 		})
+	}
+}
+
+func TestConcurrentOpensOfAFreshDatabaseAllSucceed(t *testing.T) {
+	for range 20 {
+		path := filepath.Join(t.TempDir(), "dnscli.db")
+
+		var wg sync.WaitGroup
+
+		errs := make([]error, 4)
+		for i := range errs {
+			wg.Add(1)
+
+			go func() {
+				defer wg.Done()
+
+				s, err := store.Open(context.Background(), path)
+				if err == nil {
+					_, err = s.Accounts(context.Background())
+					_ = s.Close()
+				}
+
+				errs[i] = err
+			}()
+		}
+
+		wg.Wait()
+
+		for _, err := range errs {
+			if err != nil {
+				t.Fatalf("concurrent open: %v", err)
+			}
+		}
 	}
 }
 
