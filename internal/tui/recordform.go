@@ -207,24 +207,47 @@ func (f *recordForm) record(caps providerCaps) (dns.Record, int, string) {
 		r.Extras = maps.Clone(f.edit.rec.Extras)
 	}
 
-	if slices.Contains(caps.proxiable, typ) {
+	_, had := r.Extras[proxiedExtra]
+
+	switch {
+	case !f.proxiable(caps.proxiable):
+		delete(r.Extras, proxiedExtra)
+	case had || f.proxied:
+		// A Record that had no flag gets one only when it is turned on.
 		if r.Extras == nil {
 			r.Extras = map[string]string{}
 		}
 
 		r.Extras[proxiedExtra] = strconv.FormatBool(f.proxied)
-	} else {
-		delete(r.Extras, proxiedExtra)
 	}
 
 	return r, 0, ""
 }
 
+// proxiable reports whether the form offers the proxy flag: for a type the
+// Zone's Provider can proxy, and, when editing a cached Record, only if
+// the Provider marked it proxiable, by giving it the flag. Cloudflare
+// cannot proxy every Record of a proxiable type, such as one with a
+// private address.
+func (f *recordForm) proxiable(types []string) bool {
+	if !slices.Contains(types, dns.EditableTypes[f.typ]) {
+		return false
+	}
+
+	if f.edit == nil || f.edit.kind == dns.ChangeAdd {
+		return true
+	}
+
+	_, had := f.edit.base.Extras[proxiedExtra]
+
+	return had
+}
+
 // recordFormFields is how many fields the Record form shows: the proxy
-// flag only for a type the Zone's Provider can proxy.
+// flag only where the form offers it.
 func (m *Model) recordFormFields() int {
 	f := m.recordForm
-	if slices.Contains(m.refreshOf(f.zone.ID).caps.proxiable, dns.EditableTypes[f.typ]) {
+	if f.proxiable(m.refreshOf(f.zone.ID).caps.proxiable) {
 		return recordFieldProxied + 1
 	}
 

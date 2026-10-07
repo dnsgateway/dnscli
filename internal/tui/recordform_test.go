@@ -96,3 +96,84 @@ func TestEditingARecordShowsAndChangesItsProxyFlag(t *testing.T) {
 		t.Fatalf("applied extras = %v, want %v", got, want)
 	}
 }
+
+// unproxiable is an A Record Cloudflare cannot proxy, such as one with a
+// private address: it carries no proxy flag.
+var unproxiable = dns.Record{ProviderID: "rw3", Type: "A", Name: "lan.work.example", Value: "10.0.0.1", TTL: 300}
+
+func TestEditingARecordTheProviderCannotProxyHasNoProxyFlag(t *testing.T) {
+	f := fake.New().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial}, unproxiable)
+	f.SetProxiableTypes("A", "AAAA", "CNAME")
+	h := openValidatedShowing(t, f, "10.0.0.1")
+
+	h.press("e")
+	h.assertShows("Edit Record", "‹ A ›")
+	h.assertHides("Proxied")
+
+	// Submitting it unchanged changes nothing.
+	h.press("enter", "enter", "enter", "enter")
+	h.assertHides("Edit Record", "pending change")
+
+	// A changed TTL modifies only the TTL.
+	h.press("e", "tab", "tab", "tab")
+	h.clearText(len("300"))
+	h.typeText("600")
+	h.press("enter")
+	h.assertShows("1 pending change")
+
+	h.press("p", "enter")
+
+	calls := applyCalls(f)
+	if len(calls) != 1 || len(calls[0].Changes) != 1 {
+		t.Fatalf("Apply calls = %+v", calls)
+	}
+
+	if got := calls[0].Changes[0].After.Extras; len(got) != 0 {
+		t.Fatalf("applied extras = %v, want none", got)
+	}
+}
+
+func TestAddingARecordWithTheProxyFlagOffSendsNoFlag(t *testing.T) {
+	f := proxyingZones()
+	h := openValidated(t, f)
+
+	h.addRecord("A", "lan", "10.0.0.1", "300")
+	h.assertShows("Proxied", "‹ off ›")
+	h.press("enter")
+	h.assertHides("Add Record")
+
+	h.press("p", "enter")
+
+	calls := applyCalls(f)
+	if len(calls) != 1 || len(calls[0].Changes) != 1 {
+		t.Fatalf("Apply calls = %+v", calls)
+	}
+
+	if got := calls[0].Changes[0].After.Extras; len(got) != 0 {
+		t.Fatalf("applied extras = %v, want none: the user left the proxy off", got)
+	}
+}
+
+func TestARecordWithoutTheProxyFlagIsTheSameAsOneWithItOff(t *testing.T) {
+	f := fake.New().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial}, unproxiable)
+	f.SetProxiableTypes("A", "AAAA", "CNAME")
+	h := openValidatedShowing(t, f, "10.0.0.1")
+
+	h.press("e", "tab", "tab", "tab")
+	h.clearText(len("300"))
+	h.typeText("600")
+	h.press("enter")
+
+	// The Provider now reports the flag, off, on the same Record.
+	off := unproxiable
+	off.Extras = map[string]string{"proxied": "false"}
+	f.SetRecords("zw1", off)
+
+	h.press("p", "enter")
+
+	if calls := applyCalls(f); len(calls) != 1 {
+		t.Fatalf("Apply calls = %+v, want the Changeset sent without a conflict", calls)
+	}
+
+	h.assertShows("Applied 1 change to work.example.")
+}

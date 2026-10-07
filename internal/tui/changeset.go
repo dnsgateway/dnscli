@@ -263,11 +263,24 @@ func (m *Model) stageDelete(z dns.Zone, row recordRow) {
 
 // sameRecord reports whether two Records are the same Record with the same
 // data. Names compare as DNS names do: in any case, with or without a
-// trailing dot.
+// trailing dot. A Record without the proxy flag is not proxied: the same
+// as one with the flag off.
 func sameRecord(a, b dns.Record) bool {
 	return a.ProviderID == b.ProviderID && a.Type == b.Type &&
 		strings.EqualFold(strings.TrimSuffix(a.Name, "."), strings.TrimSuffix(b.Name, ".")) &&
-		a.Value == b.Value && a.TTL == b.TTL && maps.Equal(a.Extras, b.Extras)
+		a.Value == b.Value && a.TTL == b.TTL && maps.Equal(proxyOffDropped(a.Extras), proxyOffDropped(b.Extras))
+}
+
+// proxyOffDropped returns extras without a proxy flag that is off.
+func proxyOffDropped(extras map[string]string) map[string]string {
+	if extras[proxiedExtra] != "false" {
+		return extras
+	}
+
+	out := maps.Clone(extras)
+	delete(out, proxiedExtra)
+
+	return out
 }
 
 // changeMark is the one-column mark the Records pane draws for a pending change.
