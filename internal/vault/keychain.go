@@ -22,6 +22,9 @@ type KeychainBackend interface {
 	// Load asks the user to authenticate, such as with Touch ID, and
 	// returns the item's secret.
 	Load(ref []byte) ([]byte, error)
+	// Delete removes the item, without asking the user. An item that is
+	// already gone is not an error.
+	Delete(ref []byte) error
 }
 
 // Keychain is the Keychain Unseal Method. A random key-encryption key lives
@@ -59,6 +62,18 @@ func (k Keychain) Wrap(dataKey, _ []byte) (Slot, error) {
 		return Slot{}, fmt.Errorf("store the key in the Keychain: %w", err)
 	}
 
+	slot, err := k.wrapWith(kek, ref, dataKey)
+	if err != nil {
+		// The slot was never made, so nothing else references the item.
+		_ = k.Backend.Delete(ref)
+
+		return Slot{}, err
+	}
+
+	return slot, nil
+}
+
+func (k Keychain) wrapWith(kek, ref, dataKey []byte) (Slot, error) {
 	raw, err := json.Marshal(keychainParams{Item: ref})
 	if err != nil {
 		return Slot{}, err
@@ -76,6 +91,24 @@ func (k Keychain) Wrap(dataKey, _ []byte) (Slot, error) {
 	}
 
 	return Slot{Method: k.Name(), Params: raw, Wrapped: wrapped}, nil
+}
+
+// discard deletes the Keychain item a key slot references.
+func (k Keychain) discard(slot Slot) error {
+	if k.Backend == nil {
+		return ErrKeychainUnavailable
+	}
+
+	var params keychainParams
+	if err := json.Unmarshal(slot.Params, &params); err != nil {
+		return fmt.Errorf("keychain key slot %d: %w", slot.ID, err)
+	}
+
+	if err := k.Backend.Delete(params.Item); err != nil {
+		return fmt.Errorf("delete the Keychain item: %w", err)
+	}
+
+	return nil
 }
 
 // Unwrap implements Method. The OS asks the user to authenticate.

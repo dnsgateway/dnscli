@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"slices"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -15,8 +17,11 @@ type keychainConfirm struct {
 
 // keychainEnrolledMsg reports the result of enrolling the Keychain.
 type keychainEnrolledMsg struct {
-	slots []vault.Slot // every key slot after enrolling
-	err   error
+	slot vault.Slot // the enrolled key slot
+	err  error
+	// cleanupErr is why a replaced key slot's Keychain item could not be
+	// deleted; the enrollment itself succeeded.
+	cleanupErr error
 }
 
 // enrollKeychain asks to enroll the Keychain. It wraps the session's data
@@ -62,13 +67,23 @@ func (m *Model) keychainKey(msg tea.KeyMsg) tea.Cmd {
 				return keychainEnrolledMsg{err: err}
 			}
 
-			if _, _, err := store.EnrollKeySlot(ctx, slot); err != nil {
+			enrolled, replaced, err := store.EnrollKeySlot(ctx, slot)
+			if err != nil {
+				// Nothing references the new Keychain item.
+				_ = vault.Discard(method, slot)
+
 				return keychainEnrolledMsg{err: err}
 			}
 
-			slots, err := store.KeySlots(ctx)
+			// The key slot is committed: whatever follows, enrolling succeeded.
+			msg := keychainEnrolledMsg{slot: enrolled}
+			for _, old := range replaced {
+				if err := vault.Discard(method, old); err != nil {
+					msg.cleanupErr = err
+				}
+			}
 
-			return keychainEnrolledMsg{slots: slots, err: err}
+			return msg
 		}
 	}
 
@@ -88,8 +103,15 @@ func (m *Model) keychainEnrolled(msg keychainEnrolledMsg) {
 	}
 
 	m.keychain = nil
-	m.slots = msg.slots
+	// The new key slot replaced the method's earlier ones.
+	m.slots = append(slices.DeleteFunc(slices.Clone(m.slots), func(s vault.Slot) bool {
+		return s.Method == msg.slot.Method
+	}), msg.slot)
 	m.notice = notice{text: "Keychain enrolled: Touch ID now Unseals dnscli. Your passphrase stays enrolled for recovery."}
+
+	if msg.cleanupErr != nil {
+		m.notice.text += " The replaced Keychain item could not be deleted: " + msg.cleanupErr.Error()
+	}
 }
 
 func (m *Model) keychainView() string {

@@ -101,6 +101,18 @@ func (k *Key) Wrap(m Method, secret []byte) (Slot, error) {
 	return m.Wrap(k.dataKey, secret)
 }
 
+// Discard releases what a key slot holds outside the database, such as the
+// Keychain item behind a Keychain key slot. Call it for a slot that was
+// never stored or that was replaced; a method with nothing outside the
+// database, such as the passphrase, has nothing to release.
+func Discard(m Method, slot Slot) error {
+	if d, ok := m.(interface{ discard(Slot) error }); ok && slot.Method == m.Name() {
+		return d.discard(slot)
+	}
+
+	return nil
+}
+
 // AsksForSecret reports whether dnscli asks the user for m's secret, as
 // for the passphrase. A method such as the Keychain asks the user itself.
 func AsksForSecret(m Method) bool {

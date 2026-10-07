@@ -39,6 +39,12 @@ func (k *fakeKeychain) Load(ref []byte) ([]byte, error) {
 	return secret, nil
 }
 
+func (k *fakeKeychain) Delete(ref []byte) error {
+	delete(k.items, string(ref))
+
+	return nil
+}
+
 var fastPassphrase = vault.Passphrase{Cost: vault.Argon2Cost{Time: 1, MemoryKiB: 8, Threads: 1}}
 
 func TestAKeychainKeySlotWrapsTheExistingDataKey(t *testing.T) {

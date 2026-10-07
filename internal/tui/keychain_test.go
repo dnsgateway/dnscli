@@ -3,6 +3,8 @@ package tui_test
 import (
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"testing"
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
@@ -16,6 +18,8 @@ import (
 // fakeKeychain stands in for the macOS Keychain behind Touch ID.
 type fakeKeychain struct {
 	items map[string][]byte
+	// stored counts the items ever stored, so references stay unique.
+	stored int
 	// touches counts Touch ID prompts.
 	touches int
 	// denied makes Touch ID fail, as when the user cancels it.
@@ -27,7 +31,8 @@ func (k *fakeKeychain) Store(secret []byte) ([]byte, error) {
 		k.items = map[string][]byte{}
 	}
 
-	ref := fmt.Sprintf("item-%d", len(k.items)+1)
+	k.stored++
+	ref := fmt.Sprintf("item-%d", k.stored)
 	k.items[ref] = append([]byte(nil), secret...)
 
 	return []byte(ref), nil
@@ -46,6 +51,12 @@ func (k *fakeKeychain) Load(ref []byte) ([]byte, error) {
 	}
 
 	return secret, nil
+}
+
+func (k *fakeKeychain) Delete(ref []byte) error {
+	delete(k.items, string(ref))
+
+	return nil
 }
 
 // newKeychainHarness starts a session on a Mac: the Keychain is available
@@ -232,4 +243,41 @@ func TestReenrollingTheKeychainReplacesItsKeySlot(t *testing.T) {
 	h := newKeychainHarness(t, s, fake.New(), kc)
 	h.fillAddAccount("home", "home-token")
 	h.assertShows("unsealed", "cloudflare.home")
+}
+
+func TestReenrollingTheKeychainDeletesTheReplacedItem(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	kc := &fakeKeychain{}
+	enrollKeychain(t, s, kc)
+	enrollKeychain(t, s, kc)
+
+	if len(kc.items) != 1 {
+		t.Fatalf("Keychain items = %v, want only the latest one", slices.Collect(maps.Keys(kc.items)))
+	}
+
+	h := newKeychainHarness(t, s, fake.New(), kc)
+	h.fillAddAccount("home", "home-token")
+	h.assertShows("unsealed", "cloudflare.home")
+}
+
+func TestAFailedKeychainEnrollmentLeavesNoKeychainItem(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	kc := &fakeKeychain{}
+	h := newPassphraseOnMacHarness(t, s, fake.New(), kc)
+
+	h.press("K")
+	h.typeText(passphrase)
+	h.press("enter")
+	h.assertShows("Enroll the Keychain")
+
+	// The database fails before the key slot is stored.
+	_ = s.Close()
+	h.press("enter")
+
+	h.assertShows("Could not enroll the Keychain")
+	h.assertHides("Keychain enrolled")
+
+	if len(kc.items) != 0 {
+		t.Fatalf("Keychain items = %v, want none: the enrollment failed", slices.Collect(maps.Keys(kc.items)))
+	}
 }
