@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"maps"
 	"net/http"
@@ -40,10 +41,33 @@ type cfAPI struct {
 	forbidden []string
 	// fail, when set, answers every request instead of the scripted data.
 	fail http.HandlerFunc
+	// writeStatus is the HTTP status of a successful record write; zero
+	// means 200.
+	writeStatus int
+	// reject, when it returns a message, fails the record write with that
+	// message, as Cloudflare does for a record it will not take.
+	reject func(method string, body map[string]any) string
+	nextID int
 
 	mu sync.Mutex
 	// requests records each request's path and page.
 	requests []string
+	// writes records each record write.
+	writes []write
+}
+
+// write is one record create, update or delete the API received.
+type write struct {
+	Method, Path string
+	Body         map[string]any
+}
+
+// Writes returns the record writes received, in order.
+func (api *cfAPI) Writes() []write {
+	api.mu.Lock()
+	defer api.mu.Unlock()
+
+	return slices.Clone(api.writes)
 }
 
 func (api *cfAPI) record(request string) {
@@ -92,6 +116,10 @@ func (api *cfAPI) handler(t *testing.T) http.Handler {
 
 		api.page(w, r, records)
 	})
+	mux.HandleFunc("POST /client/v4/zones/{zone}/dns_records", api.writeRecord)
+	mux.HandleFunc("PUT /client/v4/zones/{zone}/dns_records/{id}", api.writeRecord)
+	mux.HandleFunc("PATCH /client/v4/zones/{zone}/dns_records/{id}", api.writeRecord)
+	mux.HandleFunc("DELETE /client/v4/zones/{zone}/dns_records/{id}", api.writeRecord)
 	mux.HandleFunc("GET /client/v4/zones/{zone}/dnssec", func(w http.ResponseWriter, r *http.Request) {
 		writeResult(w, map[string]any{
 			"status":              api.dnssec[r.PathValue("zone")],
@@ -141,6 +169,99 @@ func (api *cfAPI) handler(t *testing.T) http.Handler {
 
 		mux.ServeHTTP(w, r)
 	})
+}
+
+// writeRecord creates, updates or deletes a record as Cloudflare does,
+// and answers with the record as stored.
+func (api *cfAPI) writeRecord(w http.ResponseWriter, r *http.Request) {
+	var body map[string]any
+	if r.Method != http.MethodDelete {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeErrors(w, http.StatusBadRequest, 9207, "Request body is invalid.")
+
+			return
+		}
+	}
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+
+	api.writes = append(api.writes, write{Method: r.Method, Path: r.URL.Path, Body: body})
+
+	if api.reject != nil {
+		if msg := api.reject(r.Method, body); msg != "" {
+			writeErrors(w, http.StatusBadRequest, 9005, msg)
+
+			return
+		}
+	}
+
+	zone, id := r.PathValue("zone"), r.PathValue("id")
+	if api.records == nil {
+		api.records = map[string][]map[string]any{}
+	}
+
+	records := api.records[zone]
+	i := slices.IndexFunc(records, func(rec map[string]any) bool { return rec["id"] == id })
+
+	if id != "" && i < 0 {
+		writeErrors(w, http.StatusNotFound, 81044, "Record does not exist.")
+
+		return
+	}
+
+	status := api.writeStatus
+	if status == 0 {
+		status = http.StatusOK
+	}
+
+	var stored map[string]any
+
+	switch r.Method {
+	case http.MethodDelete:
+		api.records[zone] = slices.Delete(records, i, i+1)
+		writeJSON(w, status, map[string]any{"success": true, "errors": []any{}, "messages": []any{}, "result": map[string]any{"id": id}})
+
+		return
+	case http.MethodPost:
+		api.nextID++
+		stored = storedRecord("new"+strconv.Itoa(api.nextID), nil, body)
+		api.records[zone] = append(records, stored)
+	case http.MethodPut:
+		stored = storedRecord(id, nil, body)
+		records[i] = stored
+	case http.MethodPatch:
+		stored = storedRecord(id, records[i], body)
+		records[i] = stored
+	}
+
+	writeJSON(w, status, map[string]any{"success": true, "errors": []any{}, "messages": []any{}, "result": stored})
+}
+
+// storedRecord is a record as Cloudflare stores it from a write's body,
+// patched onto old when old is set. Records written with structured data
+// get their content from it, as Cloudflare formats it.
+func storedRecord(id string, old, body map[string]any) map[string]any {
+	rec := cfRecord(id, "", "", "", 1, false, false)
+	maps.Copy(rec, old)
+	maps.Copy(rec, body)
+	rec["id"] = id
+
+	typ, _ := rec["type"].(string)
+	rec["proxiable"] = typ == "A" || typ == "AAAA" || typ == "CNAME"
+
+	if data, ok := body["data"].(map[string]any); ok {
+		switch typ {
+		case "SRV":
+			rec["content"] = fmt.Sprintf("%v %v %v", data["weight"], data["port"], data["target"])
+		case "URI":
+			rec["content"] = fmt.Sprintf("%v %q", data["weight"], data["target"])
+		case "CAA":
+			rec["content"] = fmt.Sprintf("%v %v %q", data["flags"], data["tag"], data["value"])
+		}
+	}
+
+	return rec
 }
 
 // page writes one page of items in the v4 list envelope.
@@ -293,17 +414,99 @@ func TestNameserversAreTheOnesCloudflareAssignedToTheAccountsZones(t *testing.T)
 	}
 }
 
-func TestApplyIsNotImplementedYet(t *testing.T) {
-	api := &cfAPI{}
+func TestApplyCreatesARecordWithTheProxyFlag(t *testing.T) {
+	api := &cfAPI{records: map[string][]map[string]any{"z1": {}}}
 	p := newProvider(t, api)
-	zone := dns.Zone{Name: "example.com", ProviderID: "z1"}
 
-	if _, err := p.Apply(context.Background(), dns.Changeset{Zone: zone}); !errors.Is(err, provider.ErrNotImplemented) {
-		t.Errorf("Apply err = %v, want provider.ErrNotImplemented", err)
+	add := dns.Change{Kind: dns.ChangeAdd, After: dns.Record{
+		Type: "A", Name: "www.example.com", Value: "192.0.2.1", TTL: 300, Extras: map[string]string{"proxied": "true"},
+	}}
+
+	res, err := p.Apply(context.Background(), dns.Changeset{Zone: dns.Zone{Name: "example.com", ProviderID: "z1"}, Changes: []dns.Change{add}})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
 	}
 
-	if n := len(api.Requests()); n != 0 {
-		t.Errorf("made %d requests, want none", n)
+	assertWrites(t, api, []write{{Method: "POST", Path: "/client/v4/zones/z1/dns_records", Body: map[string]any{
+		"type": "A", "name": "www.example.com", "content": "192.0.2.1", "ttl": 300.0, "proxied": true,
+	}}})
+
+	assertResults(t, res, []provider.ChangeResult{{Change: add, Record: dns.Record{
+		ProviderID: "new1", Type: "A", Name: "www.example.com", Value: "192.0.2.1", TTL: 300, Extras: map[string]string{"proxied": "true"},
+	}}})
+}
+
+func TestApplyUpdatesARecordInPlaceAndTurnsTheProxyOff(t *testing.T) {
+	stored := cfRecord("r1", "CNAME", "www.example.com", "example.com", 1, true, true)
+	stored["comment"] = "kept by Cloudflare"
+	api := &cfAPI{records: map[string][]map[string]any{"z1": {stored}}}
+	p := newProvider(t, api)
+
+	before := dns.Record{ProviderID: "r1", Type: "CNAME", Name: "www.example.com", Value: "example.com", TTL: 1, Extras: map[string]string{"proxied": "true"}}
+	after := dns.Record{ProviderID: "r1", Type: "CNAME", Name: "www.example.com", Value: "example.net", TTL: 300, Extras: map[string]string{"proxied": "false"}}
+	modify := dns.Change{Kind: dns.ChangeModify, Before: before, After: after}
+
+	res, err := p.Apply(context.Background(), dns.Changeset{Zone: dns.Zone{Name: "example.com", ProviderID: "z1"}, Changes: []dns.Change{modify}})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	assertWrites(t, api, []write{{Method: "PATCH", Path: "/client/v4/zones/z1/dns_records/r1", Body: map[string]any{
+		"type": "CNAME", "name": "www.example.com", "content": "example.net", "ttl": 300.0, "proxied": false,
+	}}})
+
+	assertResults(t, res, []provider.ChangeResult{{Change: modify, Record: after}})
+
+	if got := api.records["z1"][0]["comment"]; got != "kept by Cloudflare" {
+		t.Errorf("comment = %v, want the fields dnscli does not know kept", got)
+	}
+}
+
+func TestApplyDeletesARecord(t *testing.T) {
+	api := &cfAPI{records: map[string][]map[string]any{"z1": {cfRecord("r1", "TXT", "example.com", "\"old\"", 300, false, false)}}}
+	p := newProvider(t, api)
+
+	del := dns.Change{Kind: dns.ChangeDelete, Before: dns.Record{ProviderID: "r1", Type: "TXT", Name: "example.com", Value: "\"old\"", TTL: 300}}
+
+	res, err := p.Apply(context.Background(), dns.Changeset{Zone: dns.Zone{Name: "example.com", ProviderID: "z1"}, Changes: []dns.Change{del}})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	assertWrites(t, api, []write{{Method: "DELETE", Path: "/client/v4/zones/z1/dns_records/r1"}})
+	assertResults(t, res, []provider.ChangeResult{{Change: del}})
+
+	if n := len(api.records["z1"]); n != 0 {
+		t.Errorf("%d records left, want the Record deleted", n)
+	}
+}
+
+func assertWrites(t *testing.T, api *cfAPI, want []write) {
+	t.Helper()
+
+	if got := api.Writes(); !reflect.DeepEqual(got, want) {
+		t.Errorf("writes:\n got %+v\nwant %+v", got, want)
+	}
+}
+
+func assertResults(t *testing.T, res provider.ApplyResult, want []provider.ChangeResult) {
+	t.Helper()
+
+	if len(res.Results) != len(want) {
+		t.Fatalf("got %d results, want %d: %+v", len(res.Results), len(want), res.Results)
+	}
+
+	for i, w := range want {
+		g := res.Results[i]
+		if !reflect.DeepEqual(g.Change, w.Change) {
+			t.Errorf("result %d is for %+v, want %+v", i, g.Change, w.Change)
+		}
+
+		assertRecords(t, []dns.Record{g.Record}, []dns.Record{w.Record})
+
+		if (g.Err == nil) != (w.Err == nil) || (w.Err != nil && !strings.Contains(g.Err.Error(), w.Err.Error())) {
+			t.Errorf("result %d err = %v, want %v", i, g.Err, w.Err)
+		}
 	}
 }
 

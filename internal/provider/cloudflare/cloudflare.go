@@ -234,9 +234,14 @@ type wireRecord struct {
 }
 
 func toRecord(r cfdns.RecordResponse) (dns.Record, error) {
+	return decodeRecord([]byte(r.JSON.RawJSON()))
+}
+
+// decodeRecord decodes a v4 DNS record's JSON.
+func decodeRecord(data []byte) (dns.Record, error) {
 	var w wireRecord
-	if err := json.Unmarshal([]byte(r.JSON.RawJSON()), &w); err != nil {
-		return dns.Record{}, fmt.Errorf("cloudflare: decode record %s: %w", r.ID, err)
+	if err := json.Unmarshal(data, &w); err != nil {
+		return dns.Record{}, fmt.Errorf("cloudflare: decode record: %w", err)
 	}
 
 	rec := dns.Record{
@@ -260,9 +265,97 @@ func toRecord(r cfdns.RecordResponse) (dns.Record, error) {
 	return rec, nil
 }
 
-// Apply implements provider.Provider. Not implemented yet.
-func (p *Provider) Apply(context.Context, dns.Changeset) (provider.ApplyResult, error) {
-	return provider.ApplyResult{}, fmt.Errorf("cloudflare: apply a Changeset: %w", provider.ErrNotImplemented)
+// Apply implements provider.Provider. Each change is its own API call.
+func (p *Provider) Apply(ctx context.Context, cs dns.Changeset) (provider.ApplyResult, error) {
+	res := provider.ApplyResult{Results: make([]provider.ChangeResult, len(cs.Changes))}
+
+	for i, c := range cs.Changes {
+		rec, err := p.applyChange(ctx, cs.Zone, c)
+		res.Results[i] = provider.ChangeResult{Change: c, Record: rec, Err: err}
+	}
+
+	return res, nil
+}
+
+// applyChange makes one change and returns the Record as Cloudflare
+// stored it; an empty Record for a deletion.
+//
+// A modification is a PATCH of the Record it was built from, so the
+// fields dnscli does not know, such as a comment or tags, are kept.
+func (p *Provider) applyChange(ctx context.Context, zone dns.Zone, c dns.Change) (dns.Record, error) {
+	var (
+		env  envelope
+		raw  *http.Response
+		opts = []option.RequestOption{option.WithResponseBodyInto(&env), option.WithResponseInto(&raw)}
+		err  error
+	)
+
+	if c.Kind != dns.ChangeAdd && c.Before.ProviderID == "" {
+		return dns.Record{}, fmt.Errorf("cloudflare: %s %s has no record ID", c.Before.Type, c.Before.Name)
+	}
+
+	if c.Kind != dns.ChangeDelete {
+		body, err := json.Marshal(writeBody(c.After))
+		if err != nil {
+			return dns.Record{}, fmt.Errorf("cloudflare: encode record: %w", err)
+		}
+
+		opts = append(opts, option.WithRequestBody("application/json", body))
+	}
+
+	switch c.Kind {
+	case dns.ChangeAdd:
+		var params cfdns.RecordNewParams
+		params.ZoneID.Value, params.ZoneID.Present = zone.ProviderID, true
+		_, err = p.records.New(ctx, params, opts...)
+	case dns.ChangeModify:
+		var params cfdns.RecordEditParams
+		params.ZoneID.Value, params.ZoneID.Present = zone.ProviderID, true
+		_, err = p.records.Edit(ctx, c.Before.ProviderID, params, opts...)
+	case dns.ChangeDelete:
+		var params cfdns.RecordDeleteParams
+		params.ZoneID.Value, params.ZoneID.Present = zone.ProviderID, true
+		_, err = p.records.Delete(ctx, c.Before.ProviderID, params, opts...)
+	default:
+		return dns.Record{}, fmt.Errorf("cloudflare: unknown change kind %d", c.Kind)
+	}
+
+	if err != nil {
+		return dns.Record{}, apiError(err, raw)
+	}
+
+	if c.Kind == dns.ChangeDelete {
+		return dns.Record{}, nil
+	}
+
+	return decodeRecord(env.Result)
+}
+
+// envelope is the v4 response envelope of a record write.
+type envelope struct {
+	Success bool            `json:"success"`
+	Result  json.RawMessage `json:"result"`
+}
+
+// recordBody is the body of a record create or update.
+type recordBody struct {
+	Type    string `json:"type"`
+	Name    string `json:"name"`
+	Content string `json:"content,omitempty"`
+	TTL     uint32 `json:"ttl"`
+	Proxied *bool  `json:"proxied,omitempty"`
+}
+
+// writeBody is the body that creates r, or updates a record to r.
+func writeBody(r dns.Record) recordBody {
+	b := recordBody{Type: r.Type, Name: r.Name, Content: r.Value, TTL: r.TTL}
+
+	if v, ok := r.Extras[proxiedExtra]; ok {
+		proxied := v == "true"
+		b.Proxied = &proxied
+	}
+
+	return b
 }
 
 // ZoneStatus implements provider.Provider. DNSSEC comes from the Zone's
