@@ -260,14 +260,14 @@ func toRecord(r cfdns.RecordResponse) (dns.Record, error) {
 	return rec, nil
 }
 
-// Apply implements provider.Provider.
-func (p *Provider) Apply(ctx context.Context, cs dns.Changeset) (provider.ApplyResult, error) {
-	return provider.ApplyResult{}, errors.New("todo")
+// Apply implements provider.Provider. Not implemented yet.
+func (p *Provider) Apply(context.Context, dns.Changeset) (provider.ApplyResult, error) {
+	return provider.ApplyResult{}, fmt.Errorf("cloudflare: apply a Changeset: %w", provider.ErrNotImplemented)
 }
 
-// ZoneStatus implements provider.Provider.
-func (p *Provider) ZoneStatus(ctx context.Context, zone dns.Zone) (dns.ZoneStatus, error) {
-	return dns.ZoneStatus{}, errors.New("todo")
+// ZoneStatus implements provider.Provider. Not implemented yet.
+func (p *Provider) ZoneStatus(context.Context, dns.Zone) (dns.ZoneStatus, error) {
+	return dns.ZoneStatus{}, fmt.Errorf("cloudflare: read Zone Status: %w", provider.ErrNotImplemented)
 }
 
 // Nameservers implements provider.Provider. Cloudflare assigns nameservers

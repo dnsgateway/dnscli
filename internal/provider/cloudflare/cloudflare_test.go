@@ -223,6 +223,24 @@ func TestNameserversAreTheOnesCloudflareAssignedToTheAccountsZones(t *testing.T)
 	}
 }
 
+func TestApplyAndZoneStatusAreNotImplementedYet(t *testing.T) {
+	api := &cfAPI{}
+	p := newProvider(t, api)
+	zone := dns.Zone{Name: "example.com", ProviderID: "z1"}
+
+	if _, err := p.Apply(context.Background(), dns.Changeset{Zone: zone}); !errors.Is(err, provider.ErrNotImplemented) {
+		t.Errorf("Apply err = %v, want provider.ErrNotImplemented", err)
+	}
+
+	if _, err := p.ZoneStatus(context.Background(), zone); !errors.Is(err, provider.ErrNotImplemented) {
+		t.Errorf("ZoneStatus err = %v, want provider.ErrNotImplemented", err)
+	}
+
+	if n := len(api.Requests()); n != 0 {
+		t.Errorf("made %d requests, want none", n)
+	}
+}
+
 func TestRateLimitIsATypedErrorWithoutWaiting(t *testing.T) {
 	api := &cfAPI{fail: func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Retry-After", "120")
