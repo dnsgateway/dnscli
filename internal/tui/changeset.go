@@ -261,9 +261,12 @@ func (m *Model) stageDelete(z dns.Zone, row recordRow) {
 	m.refilter(paneRecords)
 }
 
-// sameRecord reports whether two Records are the same Record with the same data.
+// sameRecord reports whether two Records are the same Record with the same
+// data. Names compare as DNS names do: in any case, with or without a
+// trailing dot.
 func sameRecord(a, b dns.Record) bool {
-	return a.ProviderID == b.ProviderID && a.Type == b.Type && a.Name == b.Name &&
+	return a.ProviderID == b.ProviderID && a.Type == b.Type &&
+		strings.EqualFold(strings.TrimSuffix(a.Name, "."), strings.TrimSuffix(b.Name, ".")) &&
 		a.Value == b.Value && a.TTL == b.TTL && maps.Equal(a.Extras, b.Extras)
 }
 

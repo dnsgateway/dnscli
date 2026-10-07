@@ -252,6 +252,39 @@ func TestTheRecordFormChecksTheTTLAgainstTheProvidersLimits(t *testing.T) {
 	h.assertShows("2 pending changes")
 }
 
+func TestEditingARecordKeepsItsNamesCase(t *testing.T) {
+	mixed := dns.Record{ProviderID: "rw9", Type: "A", Name: "WWW.Work.Example", Value: "192.0.2.1", TTL: 300}
+	f := fake.New().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial}, mixed)
+	h := openValidatedShowing(t, f, "WWW.Work.Example")
+
+	// Submitting the form unchanged changes nothing.
+	h.press("e")
+	h.assertShows("Edit Record", "WWW")
+	h.press("enter", "enter", "enter", "enter")
+	h.assertHides("Edit Record", "~ ", "pending change")
+
+	// Nor does typing the same name in another case.
+	h.press("e", "tab")
+	h.clearText(len("WWW"))
+	h.typeText("www")
+	h.press("enter", "enter", "enter")
+	h.assertHides("Edit Record", "~ ", "pending change")
+
+	// A real edit keeps the name as the Provider has it.
+	h.press("e", "tab", "tab")
+	h.clearText(len("1"))
+	h.typeText("2")
+	h.press("enter", "enter")
+	h.assertShows("~ WWW.Work.Example", "192.0.2.2")
+
+	h.press("p", "enter")
+
+	calls := applyCalls(f)
+	if len(calls) != 1 || calls[0].Changes[0].After.Name != "WWW.Work.Example" {
+		t.Fatalf("Apply calls = %+v", calls)
+	}
+}
+
 func TestARecordWithoutAProviderIDCannotBeChanged(t *testing.T) {
 	f := fake.New().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial},
 		dns.Record{Type: "TXT", Name: "work.example", Value: "first", TTL: 300},

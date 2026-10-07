@@ -162,6 +162,12 @@ func (f *recordForm) record(ttlRange dns.TTLRange) (dns.Record, int, string) {
 		return dns.Record{}, recordFieldName, capitalise(err.Error()) + "."
 	}
 
+	// An edit that leaves the name as it was keeps the Record's own case,
+	// whatever the case of the zone name.
+	if f.edit != nil && strings.TrimSpace(f.name) == dns.RelativeName(f.zone.Name, f.edit.rec.Name) {
+		name = strings.TrimSuffix(f.edit.rec.Name, ".")
+	}
+
 	value := strings.TrimSpace(f.value)
 	if err := dns.CheckValue(typ, value); err != nil {
 		return dns.Record{}, recordFieldValue, capitalise(err.Error()) + "."
