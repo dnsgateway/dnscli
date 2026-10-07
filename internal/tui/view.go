@@ -69,12 +69,12 @@ func clip(s string, w, h int) string {
 }
 
 func (m *Model) domainLines(w, h int) []string {
-	start, end := window(len(m.zones), m.cursor[paneDomains], h)
+	start, end := window(len(m.visible), m.cursor[paneDomains], h)
 
 	var lines []string
 	for i := start; i < end; i++ {
 		// Every Zone is cached and unconfirmed until freshness lands, so all are dimmed.
-		lines = append(lines, m.row(paneDomains, i, " "+m.zones[i].Name, w, staleStyle))
+		lines = append(lines, m.row(paneDomains, i, " "+m.visible[i].Name, w, staleStyle))
 	}
 
 	return lines

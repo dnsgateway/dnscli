@@ -41,6 +41,10 @@ type Model struct {
 	accounts []dns.Account
 	zones    []dns.Zone
 
+	// filter decides which Zones the Domains pane shows; visible holds them.
+	filter  zoneFilter
+	visible []dns.Zone
+
 	// open is the Zone whose Records are shown; nil until the user opens one.
 	open           *dns.Zone
 	recordsLoading bool
@@ -124,6 +128,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err
 		m.accounts = msg.accounts
 		m.zones = msg.zones
+		m.setFilter(m.filter)
 	case recordsLoadedMsg:
 		if m.open == nil || m.open.ID != msg.zoneID {
 			return m, nil // the user has moved on to another Zone
@@ -189,7 +194,7 @@ func (m *Model) move(delta int) {
 func (m *Model) itemCount(p pane) int {
 	switch p {
 	case paneDomains:
-		return len(m.zones)
+		return len(m.visible)
 	case paneAccounts:
 		return len(m.accounts)
 	case paneRecords:
@@ -199,13 +204,37 @@ func (m *Model) itemCount(p pane) int {
 	return 0
 }
 
-// selectItem opens the highlighted item of the focused pane.
+// selectItem opens the highlighted item of the focused pane: a Zone shows
+// its Records, and an Account limits the Domains pane to its Zones.
 func (m *Model) selectItem() tea.Cmd {
-	if m.focus != paneDomains || len(m.zones) == 0 {
+	switch m.focus {
+	case paneDomains:
+		return m.openZone()
+	case paneAccounts:
+		if len(m.accounts) > 0 {
+			f := m.filter
+			f.account = m.accounts[m.cursor[paneAccounts]].ID
+			m.setFilter(f)
+		}
+	}
+
+	return nil
+}
+
+// setFilter changes which Zones the Domains pane shows.
+func (m *Model) setFilter(f zoneFilter) {
+	m.filter = f
+	m.visible = filterZones(m.zones, f)
+	m.cursor[paneDomains] = 0
+}
+
+// openZone shows the highlighted Zone's Records.
+func (m *Model) openZone() tea.Cmd {
+	if len(m.visible) == 0 {
 		return nil
 	}
 
-	z := m.zones[m.cursor[paneDomains]]
+	z := m.visible[m.cursor[paneDomains]]
 	m.open = &z
 	m.records = nil
 	m.recordsLoading = true
