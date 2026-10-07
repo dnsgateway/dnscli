@@ -69,12 +69,18 @@ func clip(s string, w, h int) string {
 }
 
 func (m *Model) domainLines(w, h int) []string {
+	lines := m.searchLines(paneDomains, w)
+	h -= len(lines)
+
 	start, end := window(len(m.visible), m.cursor[paneDomains], h)
 
-	var lines []string
 	for i := start; i < end; i++ {
 		// Every Zone is cached and unconfirmed until freshness lands, so all are dimmed.
 		lines = append(lines, m.row(paneDomains, i, " "+m.zoneLabel(m.visible[i]), w, staleStyle))
+	}
+
+	if len(m.visible) == 0 && len(m.zones) > 0 {
+		lines = append(lines, hintStyle.Render(" No matching Zones."))
 	}
 
 	return lines
@@ -137,12 +143,18 @@ func (m *Model) recordLines(w, h int) []string {
 	cols := recordColumns(w)
 	header := headerStyle.Render(cols.format("Name", "Type", "Content", "TTL"))
 
-	lines := []string{header}
+	lines := append(m.searchLines(paneRecords, w), header)
 
-	start, end := window(len(m.records), m.cursor[paneRecords], h-1)
+	records := m.visibleRecords()
+	start, end := window(len(records), m.cursor[paneRecords], h-len(lines))
+
 	for i := start; i < end; i++ {
-		r := m.records[i]
+		r := records[i]
 		lines = append(lines, m.row(paneRecords, i, cols.format(r.Name, r.Type, r.Value, strconv.FormatUint(uint64(r.TTL), 10)), w, staleStyle))
+	}
+
+	if len(records) == 0 {
+		lines = append(lines, hintStyle.Render("  No matching Records."))
 	}
 
 	return lines

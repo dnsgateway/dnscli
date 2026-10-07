@@ -1,17 +1,28 @@
 package tui
 
-import "github.com/sergelogvinov/dnscli/internal/dns"
+import (
+	"strings"
+
+	"github.com/sergelogvinov/dnscli/internal/dns"
+)
 
 // zoneFilter holds every criterion that decides which Zones the Domains
 // pane shows. A zero zoneFilter shows every Zone.
 type zoneFilter struct {
 	// account limits the Zones to one Account's; zero means every Account.
 	account int64
+	// query is the Domains search; a Zone matches when its name contains it,
+	// ignoring case. Empty means no search.
+	query string
 }
 
 // match reports whether z passes every criterion of f.
 func (f zoneFilter) match(z dns.Zone) bool {
-	return f.account == 0 || z.AccountID == f.account
+	if f.account != 0 && z.AccountID != f.account {
+		return false
+	}
+
+	return f.query == "" || strings.Contains(strings.ToLower(z.Name), strings.ToLower(f.query))
 }
 
 // filterZones returns the Zones that pass f, in their original order.

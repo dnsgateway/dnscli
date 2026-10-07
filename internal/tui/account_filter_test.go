@@ -77,3 +77,25 @@ func TestClearingTheAccountFilterUsesTheShortcutProfile(t *testing.T) {
 	h.press("?")
 	h.assertShows("Zones of all Accounts")
 }
+
+func TestAccountFilterAndDomainsSearchNarrowTheZonesTogether(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	h := newHarness(t, s)
+	h.press("/", "e", "x")               // example.com, example.org
+	h.press("tab", "enter", "shift+tab") // and cloudflare.personal's
+
+	h.assertShows("example.com", "/ex")
+	h.assertHides("example.org", "two.tv")
+
+	// Clearing the Account filter leaves the search's result.
+	h.press("*")
+	h.assertShows("example.com", "example.org")
+	h.assertHides("two.tv")
+
+	// Clearing the search leaves the Account filter's result.
+	h.press("tab", "enter", "shift+tab", "esc")
+	h.assertShows("example.com", "two.tv")
+	h.assertHides("example.org", "/ex")
+}

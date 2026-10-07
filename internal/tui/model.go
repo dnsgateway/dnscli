@@ -35,6 +35,7 @@ type Model struct {
 	focus         pane
 	cursor        [paneCount]int
 	help          bool // help overlay shown
+	search        [paneCount]search
 
 	loaded   bool
 	err      error // reading Accounts and Zones failed
@@ -142,6 +143,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.records = msg.records
 		m.cursor[paneRecords] = 0
 	case tea.KeyMsg:
+		if m.typeIntoSearch(msg) {
+			return m, nil
+		}
+
 		return m, m.handle(m.keys.action(msg.String()))
 	}
 
@@ -166,6 +171,10 @@ func (m *Model) handle(a Action) tea.Cmd {
 		return nil
 	}
 
+	if a != ActionNone && a != ActionUp && a != ActionDown {
+		m.search[m.focus].typing = false // the filter stays; keys are actions again
+	}
+
 	switch a {
 	case ActionHelp:
 		m.help = true
@@ -183,6 +192,10 @@ func (m *Model) handle(a Action) tea.Cmd {
 		f := m.filter
 		f.account = 0
 		m.setFilter(f)
+	case ActionSearch:
+		m.startSearch()
+	case ActionClose:
+		m.clearSearch()
 	}
 
 	return nil
@@ -205,7 +218,7 @@ func (m *Model) itemCount(p pane) int {
 	case paneAccounts:
 		return len(m.accounts)
 	case paneRecords:
-		return len(m.records)
+		return len(m.visibleRecords())
 	}
 
 	return 0
@@ -244,6 +257,7 @@ func (m *Model) openZone() tea.Cmd {
 	z := m.visible[m.cursor[paneDomains]]
 	m.open = &z
 	m.records = nil
+	m.search[paneRecords] = search{}
 	m.recordsLoading = true
 	m.recordsErr = nil
 
