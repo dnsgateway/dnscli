@@ -50,3 +50,30 @@ func TestOnlyOneFirstKeySlotIsEverEnrolled(t *testing.T) {
 		}
 	}
 }
+
+func TestAnotherKeySlotNeedsAnEnrolledDataKeyAndReplacesItsMethodsSlot(t *testing.T) {
+	s := open(t, filepath.Join(t.TempDir(), "dnscli.db"))
+	ctx := context.Background()
+
+	keychain := vault.Slot{Method: "keychain", Params: []byte("{}"), Wrapped: []byte{1}}
+
+	if _, err := s.EnrollKeySlot(ctx, keychain); !errors.Is(err, store.ErrNotEnrolled) {
+		t.Fatalf("EnrollKeySlot without a data key = %v, want ErrNotEnrolled", err)
+	}
+
+	if _, err := s.EnrollFirstKeySlot(ctx, vault.Slot{Method: "passphrase", Params: []byte("{}"), Wrapped: []byte{0}}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, wrapped := range []byte{1, 2} {
+		keychain.Wrapped = []byte{wrapped}
+		if _, err := s.EnrollKeySlot(ctx, keychain); err != nil {
+			t.Fatalf("EnrollKeySlot: %v", err)
+		}
+	}
+
+	slots, err := s.KeySlots(ctx)
+	if err != nil || len(slots) != 2 || slots[0].Method != "passphrase" || slots[1].Method != "keychain" || slots[1].Wrapped[0] != 2 {
+		t.Fatalf("key slots = %+v, %v; want the passphrase and the latest keychain slot", slots, err)
+	}
+}
