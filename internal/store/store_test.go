@@ -106,7 +106,7 @@ func TestPutZoneWithoutRefreshMetadataKeepsTheCachedSerialAndRefreshTime(t *test
 	}
 
 	// Relisting the Account's Zones knows the zone ID but not the Serial.
-	second, err := s.PutZone(ctx, dns.Zone{AccountID: a.ID, Name: "example.com", ProviderID: "z1-new"})
+	second, err := s.PutZone(ctx, dns.Zone{AccountID: a.ID, Name: "example.com", ProviderID: "z1"})
 	if err != nil {
 		t.Fatalf("put zone again: %v", err)
 	}
@@ -125,8 +125,8 @@ func TestPutZoneWithoutRefreshMetadataKeepsTheCachedSerialAndRefreshTime(t *test
 	}
 
 	z := zones[0]
-	if z.ProviderID != "z1-new" || z.Serial != 2026100701 || !z.RefreshedAt.Equal(refreshed) {
-		t.Fatalf("zone after relist = %+v, want provider ID z1-new, serial 2026100701, refreshed %v", z, refreshed)
+	if z.ProviderID != "z1" || z.Serial != 2026100701 || !z.RefreshedAt.Equal(refreshed) {
+		t.Fatalf("zone after relist = %+v, want provider ID z1, serial 2026100701, refreshed %v", z, refreshed)
 	}
 }
 

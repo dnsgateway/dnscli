@@ -73,6 +73,30 @@ func TestTheZoneStatusAndNameserversRoundTrip(t *testing.T) {
 	}
 }
 
+func TestAZoneRelistedWithAnotherProviderIDForgetsItsStatusAndSerial(t *testing.T) {
+	ctx := context.Background()
+	s := open(t, filepath.Join(t.TempDir(), "dnscli.db"))
+
+	z := putZone(t, s, dns.Zone{Name: "example.com", ProviderID: "z1"})
+
+	at := time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC)
+	z.Status, z.StatusAt = dns.ZoneStatus{DNSSEC: dns.On, HSTS: dns.On}, at
+
+	if _, err := s.SaveRefresh(ctx, z, nil, 2026100701, at); err != nil {
+		t.Fatalf("save refresh: %v", err)
+	}
+
+	// The zone was deleted and created again at the Provider.
+	if _, err := s.PutZone(ctx, dns.Zone{AccountID: z.AccountID, Name: "example.com", ProviderID: "z2"}); err != nil {
+		t.Fatalf("put zone again: %v", err)
+	}
+
+	got := onlyZone(t, s)
+	if got.ProviderID != "z2" || got.Serial != 0 || got.Status != (dns.ZoneStatus{}) || !got.StatusAt.IsZero() {
+		t.Fatalf("zone = %+v, want provider ID z2 with no serial and no Zone Status", got)
+	}
+}
+
 // v2Database is a database as migrations 1 and 2 left it, with one Zone.
 const v2Database = `
 	CREATE TABLE accounts (

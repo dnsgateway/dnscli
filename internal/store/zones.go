@@ -16,7 +16,9 @@ import (
 // Account and zone name, and returns it as stored, with its ID set.
 // A zero Serial or RefreshedAt, or no Nameservers, keeps the cached value,
 // so relisting an Account's Zones does not forget their last Refresh. The
-// Zone Status is never written here; it keeps the cached one.
+// Zone Status is never written here; it keeps the cached one. A changed
+// Provider zone ID is another zone at the Provider, so it forgets the
+// cached Zone Status and serial, which belonged to the old one.
 func (s *Store) PutZone(ctx context.Context, z dns.Zone) (dns.Zone, error) {
 	return putZone(ctx, s.db, z)
 }
@@ -37,9 +39,12 @@ func putZone(ctx context.Context, db queryRower, z dns.Zone) (dns.Zone, error) {
 		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT (account_id, name) DO UPDATE SET
 			provider_zone_id = excluded.provider_zone_id,
-			soa_serial       = IIF(excluded.soa_serial = 0, soa_serial, excluded.soa_serial),
+			soa_serial       = IIF(excluded.soa_serial = 0 AND excluded.provider_zone_id = provider_zone_id, soa_serial, excluded.soa_serial),
 			refreshed_at     = IIF(excluded.refreshed_at = 0, refreshed_at, excluded.refreshed_at),
-			nameservers      = IIF(excluded.nameservers = '', nameservers, excluded.nameservers)
+			nameservers      = IIF(excluded.nameservers = '', nameservers, excluded.nameservers),
+			dnssec           = IIF(excluded.provider_zone_id = provider_zone_id, dnssec, 0),
+			hsts             = IIF(excluded.provider_zone_id = provider_zone_id, hsts, 0),
+			status_at        = IIF(excluded.provider_zone_id = provider_zone_id, status_at, 0)
 		RETURNING id, soa_serial, refreshed_at, dnssec, hsts, status_at, nameservers`,
 		z.AccountID, z.Name, z.ProviderID, z.Serial, unixOrZero(z.RefreshedAt), joinNames(z.Nameservers),
 	).Scan(&z.ID, &z.Serial, &refreshed, &z.Status.DNSSEC, &z.Status.HSTS, &statusAt, &ns)
