@@ -106,10 +106,9 @@ func (s *Store) SyncAccountZones(ctx context.Context, accountID int64, zones []d
 				continue
 			}
 
-			for _, q := range []string{`DELETE FROM records WHERE zone_id = ?`, `DELETE FROM zones WHERE id = ?`} {
-				if _, err := conn.ExecContext(ctx, q, z.ID); err != nil {
-					return err
-				}
+			// The schema cascades the delete to the Zone's Records.
+			if _, err := conn.ExecContext(ctx, `DELETE FROM zones WHERE id = ?`, z.ID); err != nil {
+				return err
 			}
 
 			res.Dropped = append(res.Dropped, z)

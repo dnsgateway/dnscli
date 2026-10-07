@@ -66,31 +66,13 @@ func (s *Store) Accounts(ctx context.Context) ([]dns.Account, error) {
 	return out, rows.Err()
 }
 
-// RemoveAccount deletes an Account with its sealed secret, its cached Zones
-// and their Records, in one transaction. The key slots stay: the data key
-// remains enrolled even when the last Account is removed. Removing an
-// Account that is already gone is not an error.
+// RemoveAccount deletes an Account with its sealed secret; the schema
+// cascades the delete to its cached Zones and their Records, in the same
+// statement. The key slots stay: the data key remains enrolled even when
+// the last Account is removed. Removing an Account that is already gone is
+// not an error.
 func (s *Store) RemoveAccount(ctx context.Context, id int64) error {
-	conn, err := s.db.Conn(ctx)
-	if err != nil {
-		return fmt.Errorf("remove account: %w", err)
-	}
-	defer conn.Close()
-
-	err = writeLocked(ctx, conn, func() error {
-		for _, q := range []string{
-			`DELETE FROM records WHERE zone_id IN (SELECT id FROM zones WHERE account_id = ?)`,
-			`DELETE FROM zones WHERE account_id = ?`,
-			`DELETE FROM accounts WHERE id = ?`,
-		} {
-			if _, err := conn.ExecContext(ctx, q, id); err != nil {
-				return err
-			}
-		}
-
-		return nil
-	})
-	if err != nil {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM accounts WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("remove account: %w", err)
 	}
 
