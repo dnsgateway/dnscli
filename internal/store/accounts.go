@@ -2,16 +2,34 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
+
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
 )
+
+// ErrAccountExists means an Account with the same label is already stored.
+var ErrAccountExists = errors.New("the Account already exists")
+
+// addAccountError wraps an error from inserting an Account, reporting a
+// duplicate label as ErrAccountExists.
+func addAccountError(a dns.Account, err error) error {
+	var se *sqlite.Error
+	if errors.As(err, &se) && se.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
+		err = ErrAccountExists
+	}
+
+	return fmt.Errorf("add account %s: %w", a.Label(), err)
+}
 
 // AddAccount stores a new Account and returns it with its ID set.
 func (s *Store) AddAccount(ctx context.Context, a dns.Account) (dns.Account, error) {
 	res, err := s.db.ExecContext(ctx, `INSERT INTO accounts (provider, name) VALUES (?, ?)`, a.Provider, a.Name)
 	if err != nil {
-		return dns.Account{}, fmt.Errorf("add account %s: %w", a.Label(), err)
+		return dns.Account{}, addAccountError(a, err)
 	}
 
 	a.ID, err = res.LastInsertId()

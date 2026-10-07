@@ -261,6 +261,26 @@ func TestTheAddAccountDialogRefusesIncompleteInput(t *testing.T) {
 	h.assertHides("Passphrase")
 }
 
+func TestAnAccountAddedElsewhereMeanwhileIsReportedAsExisting(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	f := fake.New()
+	h := newAccountHarness(t, s, f)
+
+	// Another dnscli process adds cloudflare.home after this one loaded its cache.
+	mustAccount(t, s, "cloudflare", "home")
+
+	h.fillAddAccount("home", "home-token")
+	h.typeText(passphrase)
+	h.press("enter")
+
+	h.assertShows("Add Account", "cloudflare.home already exists.")
+	h.assertHides("UNIQUE", "constraint")
+
+	if calls := f.Calls(); len(calls) != 0 {
+		t.Fatalf("the Provider was called for a duplicate Account: %+v", calls)
+	}
+}
+
 func TestMismatchedPassphrasesAreNotEnrolled(t *testing.T) {
 	s, _ := openStore(t)
 	h := newAccountHarness(t, s, workZones())

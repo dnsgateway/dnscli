@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -166,17 +167,25 @@ func (m *Model) saveAccount(a dns.Account, token string) tea.Cmd {
 			return accountAddedMsg{err: err}
 		}
 
-		a, err = store.AddAccountWithSecret(ctx, a, sealed)
+		added, err := store.AddAccountWithSecret(ctx, a, sealed)
+		if err != nil {
+			return accountAddedMsg{account: a, err: err}
+		}
 
-		return accountAddedMsg{account: a, err: err}
+		return accountAddedMsg{account: added}
 	}
 }
 
 func (m *Model) accountAdded(msg accountAddedMsg) tea.Cmd {
 	if msg.err != nil {
-		if m.addForm != nil {
-			m.addForm.busy = false
-			m.addForm.err = "Could not add the Account: " + msg.err.Error()
+		if f := m.addForm; f != nil {
+			f.busy = false
+			f.err = "Could not add the Account: " + msg.err.Error()
+
+			if errors.Is(msg.err, store.ErrAccountExists) {
+				f.err = msg.account.Label() + " already exists."
+				f.field = addFieldName
+			}
 		}
 
 		return nil

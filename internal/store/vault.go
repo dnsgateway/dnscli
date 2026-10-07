@@ -14,7 +14,7 @@ import (
 func (s *Store) AddAccountWithSecret(ctx context.Context, a dns.Account, sealed []byte) (dns.Account, error) {
 	res, err := s.db.ExecContext(ctx, `INSERT INTO accounts (provider, name, secret) VALUES (?, ?, ?)`, a.Provider, a.Name, sealed)
 	if err != nil {
-		return dns.Account{}, fmt.Errorf("add account %s: %w", a.Label(), err)
+		return dns.Account{}, addAccountError(a, err)
 	}
 
 	a.ID, err = res.LastInsertId()
