@@ -63,3 +63,48 @@ func TestAMatchingSerialMarksTheZoneHintCurrentButNotValidated(t *testing.T) {
 	h.press("enter")
 	h.assertShows("serial matches (a hint), not validated")
 }
+
+func TestADifferingSerialMarksTheZonePossiblyStale(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	h := newHarnessWith(t, s, tui.Deps{Resolver: &fakeResolver{serials: map[string]uint32{
+		"example.com": 2026100702,
+		"two.tv":      7,
+		"example.org": 1,
+	}}})
+
+	for _, zone := range []string{"example.com", "two.tv"} {
+		if row := h.domainRow(zone); !strings.Contains(row, "!") {
+			t.Fatalf("%s row does not show the possibly-stale marker: %q", zone, row)
+		}
+	}
+
+	h.assertDimmed("example.com")
+
+	h.press("enter")
+	h.assertShows("resolver serial 2026100702, cached 2026100701: possibly stale")
+
+	// two.tv has no cached serial, so nothing can match it.
+	h.press("j", "j", "enter")
+	h.assertShows("resolver serial 7, none cached: possibly stale")
+}
+
+func TestAFailingSerialCheckMarksTheZoneAndShowsTheError(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	h := newHarnessWith(t, s, tui.Deps{Resolver: &fakeResolver{
+		serials: map[string]uint32{"example.org": 1},
+		errs:    map[string]error{"example.com": errors.New("i/o timeout")},
+	}})
+
+	if row := h.domainRow("example.com"); !strings.Contains(row, "?") {
+		t.Fatalf("example.com row does not show the failed-check marker: %q", row)
+	}
+
+	h.assertDimmed("example.com")
+
+	h.press("enter")
+	h.assertShows("Serial Check failed: i/o timeout", "192.0.2.10")
+}
