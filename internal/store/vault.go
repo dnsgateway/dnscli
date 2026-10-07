@@ -44,36 +44,9 @@ var ErrAlreadyEnrolled = errors.New("an Unseal Method is already enrolled")
 // slot exists: the check and the insert hold the write lock together, so
 // even two processes enrolling at once leave exactly one data key.
 func (s *Store) EnrollFirstKeySlot(ctx context.Context, slot vault.Slot) (vault.Slot, error) {
-	conn, err := s.db.Conn(ctx)
-	if err != nil {
-		return vault.Slot{}, fmt.Errorf("enroll key slot: %w", err)
-	}
-	defer conn.Close()
+	slot, _, err := s.enroll(ctx, slot, true)
 
-	err = writeLocked(ctx, conn, func() error {
-		var exists bool
-		if err := conn.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM key_slots)`).Scan(&exists); err != nil {
-			return err
-		}
-
-		if exists {
-			return ErrAlreadyEnrolled
-		}
-
-		res, err := conn.ExecContext(ctx, `INSERT INTO key_slots (method, params, wrapped) VALUES (?, ?, ?)`, slot.Method, slot.Params, slot.Wrapped)
-		if err != nil {
-			return err
-		}
-
-		slot.ID, err = res.LastInsertId()
-
-		return err
-	})
-	if err != nil {
-		return vault.Slot{}, fmt.Errorf("enroll key slot: %w", err)
-	}
-
-	return slot, nil
+	return slot, err
 }
 
 // ErrNotEnrolled means no key slot, and so no data key, exists yet.
@@ -86,6 +59,13 @@ var ErrNotEnrolled = errors.New("no Unseal Method is enrolled yet")
 // caller can clean up what they referenced. It returns ErrNotEnrolled when
 // no key slot exists: the first one goes through EnrollFirstKeySlot.
 func (s *Store) EnrollKeySlot(ctx context.Context, slot vault.Slot) (vault.Slot, []vault.Slot, error) {
+	return s.enroll(ctx, slot, false)
+}
+
+// enroll stores a key slot, checking under the write lock that key slots
+// exist (or, for the first one, that none does), and replaces the earlier
+// slots of the same Unseal Method, which it returns.
+func (s *Store) enroll(ctx context.Context, slot vault.Slot, first bool) (vault.Slot, []vault.Slot, error) {
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return vault.Slot{}, nil, fmt.Errorf("enroll key slot: %w", err)
@@ -100,7 +80,10 @@ func (s *Store) EnrollKeySlot(ctx context.Context, slot vault.Slot) (vault.Slot,
 			return err
 		}
 
-		if !exists {
+		switch {
+		case first && exists:
+			return ErrAlreadyEnrolled
+		case !first && !exists:
 			return ErrNotEnrolled
 		}
 
