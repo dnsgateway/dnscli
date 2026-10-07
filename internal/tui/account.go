@@ -263,11 +263,12 @@ func (m *Model) addAccountView() string {
 
 	var notes []string
 	if len(m.accounts) == 0 {
-		notes = append(notes, wrapNote(hintStyle, notDisposableWarning, 56)...)
+		notes = append(notes, wrapNote(hintStyle, notDisposableWarning, noteWidth)...)
 	}
 
 	if f.err != "" {
-		notes = append(notes, "", errorStyle.Render(f.err))
+		notes = append(notes, "")
+		notes = append(notes, wrapNote(errorStyle, f.err, noteWidth)...)
 	}
 
 	if f.busy {

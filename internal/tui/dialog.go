@@ -5,6 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // quitsDialog reports whether a key quits the app while a dialog is open.
@@ -13,6 +14,13 @@ import (
 func quitsDialog(a Action, msg tea.KeyMsg) bool {
 	return a == ActionQuit && msg.Type != tea.KeyRunes && msg.Type != tea.KeySpace
 }
+
+// Dialogs stay narrow enough for an 80-column terminal: notes wrap at
+// noteWidth, and a long value shows only its end.
+const (
+	noteWidth     = 56
+	maxValueWidth = 40
+)
 
 // dialogField is one row of a dialog form.
 type dialogField struct {
@@ -36,6 +44,10 @@ func dialogView(title string, fields []dialogField, focus int, typing bool, note
 		v := f.value
 		if f.masked {
 			v = strings.Repeat("•", len([]rune(v)))
+		}
+
+		if w := lipgloss.Width(v); w > maxValueWidth {
+			v = "…" + ansi.TruncateLeft(v, w-maxValueWidth+1, "")
 		}
 
 		marker := "  "
