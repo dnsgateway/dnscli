@@ -44,6 +44,8 @@ type Model struct {
 	// filter decides which Zones the Domains pane shows; visible holds them.
 	filter  zoneFilter
 	visible []dns.Zone
+	// shared holds the zone names that exist in more than one Account.
+	shared map[string]bool
 
 	// open is the Zone whose Records are shown; nil until the user opens one.
 	open           *dns.Zone
@@ -128,6 +130,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err
 		m.accounts = msg.accounts
 		m.zones = msg.zones
+		m.shared = sharedNames(msg.zones)
 		m.setFilter(m.filter)
 	case recordsLoadedMsg:
 		if m.open == nil || m.open.ID != msg.zoneID {

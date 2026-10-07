@@ -26,3 +26,21 @@ func filterZones(zones []dns.Zone, f zoneFilter) []dns.Zone {
 
 	return out
 }
+
+// sharedNames returns the zone names that exist in more than one Account.
+func sharedNames(zones []dns.Zone) map[string]bool {
+	first := map[string]int64{} // zone name -> the first Account seen with it
+	shared := map[string]bool{}
+
+	for _, z := range zones {
+		a, seen := first[z.Name]
+		switch {
+		case !seen:
+			first[z.Name] = z.AccountID
+		case a != z.AccountID:
+			shared[z.Name] = true
+		}
+	}
+
+	return shared
+}

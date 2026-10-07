@@ -74,10 +74,24 @@ func (m *Model) domainLines(w, h int) []string {
 	var lines []string
 	for i := start; i < end; i++ {
 		// Every Zone is cached and unconfirmed until freshness lands, so all are dimmed.
-		lines = append(lines, m.row(paneDomains, i, " "+m.visible[i].Name, w, staleStyle))
+		lines = append(lines, m.row(paneDomains, i, " "+m.zoneLabel(m.visible[i]), w, staleStyle))
 	}
 
 	return lines
+}
+
+// zoneLabel names a Zone in the Domains pane. A zone name that exists in
+// several Accounts carries its Account, so the copies can be told apart.
+func (m *Model) zoneLabel(z dns.Zone) string {
+	if !m.shared[z.Name] {
+		return z.Name
+	}
+
+	if a, ok := m.account(z.AccountID); ok {
+		return z.Name + " · " + a.Label()
+	}
+
+	return z.Name
 }
 
 func (m *Model) accountLines(w, h int) []string {
