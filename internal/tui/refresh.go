@@ -81,13 +81,19 @@ func (m *Model) retryRefresh() tea.Cmd {
 	z := *m.open
 	r := m.refreshOf(z.ID)
 
-	if !r.pending && m.rateLimited(r) {
+	switch {
+	case !m.canRefresh(z):
+		a, _ := m.account(z.AccountID)
+		m.notice = notice{text: fmt.Sprintf("Cannot Refresh %s: Provider type %q is not available in this build.", z.Name, a.Provider), err: true}
+	case r.pending:
+		m.notice = notice{text: z.Name + " is already being Refreshed…"}
+	case m.rateLimited(r):
 		m.notice = notice{text: fmt.Sprintf("Refreshing %s is rate-limited until %s.", z.Name, r.retryAt.Local().Format(time.TimeOnly))}
-
-		return nil
+	default:
+		return m.refreshZone(z)
 	}
 
-	return m.refreshZone(z)
+	return nil
 }
 
 // refreshZone Refreshes a Zone in the background once the session is

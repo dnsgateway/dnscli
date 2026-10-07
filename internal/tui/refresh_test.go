@@ -271,6 +271,24 @@ func TestARateLimitedZoneIsNotRefreshedUntilTheProviderSaid(t *testing.T) {
 	}
 }
 
+func TestRetryingAZoneThatCannotBeRefreshedSaysWhy(t *testing.T) {
+	f := refreshZones()
+	h, _, _ := newRefreshHarness(t, f)
+
+	refresh := h.step(h.pressHolding("enter"))
+	h.press("r")
+	h.assertShows("work.example is already being Refreshed")
+	h.run(refresh)
+
+	// A later session whose build lacks the Account's Provider type.
+	s, _ := enrollFirstAccount(t)
+	later := newHarnessWith(t, s, tui.Deps{UnsealMethod: fastPassphrase()})
+	later.press("enter", "r")
+
+	later.assertShows(`Provider type "cloudflare" is not available in this build`)
+	later.assertHides("Passphrase")
+}
+
 func TestRefreshesOfOneZoneAreSingleFlight(t *testing.T) {
 	f := refreshZones()
 	h, s, _ := newRefreshHarness(t, f)
