@@ -196,6 +196,7 @@ func TestChangingARecordsTypeKeepsTheProxyFlagOnlyWhereItApplies(t *testing.T) {
 		t.Run(c.typ, func(t *testing.T) {
 			f := fake.New().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial},
 				liveRecords[0], liveRecords[1], proxied)
+			f.SetProxiableTypes("A", "AAAA", "CNAME")
 			h := openValidated(t, f)
 
 			// The CNAME is the third row; step its type to c.typ.
@@ -215,6 +216,7 @@ func TestChangingARecordsTypeKeepsTheProxyFlagOnlyWhereItApplies(t *testing.T) {
 			if c.typ == "A" {
 				h.clearText(len("work.example"))
 				h.typeText("192.0.2.1")
+				h.press("enter") // past the Proxied field the Provider shows for an A Record
 			}
 
 			h.press("enter", "enter")
