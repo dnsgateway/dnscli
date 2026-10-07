@@ -29,6 +29,7 @@ type unsealPrompt struct {
 	field      int
 	passphrase string
 	repeat     string
+	caret      int // the focused field's caret, in runes back from its end
 	err        string
 	busy       bool // the KDF is running
 }
@@ -119,7 +120,7 @@ func (m *Model) unsealKey(msg tea.KeyMsg) tea.Cmd {
 		text = &p.repeat
 	}
 
-	if m.keys.typeInto(text, msg) {
+	if m.keys.typeInto(text, &p.caret, msg) {
 		return nil
 	}
 
@@ -317,6 +318,10 @@ func (m *Model) unsealView() string {
 	}
 
 	notes = append(notes, "", hintStyle.Render(m.keys.keysFor(ActionSelect)+" Unseal · "+m.keys.keysFor(ActionClose)+" cancel"))
+
+	if p.field < len(fields) {
+		fields[p.field].caret = p.caret
+	}
 
 	return dialogView(title, fields, p.field, !p.busy, notes)
 }

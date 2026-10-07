@@ -15,6 +15,7 @@ type removeConfirm struct {
 	account dns.Account
 	zones   int // how many Zones the Account has cached
 	typed   string
+	caret   int // in runes back from the end of typed
 	err     string
 	busy    bool // the Account is being removed
 }
@@ -75,7 +76,7 @@ func (m *Model) removeAccountKey(msg tea.KeyMsg) tea.Cmd {
 		return m.handle(ActionQuit)
 	}
 
-	if c.busy || m.keys.typeInto(&c.typed, msg) {
+	if c.busy || m.keys.typeInto(&c.typed, &c.caret, msg) {
 		return nil
 	}
 
@@ -190,5 +191,5 @@ func (m *Model) removeAccountView() string {
 
 	notes = append(notes, "", hintStyle.Render(m.keys.keysFor(ActionSelect)+" remove · "+m.keys.keysFor(ActionClose)+" cancel"))
 
-	return dialogView("Remove Account", []dialogField{{label: "Account", value: c.typed}}, 0, !c.busy, notes)
+	return dialogView("Remove Account", []dialogField{{label: "Account", value: c.typed, caret: c.caret}}, 0, !c.busy, notes)
 }

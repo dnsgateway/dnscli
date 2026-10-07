@@ -132,14 +132,14 @@ func TestARelistingThatFinishesAfterItsAccountWasRemovedIsDropped(t *testing.T) 
 	h := newAccountHarness(t, s, f)
 
 	// Unseal first, so the re-listing starts at once.
-	h.press("shift+tab", "X")
+	h.press("shift+tab", "d")
 	h.unsealWith(passphrase)
 	h.press("esc")
 
 	relist := h.pressHolding("L")
 	h.assertShows("Re-listing the Zones of cloudflare.work…")
 
-	h.press("X")
+	h.press("d")
 	h.typeText("cloudflare.work")
 	h.press("enter")
 	h.assertShows("Removed cloudflare.work.")

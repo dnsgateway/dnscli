@@ -21,12 +21,17 @@ var ErrAccountNotFound = errors.New("the Account no longer exists")
 // addAccountError wraps an error from inserting an Account, reporting a
 // duplicate label as ErrAccountExists.
 func addAccountError(a dns.Account, err error) error {
+	return fmt.Errorf("add account %s: %w", a.Label(), uniqueError(err))
+}
+
+// uniqueError reports a duplicate Account label as ErrAccountExists.
+func uniqueError(err error) error {
 	var se *sqlite.Error
 	if errors.As(err, &se) && se.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
-		err = ErrAccountExists
+		return ErrAccountExists
 	}
 
-	return fmt.Errorf("add account %s: %w", a.Label(), err)
+	return err
 }
 
 // AddAccount stores a new Account and returns it with its ID set.

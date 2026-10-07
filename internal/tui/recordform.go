@@ -44,6 +44,8 @@ type recordForm struct {
 	err     string
 	// edit is the row being edited; nil when adding.
 	edit *recordRow
+	// caret is the focused text field's caret, in runes back from its end.
+	caret int
 	// picker lists every value of the focused option field; nil when closed.
 	picker *picker
 }
@@ -89,15 +91,15 @@ func (m *Model) recordFormKey(msg tea.KeyMsg) tea.Cmd {
 
 	switch f.field {
 	case recordFieldName:
-		if m.keys.typeInto(&f.name, msg) {
+		if m.keys.typeInto(&f.name, &f.caret, msg) {
 			return nil
 		}
 	case recordFieldValue:
-		if m.keys.typeInto(&f.value, msg) {
+		if m.keys.typeInto(&f.value, &f.caret, msg) {
 			return nil
 		}
 	case recordFieldTTL:
-		if m.keys.typeInto(&f.ttl, msg) {
+		if m.keys.typeInto(&f.ttl, &f.caret, msg) {
 			return nil
 		}
 	}
@@ -326,6 +328,10 @@ func (m *Model) recordFormView() string {
 		}
 
 		fields = append(fields, dialogField{label: "Proxied", value: v, choice: true})
+	}
+
+	if f.field < len(fields) {
+		fields[f.field].caret = f.caret
 	}
 
 	notes := []string{saveRow(f.field == len(fields))}

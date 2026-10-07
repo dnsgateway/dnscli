@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
+	"github.com/sergelogvinov/dnscli/internal/dns"
 	"github.com/sergelogvinov/dnscli/internal/store"
 	"github.com/sergelogvinov/dnscli/internal/vault"
 )
@@ -99,5 +101,48 @@ func TestEnrollingAnotherKeySlotReturnsTheSlotsItReplaced(t *testing.T) {
 	// The caller cleans up what a replaced slot referenced, such as its Keychain item.
 	if len(replaced) != 1 || replaced[0].ID != first.ID || string(replaced[0].Params) != `{"item":"old"}` {
 		t.Fatalf("replaced = %+v, want only the first keychain slot %+v", replaced, first)
+	}
+}
+
+func TestUpdatingAnAccountRenamesItAndReplacesItsSecret(t *testing.T) {
+	s := open(t, filepath.Join(t.TempDir(), "dnscli.db"))
+	ctx := context.Background()
+
+	work, err := s.AddAccountWithSecret(ctx, dns.Account{Provider: "cloudflare", Name: "work"}, []byte{1})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := s.AddAccountWithSecret(ctx, dns.Account{Provider: "cloudflare", Name: "home"}, []byte{2}); err != nil {
+		t.Fatal(err)
+	}
+
+	taken := work
+	taken.Name = "home"
+
+	err = s.UpdateAccountWithSecret(ctx, taken, []byte{3})
+	if !errors.Is(err, store.ErrAccountExists) || !strings.HasPrefix(err.Error(), "update account") {
+		t.Fatalf("renaming onto another Account's label: %v, want an update ErrAccountExists", err)
+	}
+
+	office := work
+	office.Name = "office"
+
+	if err := s.UpdateAccountWithSecret(ctx, office, []byte{4}); err != nil {
+		t.Fatal(err)
+	}
+
+	accounts, err := s.Accounts(ctx)
+	if err != nil || len(accounts) != 2 || accounts[1] != office {
+		t.Fatalf("stored Accounts = %+v, %v", accounts, err)
+	}
+
+	if sealed, err := s.AccountSecret(ctx, work.ID); err != nil || string(sealed) != "\x04" {
+		t.Fatalf("secret = %v, %v", sealed, err)
+	}
+
+	gone := dns.Account{ID: 99, Provider: "cloudflare", Name: "gone"}
+	if err := s.UpdateAccountWithSecret(ctx, gone, []byte{5}); !errors.Is(err, store.ErrAccountNotFound) {
+		t.Fatalf("updating a removed Account: %v, want ErrAccountNotFound", err)
 	}
 }

@@ -35,14 +35,9 @@ const (
 	// ActionAllAccounts clears the Account filter, so the Domains pane shows
 	// the Zones of every Account.
 	ActionAllAccounts
-	// ActionAddAccount opens the add-Account dialog.
-	ActionAddAccount
 	// ActionEnrollKeychain enrolls the Keychain with Touch ID as another
 	// Unseal Method, after Unseal.
 	ActionEnrollKeychain
-	// ActionRemoveAccount asks to remove the highlighted Account with its
-	// cached Zones, Records and secret.
-	ActionRemoveAccount
 	// ActionRelistZones re-lists the highlighted Account's Zones from its
 	// Provider, after Unseal.
 	ActionRelistZones
@@ -52,16 +47,18 @@ const (
 	// ActionDelegation shows the highlighted Zone's Delegation next to the
 	// nameservers its Account expects, read-only (ADR-0004).
 	ActionDelegation
-	// ActionAddRecord opens the Record form to add a Record to the open
-	// Zone's pending Changeset. Like editing and deleting, it obeys the
-	// write gate.
-	ActionAddRecord
-	// ActionEditRecord opens the Record form, prefilled, for the Record
-	// highlighted in the Records pane.
-	ActionEditRecord
-	// ActionDeleteRecord marks the highlighted Record for deletion, or
-	// takes back its pending change.
-	ActionDeleteRecord
+	// ActionInsert, ActionEdit and ActionDelete act on the focused pane's
+	// items. In the Records pane, insert opens the Record form to add a
+	// Record to the open Zone's pending Changeset, edit opens it prefilled
+	// for the highlighted Record, and delete marks that Record for
+	// deletion or takes back its pending change; all three obey the write
+	// gate. In the Accounts pane, insert opens the add-Account dialog, edit
+	// the edit-Account dialog for the highlighted Account, and delete asks
+	// to remove it with its cached Zones, Records and secret. Without
+	// Accounts, insert adds one from any pane.
+	ActionInsert
+	ActionEdit
+	ActionDelete
 	// ActionPreviewChanges shows the open Zone's pending Changeset, from
 	// which it is applied or discarded.
 	ActionPreviewChanges
@@ -82,7 +79,9 @@ type Binding struct {
 	Action Action
 	// Keys are key names as Bubble Tea prints them, e.g. "tab", "shift+tab", "j".
 	Keys []string
-	// Help is the description shown in the help overlay.
+	// Help is the description shown in the help overlay. An Action that
+	// acts on a pane's items has none: the overlay shows paneHelp's, which
+	// says what it does in the focused pane.
 	Help string
 }
 
@@ -105,27 +104,67 @@ func DefaultShortcutProfile() ShortcutProfile {
 			{Action: ActionDown, Keys: []string{"down", "j"}, Help: "move down"},
 			{Action: ActionPageUp, Keys: []string{"pgup"}, Help: "page up"},
 			{Action: ActionPageDown, Keys: []string{"pgdown"}, Help: "page down"},
-			{Action: ActionSelect, Keys: []string{"enter"}, Help: "open / select"},
+			{Action: ActionSelect, Keys: []string{"enter"}},
 			{Action: ActionSearch, Keys: []string{"/"}, Help: "search"},
 			{Action: ActionAllAccounts, Keys: []string{"*"}, Help: "Zones of all Accounts"},
 			{Action: ActionRefresh, Keys: []string{"r"}, Help: "Refresh the open Zone (retry)"},
 			{Action: ActionDelegation, Keys: []string{"N"}, Help: "Delegation (nameservers), read-only"},
-			{Action: ActionAddRecord, Keys: []string{"i", "insert"}, Help: "insert a new Record (Records pane)"},
-			{Action: ActionEditRecord, Keys: []string{"e"}, Help: "edit the Record (Records pane; Enter too)"},
-			{Action: ActionDeleteRecord, Keys: []string{"d", "delete"}, Help: "delete the Record, or undo its change (Records pane)"},
-			{Action: ActionApplyTemplate, Keys: []string{"t"}, Help: "apply a Template, such as Google mail (Records pane)"},
+			{Action: ActionInsert, Keys: []string{"i", "insert"}},
+			{Action: ActionEdit, Keys: []string{"e"}},
+			{Action: ActionDelete, Keys: []string{"d", "delete"}},
+			{Action: ActionApplyTemplate, Keys: []string{"t"}},
 			{Action: ActionPreviewChanges, Keys: []string{"p"}, Help: "preview the pending changes, Enter applies"},
 			{Action: ActionDiscardChanges, Keys: []string{"D"}, Help: "discard the pending changes (in the preview)"},
 			{Action: ActionApplyOver, Keys: []string{"O"}, Help: "apply over the current values (in the preview, after a conflict)"},
-			{Action: ActionAddAccount, Keys: []string{"a"}, Help: "add Account"},
-			{Action: ActionRemoveAccount, Keys: []string{"X"}, Help: "remove Account"},
-			{Action: ActionRelistZones, Keys: []string{"L"}, Help: "re-list the Account's Zones"},
+			{Action: ActionRelistZones, Keys: []string{"L"}},
 			{Action: ActionEnrollKeychain, Keys: []string{"K"}, Help: "enroll the Keychain (Touch ID)"},
 			{Action: ActionHelp, Keys: []string{"?"}, Help: "toggle help"},
 			{Action: ActionClose, Keys: []string{"esc"}, Help: "close"},
 			{Action: ActionQuit, Keys: []string{"q", "ctrl+c"}, Help: "quit"},
 		},
 	}
+}
+
+// paneBinding is an Action as the help overlay describes it in one pane.
+type paneBinding struct {
+	Action Action
+	Help   string
+}
+
+// paneHelp lists the Actions that act on each pane's items, with what they
+// do there. The help overlay shows the focused pane's apart from the
+// global ones: every other bound Action.
+var paneHelp = map[pane][]paneBinding{
+	paneDomains: {
+		{ActionSelect, "show the Zone's Records"},
+	},
+	paneRecords: {
+		{ActionInsert, "insert a new Record"},
+		{ActionEdit, "edit the Record"},
+		{ActionSelect, "edit the Record"},
+		{ActionDelete, "delete the Record, or undo its change"},
+		{ActionApplyTemplate, "apply a Template, such as Google mail"},
+	},
+	paneAccounts: {
+		{ActionSelect, "show only the Account's Zones"},
+		{ActionInsert, "add an Account"},
+		{ActionEdit, "edit the Account: its name or API token"},
+		{ActionDelete, "remove the Account"},
+		{ActionRelistZones, "re-list the Account's Zones"},
+	},
+}
+
+// paneAction reports whether Action a acts on some pane's items.
+func paneAction(a Action) bool {
+	for _, bs := range paneHelp {
+		for _, b := range bs {
+			if b.Action == a {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 // Validate reports whether the profile is usable: every key maps to one

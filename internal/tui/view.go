@@ -71,10 +71,10 @@ func (m *Model) View() string {
 	leftW, rightW, bodyH, domainsH, accountsH := l.leftW, l.rightW, l.bodyH, l.domainsH, l.accountsH
 
 	left := lipgloss.JoinVertical(lipgloss.Left,
-		box("Domains", m.domainLines(leftW-2, domainsH-2), leftW, domainsH, m.focus == paneDomains),
-		box("Accounts", m.accountLines(leftW-2, accountsH-2), leftW, accountsH, m.focus == paneAccounts),
+		box(paneNames[paneDomains], m.domainLines(leftW-2, domainsH-2), leftW, domainsH, m.focus == paneDomains),
+		box(paneNames[paneAccounts], m.accountLines(leftW-2, accountsH-2), leftW, accountsH, m.focus == paneAccounts),
 	)
-	right := box("Records", m.recordLines(rightW-2, bodyH-2), rightW, bodyH, m.focus == paneRecords)
+	right := box(paneNames[paneRecords], m.recordLines(rightW-2, bodyH-2), rightW, bodyH, m.focus == paneRecords)
 
 	view := lipgloss.JoinVertical(lipgloss.Left,
 		m.zoneStatusRow(),
@@ -89,6 +89,9 @@ func (m *Model) View() string {
 		view = overlay(view, m.unsealView(), m.width, m.height)
 	case m.addForm != nil:
 		view = overlay(view, m.addAccountView(), m.width, m.height)
+		if m.addForm.picker != nil {
+			view = overlay(view, m.addForm.picker.view(m.height), m.width, m.height)
+		}
 	case m.keychain != nil:
 		view = overlay(view, m.keychainView(), m.width, m.height)
 	case m.remove != nil:
@@ -225,7 +228,7 @@ func (m *Model) recordLines(w, h int) []string {
 	case len(m.accounts) == 0:
 		return []string{
 			"",
-			fmt.Sprintf("  No Accounts yet: press %s to add your first Account.", m.keys.keysFor(ActionAddAccount)),
+			fmt.Sprintf("  No Accounts yet: press %s to add your first Account.", m.keys.keysFor(ActionInsert)),
 			"",
 			"  An Account is a Provider, a name and an API token.",
 			hintStyle.Render("  dnscli keeps Accounts in its local database; it is not a disposable cache."),
@@ -340,7 +343,7 @@ func (m *Model) zoneStatusRow() string {
 func (m *Model) statusLineRow() string {
 	left, right := m.statusLine(), hintStyle.Render(m.keyHints()+" ")
 
-	form := m.recordForm != nil || m.templateForm != nil
+	form := m.recordForm != nil || m.templateForm != nil || m.addForm != nil
 
 	switch {
 	case !form && lipgloss.Width(left)+1+lipgloss.Width(right) > m.width:
@@ -356,8 +359,13 @@ func (m *Model) statusLineRow() string {
 
 // keyHints are the keys of the open form, or the keys for help and quit.
 func (m *Model) keyHints() string {
+	if m.addForm != nil {
+		// An edited Account's Provider has no values to change or list.
+		return m.formKeysHint(m.addForm.editing == nil)
+	}
+
 	if m.recordForm != nil || m.templateForm != nil {
-		return m.formKeysHint()
+		return m.formKeysHint(true)
 	}
 
 	return fmt.Sprintf("%s help · %s quit", m.keys.keysFor(ActionHelp), m.keys.keysFor(ActionQuit))

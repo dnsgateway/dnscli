@@ -148,10 +148,11 @@ func TestUnsealWithTheKeychainPromptsForTouchID(t *testing.T) {
 	enrollKeychain(t, s, kc)
 
 	h := newKeychainHarness(t, s, fake.New(), kc)
-	h.press("a", "tab")
+	h.press("shift+tab", "i", "tab")
 	h.typeText("home")
 	h.press("tab")
 	h.typeText("home-token")
+	h.press("enter")
 	unseal := h.pressHolding("enter")
 
 	h.assertShows("Unseal", "Touch ID")

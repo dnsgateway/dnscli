@@ -35,6 +35,8 @@ type templateForm struct {
 	// warning says what the Template would weaken, such as the Zone's
 	// DMARC policy; a second Save stages it anyway.
 	warning string
+	// caret is the focused text field's caret, in runes back from its end.
+	caret int
 	// picker lists every value of the focused option field; nil when closed.
 	picker *picker
 	// size is the largest size the dialog takes, which it keeps.
@@ -106,7 +108,7 @@ func (m *Model) templateFormKey(msg tea.KeyMsg) tea.Cmd {
 
 	if p, ok := f.param(); ok && p.Choices == nil {
 		v := values[p.Name]
-		if m.keys.typeInto(&v, msg) {
+		if m.keys.typeInto(&v, &f.caret, msg) {
 			values[p.Name] = v
 			f.warning = ""
 
@@ -359,6 +361,10 @@ func (m *Model) templateFormView() string {
 	values := f.values[t.Name]
 
 	fields := f.dialogFields(t, values)
+	if f.field < len(fields) {
+		fields[f.field].caret = f.caret
+	}
+
 	notes := []string{saveRow(f.field == len(fields))}
 
 	if f.err != "" {

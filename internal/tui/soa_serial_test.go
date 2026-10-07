@@ -101,7 +101,7 @@ func TestARefreshDoesNotAskTheDelegatedNameserversOfAZoneNameInSeveralAccounts(t
 	h.fillAddAccount("lab", "lab-token")
 	h.assertShows("work.example · cloudfla")
 
-	h.press("enter")
+	h.press("tab", "enter") // back from the Accounts pane to the Domains pane
 	h.assertShows("validated this session")
 
 	if q := r.soaAtQueries(); len(q) != 0 {

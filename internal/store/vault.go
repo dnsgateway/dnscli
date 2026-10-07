@@ -26,6 +26,29 @@ func (s *Store) AddAccountWithSecret(ctx context.Context, a dns.Account, sealed 
 	return a, nil
 }
 
+// UpdateAccountWithSecret renames a stored Account and replaces its API
+// token, already sealed with the data key for its new label: the sealed
+// token is bound to the label, so the two change together; nil keeps an
+// Account without a token without one. It returns
+// ErrAccountExists when another Account has the new label, and
+// ErrAccountNotFound when the Account is not stored.
+func (s *Store) UpdateAccountWithSecret(ctx context.Context, a dns.Account, sealed []byte) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE accounts SET name = ?, secret = ? WHERE id = ?`, a.Name, sealed, a.ID)
+	if err != nil {
+		return fmt.Errorf("update account %s: %w", a.Label(), uniqueError(err))
+	}
+
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		if err == nil {
+			err = ErrAccountNotFound
+		}
+
+		return fmt.Errorf("update account %s: %w", a.Label(), err)
+	}
+
+	return nil
+}
+
 // AccountSecret returns an Account's sealed API token; nil when it has none.
 // It returns ErrAccountNotFound when the Account is not stored.
 func (s *Store) AccountSecret(ctx context.Context, accountID int64) ([]byte, error) {

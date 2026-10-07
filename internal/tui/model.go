@@ -6,6 +6,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"time"
 
@@ -24,6 +25,9 @@ const (
 	paneAccounts
 	paneCount
 )
+
+// paneNames are the panes' titles.
+var paneNames = [paneCount]string{paneDomains: "Domains", paneRecords: "Records", paneAccounts: "Accounts"}
 
 // Model is the top-level Bubble Tea model.
 type Model struct {
@@ -286,6 +290,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.accountAdded(msg)
 	case zonesDiscoveredMsg:
 		return m, m.zonesDiscovered(msg)
+	case accountEditedMsg:
+		return m, m.accountEdited(msg)
 	case accountRemovedMsg:
 		return m, m.accountRemoved(msg)
 	case serialPolledMsg:
@@ -417,12 +423,8 @@ func (m *Model) handle(a Action) tea.Cmd {
 		m.startSearch()
 	case ActionClose:
 		m.clearSearch()
-	case ActionAddAccount:
-		m.openAddAccount()
 	case ActionEnrollKeychain:
 		return m.enrollKeychain()
-	case ActionRemoveAccount:
-		return m.removeAccount()
 	case ActionRelistZones:
 		return m.relistZones()
 	case ActionRefresh:
@@ -431,13 +433,29 @@ func (m *Model) handle(a Action) tea.Cmd {
 		if len(m.visible) > 0 {
 			m.delegationOf = m.visible[m.cursor[paneDomains]].Name
 		}
-	case ActionAddRecord, ActionEditRecord, ActionDeleteRecord:
-		return m.recordAction(a)
+	case ActionInsert, ActionEdit, ActionDelete:
+		return m.itemAction(a)
 	case ActionPreviewChanges:
 		return m.previewChanges()
 	case ActionApplyTemplate:
 		return m.openTemplateForm()
 	}
+
+	return nil
+}
+
+// itemAction runs an insert, edit or delete Action on the focused pane's
+// items: Records or Accounts. Without Accounts, insert adds one from any
+// pane, as there is nothing else to insert into.
+func (m *Model) itemAction(a Action) tea.Cmd {
+	switch {
+	case m.focus == paneAccounts, a == ActionInsert && len(m.accounts) == 0:
+		return m.accountAction(a)
+	case m.focus == paneRecords:
+		return m.recordAction(a)
+	}
+
+	m.notice = notice{text: fmt.Sprintf("Records are edited in the Records pane, Accounts in the Accounts pane (%s).", m.keys.keysFor(ActionNextPane)), err: true}
 
 	return nil
 }
@@ -496,7 +514,7 @@ func (m *Model) itemCount(p pane) int {
 
 // selectItem opens the highlighted item of the focused pane: a Zone shows
 // its Records, an Account limits the Domains pane to its Zones, and a
-// Record opens in the Record form, as ActionEditRecord does.
+// Record opens in the Record form, as ActionEdit does.
 func (m *Model) selectItem() tea.Cmd {
 	switch m.focus {
 	case paneDomains:
@@ -506,7 +524,7 @@ func (m *Model) selectItem() tea.Cmd {
 			m.setAccount(m.accounts[m.cursor[paneAccounts]].ID)
 		}
 	case paneRecords:
-		return m.recordAction(ActionEditRecord)
+		return m.recordAction(ActionEdit)
 	}
 
 	return nil

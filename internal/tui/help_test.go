@@ -1,6 +1,7 @@
 package tui_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/sergelogvinov/dnscli/internal/tui"
@@ -20,9 +21,32 @@ func TestHelpOverlayListsTheCurrentKeys(t *testing.T) {
 		"Shift+Tab", "previous pane",
 		"↑/k", "move up",
 		"↓/j", "move down",
-		"Enter", "open / select",
 		"q/Ctrl+C", "quit",
 	)
+}
+
+func TestHelpOverlayListsTheFocusedPanesKeysBelowTheGlobalOnes(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	h := newHarness(t, s)
+
+	h.press("?")
+	h.assertShows("── Domains ─", "show the Zone's Records")
+	h.assertHides("── Records ─", "── Accounts ─", "insert a new Record", "add an Account")
+
+	h.press("esc", "shift+tab", "?")
+	h.assertShows("── Accounts ─", "show only the Account's Zones", "add an Account", "edit the Account", "remove the Account", "re-list")
+	h.assertHides("── Domains ─", "insert a new Record")
+
+	// The global keys show in every pane, above the rule. N works on the
+	// highlighted Zone from any pane, so it is global.
+	h.assertShows("next pane", "search", "quit", "Delegation")
+
+	view := h.view()
+	if strings.Index(view, "quit") > strings.Index(view, "── Accounts ─") {
+		t.Fatalf("the global keys are not above the pane's:\n%s", view)
+	}
 }
 
 func TestEscClosesHelpOverlay(t *testing.T) {
@@ -72,4 +96,15 @@ func TestHelpOverlayCapturesNavigationKeys(t *testing.T) {
 
 	h.assertFocused("Domains")
 	h.assertHides("192.0.2.10")
+}
+
+func TestWithoutAccountsHelpSaysInsertAddsOneFromAnyPane(t *testing.T) {
+	s, _ := openStore(t)
+	h := newHarness(t, s)
+
+	for _, keys := range [][]string{{"?"}, {"esc", "tab", "?"}} {
+		h.press(keys...)
+		h.assertShows("i/insert", "add an Account")
+		h.assertHides("insert a new Record")
+	}
 }

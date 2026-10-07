@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
@@ -38,11 +39,11 @@ func TestAddAccountDialogAsksForProviderNameAndToken(t *testing.T) {
 	s, _ := openStore(t)
 	h := newAccountHarness(t, s, fake.New())
 
-	h.press("a")
+	h.press("i")
 
 	h.assertShows("Add Account", "Provider", "cloudflare", "Name", "API token")
 	// The first Account carries the warning that the database is not disposable.
-	h.assertShows("not a disposable cache")
+	h.assertShows("Back it up")
 }
 
 const token = "cf-token-Zx81-secret"
@@ -64,15 +65,21 @@ func (h *harness) typeText(s string) {
 }
 
 // fillAddAccount opens the add-Account dialog and submits it for
-// cloudflare.<name> with the API token.
+// cloudflare.<name> with the API token. The first Account is inserted from
+// the Domains pane, which keeps the focus; later ones from the Accounts pane.
 func (h *harness) fillAddAccount(name, token string) {
 	h.t.Helper()
 
-	h.press("a", "tab")
+	// The focused pane has a heavy border.
+	if v := h.view(); !strings.Contains(v, "No Accounts yet") && !strings.Contains(v, "┏━ Accounts") {
+		h.press("shift+tab")
+	}
+
+	h.press("i", "tab")
 	h.typeText(name)
 	h.press("tab")
 	h.typeText(token)
-	h.press("enter")
+	h.press("enter", "enter") // to the Save button, then save
 }
 
 func TestAddingTheFirstAccountEnrollsAPassphraseAndDiscoversItsZones(t *testing.T) {
@@ -217,7 +224,7 @@ func TestTheAddAccountDialogTypesKeysThatAreBoundToActions(t *testing.T) {
 	h := newAccountHarness(t, s, workZones())
 
 	// q quits, ? opens help, j moves and a adds an Account outside the dialog.
-	h.press("a", "tab")
+	h.press("i", "tab")
 	h.typeText("qja?")
 
 	if h.quit {
@@ -239,7 +246,7 @@ func TestTheAddAccountDialogTypesKeysThatAreBoundToActions(t *testing.T) {
 		t.Fatalf("a cancelled dialog stored %+v", accounts)
 	}
 
-	h.press("a", "ctrl+c")
+	h.press("i", "ctrl+c")
 
 	if !h.quit {
 		t.Fatal("Ctrl+C did not quit from the dialog")

@@ -34,7 +34,7 @@ func TestALongMaskedTokenKeepsTheDialogInsideTheTerminal(t *testing.T) {
 	h := newAccountHarness(t, s, fake.New())
 	h.send(tea.WindowSizeMsg{Width: 80, Height: 30})
 
-	h.press("a", "tab")
+	h.press("i", "tab")
 	h.typeText("work")
 	h.press("tab")
 	h.typeText(strings.Repeat("t", 200))

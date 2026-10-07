@@ -28,6 +28,8 @@ type dialogField struct {
 	value  string
 	masked bool // a secret: shown as dots
 	choice bool // picked from a list of values instead of typed
+	fixed  bool // shown but not typed into nor changed
+	caret  int  // where the caret is while the field is typed into, in runes back from the end
 }
 
 // dialogView renders a dialog box: its fields, with the focused one marked,
@@ -61,11 +63,12 @@ func sizedDialogView(title string, fields []dialogField, focus int, typing bool,
 			v = strings.Repeat("•", len([]rune(v)))
 		}
 
-		if w := lipgloss.Width(v); w > maxValueWidth {
+		marker := "  "
+		caret := i == focus && typing && !f.choice && !f.fixed
+
+		if w := lipgloss.Width(v); w > maxValueWidth && !caret {
 			v = "…" + ansi.TruncateLeft(v, w-maxValueWidth+1, "")
 		}
-
-		marker := "  "
 
 		if i == focus {
 			marker = "› "
@@ -73,8 +76,8 @@ func sizedDialogView(title string, fields []dialogField, focus int, typing bool,
 			switch {
 			case f.choice:
 				v = "‹ " + v + " ›"
-			case typing:
-				v += "▏"
+			case caret:
+				v = withCaret(v, f.caret, maxValueWidth)
 			}
 		}
 
@@ -199,10 +202,15 @@ func saveRow(focused bool) string {
 	return "  [ Save ]"
 }
 
-// formKeysHint says how to move through a form with option fields and a
-// Save button, for the status line.
-func (m *Model) formKeysHint() string {
+// formKeysHint says how to move through a form with a Save button, for
+// the status line; options says whether the form has option fields, which
+// Left and Right change and Enter lists.
+func (m *Model) formKeysHint(options bool) string {
 	k := m.keys.keysFor
+
+	if !options {
+		return k(ActionUp) + " " + k(ActionDown) + " field · " + k(ActionSelect) + " next or save · " + k(ActionClose) + " cancel"
+	}
 
 	return k(ActionUp) + " " + k(ActionDown) + " field · " + k(ActionPaneLeft) + " " + k(ActionPaneRight) + " change · " +
 		k(ActionSelect) + " list or save · " + k(ActionClose) + " cancel"

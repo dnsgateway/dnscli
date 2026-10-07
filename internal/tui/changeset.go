@@ -157,21 +157,15 @@ func (m *Model) highlightedRecord() (recordRow, bool) {
 	return m.visibleRecords[m.cursor[paneRecords]], true
 }
 
-// recordAction runs a Record action. They act in the Records pane, on the
-// open Zone, and only past the write gate.
+// recordAction runs an insert, edit or delete Action on Records. They act
+// in the Records pane, on the open Zone, and only past the write gate.
 func (m *Model) recordAction(a Action) tea.Cmd {
-	if m.focus != paneRecords {
-		m.notice = notice{text: fmt.Sprintf("Records are edited in the Records pane (%s).", m.keys.keysFor(ActionNextPane)), err: true}
-
-		return nil
-	}
-
 	z, cmd, ok := m.writeGate()
 	if !ok {
 		return cmd
 	}
 
-	if a == ActionAddRecord {
+	if a == ActionInsert {
 		m.recordForm = newRecordForm(z, nil)
 
 		return nil
@@ -192,14 +186,14 @@ func (m *Model) recordAction(a Action) tea.Cmd {
 		return nil
 	}
 
-	if a == ActionDeleteRecord {
+	if a == ActionDelete {
 		m.stageDelete(z, row)
 
 		return nil
 	}
 
 	if !dns.Editable(row.rec.Type) {
-		m.notice = notice{text: fmt.Sprintf("dnscli cannot edit %s Records; %s deletes one.", row.rec.Type, m.keys.keysFor(ActionDeleteRecord)), err: true}
+		m.notice = notice{text: fmt.Sprintf("dnscli cannot edit %s Records; %s deletes one.", row.rec.Type, m.keys.keysFor(ActionDelete)), err: true}
 
 		return nil
 	}

@@ -389,7 +389,7 @@ func TestARefreshThatNeedsUnsealWaitsForThePromptAlreadyOpen(t *testing.T) {
 	// The Zone's cached Records load while the user asks to remove the
 	// Account, which opens the Unseal prompt first.
 	load := h.pressHolding("enter")
-	h.press("shift+tab", "X")
+	h.press("shift+tab", "d")
 	h.assertShows("Unseal")
 	h.run(load)
 

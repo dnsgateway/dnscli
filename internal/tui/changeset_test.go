@@ -363,9 +363,9 @@ func TestTheHelpOverlayListsTheRecordKeys(t *testing.T) {
 	seedCache(t, s)
 
 	h := newHarness(t, s)
-	h.press("?")
+	h.press("tab", "?")
 
-	h.assertShows("insert a new Record", "edit the Record", "delete the Record",
+	h.assertShows("── Records ─", "insert a new Record", "edit the Record", "delete the Record", "apply a Template",
 		"preview the pending changes", "discard the pending changes")
 }
 
