@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -29,7 +30,13 @@ type delegation struct {
 	// ns are the delegated nameservers, as nameKey keys, sorted.
 	ns  []string
 	err error
+	// at is when the resolver answered.
+	at time.Time
 }
+
+// delegationTTL is how long a resolved Delegation is trusted before a
+// reload resolves it again.
+const delegationTTL = 10 * time.Minute
 
 // delegationMsg carries the result of one Delegation lookup.
 type delegationMsg struct {
@@ -41,8 +48,8 @@ type delegationMsg struct {
 // queueDelegations runs after each cache (re)load. It queues a Delegation
 // lookup for every zone name this session has not resolved yet, once per
 // zone name however many Accounts have it, and again for every name whose
-// lookup failed: once per reload, like the Serial Checks. It forgets the
-// names that left the cache.
+// lookup failed or whose result is older than delegationTTL: once per
+// reload, like the Serial Checks. It forgets the names that left the cache.
 func (m *Model) queueDelegations() tea.Cmd {
 	if m.deps.Resolver == nil {
 		return nil
@@ -68,7 +75,8 @@ func (m *Model) queueDelegations() tea.Cmd {
 		case !ok:
 			m.delegations[k] = &delegation{}
 			m.lookups.queue = append(m.lookups.queue, k)
-		case d.state == lookupFailed:
+		case d.state == lookupFailed,
+			d.state == lookupDone && m.deps.now().Sub(d.at) >= delegationTTL:
 			*d = delegation{}
 			m.lookups.queue = append(m.lookups.queue, k)
 		}
@@ -82,6 +90,22 @@ func (m *Model) queueDelegations() tea.Cmd {
 	}
 
 	return m.startDelegations()
+}
+
+// forgetDelegations forgets what this session resolved for an Account's
+// zone names, so the next reload resolves them again, such as after the
+// Account is re-listed.
+func (m *Model) forgetDelegations(accountID int64) {
+	for _, z := range m.zones {
+		if z.AccountID != accountID {
+			continue
+		}
+
+		k := nameKey(z.Name)
+		if d, ok := m.delegations[k]; ok && (d.state == lookupDone || d.state == lookupFailed) {
+			delete(m.delegations, k)
+		}
+	}
 }
 
 // startDelegations starts queued Delegation lookups up to the limit.
@@ -125,7 +149,7 @@ func (m *Model) delegationResolved(msg delegationMsg) tea.Cmd {
 		case len(msg.ns) == 0:
 			*d = delegation{state: lookupFailed, err: errNoNameservers}
 		default:
-			*d = delegation{state: lookupDone, ns: nameSet(msg.ns)}
+			*d = delegation{state: lookupDone, ns: nameSet(msg.ns), at: m.deps.now()}
 		}
 	}
 

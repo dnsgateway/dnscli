@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -343,6 +344,53 @@ func TestAFailedDelegationLookupRunsAgainOnReload(t *testing.T) {
 	h.reloadCache()
 
 	h.assertLive("example.com", true)
+}
+
+var adaBob = []string{"ada.ns.cloudflare.com", "bob.ns.cloudflare.com"}
+
+func TestADelegationIsResolvedAgainOnReloadOnceItExpires(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+	expectNameservers(t, s, "cloudflare.personal", "example.com", cruzDee...)
+
+	now := testNow
+	r := &fakeResolver{ns: map[string][]string{"example.com": adaBob}}
+	h := newHarnessWith(t, s, tui.Deps{
+		Providers:    provider.Registry{"cloudflare": fake.New().New},
+		UnsealMethod: fastPassphrase(),
+		Resolver:     r,
+		Clock:        func() time.Time { return now },
+	})
+	h.assertLive("example.com", false)
+
+	// The Delegation changed at the registrar.
+	r.ns["example.com"] = cruzDee
+
+	now = testNow.Add(9 * time.Minute)
+	h.reloadCache()
+	h.assertLive("example.com", false)
+
+	now = testNow.Add(10 * time.Minute)
+	h.fillAddAccount("lab2", "lab2-token")
+	h.assertShows("cloudflare.lab2")
+	h.assertLive("example.com", true)
+}
+
+func TestRelistingAnAccountResolvesItsZoneNamesDelegationAgain(t *testing.T) {
+	f := fake.New().
+		AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Nameservers: cruzDee}).
+		AddZone(dns.Zone{Name: "work.test", ProviderID: "zw2", Nameservers: cruzDee})
+
+	r := &fakeResolver{ns: map[string][]string{"work.example": adaBob, "work.test": cruzDee}}
+	h, _ := addWorkAccount(t, f, r)
+	h.assertLive("work.example", false)
+
+	// The Delegation changed at the registrar.
+	r.ns["work.example"] = cruzDee
+
+	h.press("tab", "L")
+	h.assertShows("Re-listed cloudflare.work")
+	h.assertLive("work.example", true)
 }
 
 func TestTheZoneStatusBarSaysWhetherTheOpenZoneIsTheLiveZone(t *testing.T) {

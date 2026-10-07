@@ -33,7 +33,8 @@ func (m *Model) relistZones() tea.Cmd {
 	})
 }
 
-// zonesRelisted reports a re-listing. A failed one changed nothing.
+// zonesRelisted reports a re-listing. A failed one changed nothing; a
+// successful one also resolves the Account's zone names' Delegation again.
 func (m *Model) zonesRelisted(msg zonesDiscoveredMsg) tea.Cmd {
 	delete(m.relisting, msg.account.ID)
 
@@ -51,6 +52,7 @@ func (m *Model) zonesRelisted(msg zonesDiscoveredMsg) tea.Cmd {
 	}
 
 	m.forgetZones(dropped)
+	m.forgetDelegations(msg.account.ID)
 
 	switch added, gone := len(msg.sync.Added), len(msg.sync.Dropped); {
 	case msg.count == 0:
