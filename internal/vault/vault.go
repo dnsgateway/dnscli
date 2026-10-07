@@ -44,7 +44,8 @@ type Method interface {
 
 // Key is the released data key. Holding one means the session is unsealed.
 type Key struct {
-	aead cipher.AEAD
+	dataKey []byte
+	aead    cipher.AEAD
 }
 
 // Create makes a new data key and wraps it in a key slot for m.
@@ -90,7 +91,22 @@ func newKey(dataKey []byte) (*Key, error) {
 		return nil, fmt.Errorf("data key: %w", err)
 	}
 
-	return &Key{aead: aead}, nil
+	return &Key{dataKey: dataKey, aead: aead}, nil
+}
+
+// Wrap wraps the session's data key in a new key slot for m, so m Unseals
+// the same secrets as the method that released it. Only an unsealed
+// session holds a Key, so only an unsealed session can enroll a method.
+func (k *Key) Wrap(m Method, secret []byte) (Slot, error) {
+	return m.Wrap(k.dataKey, secret)
+}
+
+// AsksForSecret reports whether dnscli asks the user for m's secret, as
+// for the passphrase. A method such as the Keychain asks the user itself.
+func AsksForSecret(m Method) bool {
+	_, own := m.(interface{ authenticatesItself() })
+
+	return !own
 }
 
 // Seal encrypts a secret. The label binds it to its owner, such as an

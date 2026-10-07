@@ -62,6 +62,11 @@ type Model struct {
 	// visibleRecords are the Records the Records pane lists, after its search.
 	visibleRecords []dns.Record
 
+	// fresh is each Zone's freshness this session, by Zone ID.
+	fresh map[int64]*zoneFreshness
+	// checks schedules the Serial Checks.
+	checks checkQueue
+
 	// addForm is the add-Account dialog; nil when closed.
 	addForm *addAccountForm
 	// notice is the latest background result shown in the status bar.
@@ -75,6 +80,8 @@ type Model struct {
 	unseal *unsealPrompt
 	// afterUnseal is the action waiting for the Unseal prompt.
 	afterUnseal func() tea.Cmd
+	// keychain asks to enroll the Keychain; nil when closed.
+	keychain *keychainConfirm
 }
 
 // notice is a message for the status bar.
@@ -190,8 +197,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for p := range paneCount {
 			m.cursor[p] = min(m.cursor[p], max(m.itemCount(p)-1, 0))
 		}
+
+		return m, m.queueSerialChecks()
+	case serialCheckedMsg:
+		return m, m.serialChecked(msg)
 	case unsealedMsg:
 		return m, m.unsealed(msg)
+	case keychainEnrolledMsg:
+		m.keychainEnrolled(msg)
 	case accountAddedMsg:
 		return m, m.accountAdded(msg)
 	case zonesDiscoveredMsg:
@@ -213,6 +226,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.addForm != nil {
 			return m, m.addAccountKey(msg)
+		}
+
+		if m.keychain != nil {
+			return m, m.keychainKey(msg)
 		}
 
 		if m.typeIntoSearch(msg) {
@@ -270,6 +287,8 @@ func (m *Model) handle(a Action) tea.Cmd {
 		m.clearSearch()
 	case ActionAddAccount:
 		m.openAddAccount()
+	case ActionEnrollKeychain:
+		return m.enrollKeychain()
 	}
 
 	return nil

@@ -75,6 +75,51 @@ func (s *Store) EnrollFirstKeySlot(ctx context.Context, slot vault.Slot) (vault.
 	return slot, nil
 }
 
+// ErrNotEnrolled means no key slot, and so no data key, exists yet.
+var ErrNotEnrolled = errors.New("no Unseal Method is enrolled yet")
+
+// EnrollKeySlot stores another key slot, which must wrap the existing data
+// key, and returns it with its ID set. It replaces the earlier key slots of
+// the same Unseal Method, so a method can be enrolled again, such as after
+// its Keychain item was lost. It returns ErrNotEnrolled when no key slot
+// exists: the first one goes through EnrollFirstKeySlot.
+func (s *Store) EnrollKeySlot(ctx context.Context, slot vault.Slot) (vault.Slot, error) {
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return vault.Slot{}, fmt.Errorf("enroll key slot: %w", err)
+	}
+	defer conn.Close()
+
+	err = writeLocked(ctx, conn, func() error {
+		var exists bool
+		if err := conn.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM key_slots)`).Scan(&exists); err != nil {
+			return err
+		}
+
+		if !exists {
+			return ErrNotEnrolled
+		}
+
+		if _, err := conn.ExecContext(ctx, `DELETE FROM key_slots WHERE method = ?`, slot.Method); err != nil {
+			return err
+		}
+
+		res, err := conn.ExecContext(ctx, `INSERT INTO key_slots (method, params, wrapped) VALUES (?, ?, ?)`, slot.Method, slot.Params, slot.Wrapped)
+		if err != nil {
+			return err
+		}
+
+		slot.ID, err = res.LastInsertId()
+
+		return err
+	})
+	if err != nil {
+		return vault.Slot{}, fmt.Errorf("enroll key slot: %w", err)
+	}
+
+	return slot, nil
+}
+
 // KeySlots returns every enrolled key slot, oldest first.
 func (s *Store) KeySlots(ctx context.Context) ([]vault.Slot, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id, method, params, wrapped FROM key_slots ORDER BY id`)

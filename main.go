@@ -16,8 +16,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/pflag"
 
+	"github.com/sergelogvinov/dnscli/internal/keychain"
 	"github.com/sergelogvinov/dnscli/internal/provider"
 	"github.com/sergelogvinov/dnscli/internal/provider/cloudflare"
+	"github.com/sergelogvinov/dnscli/internal/resolver"
 	"github.com/sergelogvinov/dnscli/internal/store"
 	"github.com/sergelogvinov/dnscli/internal/tui"
 	"github.com/sergelogvinov/dnscli/internal/vault"
@@ -32,19 +34,25 @@ var providers = provider.Registry{
 	"cloudflare": cloudflare.Config{}.New,
 }
 
-// unsealMethods are the Unseal Methods this build supports, by name.
-var unsealMethods = map[string]vault.Method{
-	vault.Passphrase{}.Name(): vault.Passphrase{},
+// unsealMethods are the Unseal Methods a build supports, by name: the
+// passphrase everywhere, and the Keychain where the platform has one.
+func unsealMethods(kc vault.KeychainBackend) map[string]vault.Method {
+	methods := map[string]vault.Method{vault.Passphrase{}.Name(): vault.Passphrase{}}
+	if kc != nil {
+		methods[vault.Keychain{}.Name()] = vault.Keychain{Backend: kc}
+	}
+
+	return methods
 }
 
 func main() {
-	os.Exit(runMain(os.Args[1:], os.Getenv, runtime.GOOS, os.Stderr))
+	os.Exit(runMain(os.Args[1:], os.Getenv, runtime.GOOS, unsealMethods(keychain.System()), os.Stderr))
 }
 
 // runMain runs dnscli and returns its exit status: 2 for an invalid
 // command line, which also prints the usage, and 1 for any other error.
-func runMain(args []string, getenv func(string) string, goos string, stderr io.Writer) int {
-	opts, err := parseOptions(args, getenv, goos, stderr)
+func runMain(args []string, getenv func(string) string, goos string, methods map[string]vault.Method, stderr io.Writer) int {
+	opts, err := parseOptions(args, getenv, goos, methods, stderr)
 
 	switch {
 	case errors.Is(err, pflag.ErrHelp):
@@ -63,13 +71,17 @@ func runMain(args []string, getenv func(string) string, goos string, stderr io.W
 }
 
 type options struct {
-	dbPath string
-	unseal vault.Method
+	dbPath       string
+	unseal       vault.Method
+	serialChecks int
+	// keychain is the Keychain Unseal Method to offer for enrolling; nil
+	// where the platform has none.
+	keychain vault.Method
 }
 
 // parseOptions reads the command line and the environment. When they are
 // invalid, it prints the error and the usage to stderr.
-func parseOptions(args []string, getenv func(string) string, goos string, stderr io.Writer) (options, error) {
+func parseOptions(args []string, getenv func(string) string, goos string, methods map[string]vault.Method, stderr io.Writer) (options, error) {
 	fs := pflag.NewFlagSet("dnscli", pflag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
@@ -77,8 +89,9 @@ func parseOptions(args []string, getenv func(string) string, goos string, stderr
 	}
 
 	dbPath := fs.String("db", defaultDBPath(), "path to the dnscli database (not a disposable cache: it holds your Accounts)")
+	serialChecks := fs.Int("serial-checks", tui.DefaultSerialChecks, "how many Serial Checks may ask the system DNS resolver at once")
 	unseal := fs.String("unseal", "", fmt.Sprintf("Unseal Method for this session: %s (default $%s, else %s)",
-		strings.Join(methodNames(), ", "), unsealEnv, defaultUnsealMethod(goos)))
+		strings.Join(methodNames(methods), ", "), unsealEnv, defaultUnsealMethod(goos, methods)))
 
 	opts, err := func() (options, error) {
 		if err := fs.Parse(args); err != nil {
@@ -89,21 +102,29 @@ func parseOptions(args []string, getenv func(string) string, goos string, stderr
 			return options{}, fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
 		}
 
+		if *serialChecks < 1 {
+			return options{}, fmt.Errorf("--serial-checks must be at least 1, got %d", *serialChecks)
+		}
+
 		name := *unseal
 		if name == "" {
 			name = getenv(unsealEnv)
 		}
 
 		if name == "" {
-			name = defaultUnsealMethod(goos)
+			name = defaultUnsealMethod(goos, methods)
 		}
 
-		m, ok := unsealMethods[name]
-		if !ok {
-			return options{}, fmt.Errorf("unknown Unseal Method %q (available: %s)", name, strings.Join(methodNames(), ", "))
+		m, ok := methods[name]
+
+		switch {
+		case !ok && name == vault.Keychain{}.Name():
+			return options{}, fmt.Errorf("%w (available: %s)", vault.ErrKeychainUnavailable, strings.Join(methodNames(methods), ", "))
+		case !ok:
+			return options{}, fmt.Errorf("unknown Unseal Method %q (available: %s)", name, strings.Join(methodNames(methods), ", "))
 		}
 
-		return options{dbPath: *dbPath, unseal: m}, nil
+		return options{dbPath: *dbPath, unseal: m, serialChecks: *serialChecks, keychain: methods[vault.Keychain{}.Name()]}, nil
 	}()
 
 	// pflag has already printed the usage for --help.
@@ -115,18 +136,18 @@ func parseOptions(args []string, getenv func(string) string, goos string, stderr
 	return opts, err
 }
 
-// defaultUnsealMethod is the macOS Keychain on macOS, once this build has
-// it, and the passphrase everywhere else.
-func defaultUnsealMethod(goos string) string {
-	if _, ok := unsealMethods["keychain"]; ok && goos == "darwin" {
-		return "keychain"
+// defaultUnsealMethod is the Keychain on macOS, when the build has it,
+// and the passphrase everywhere else.
+func defaultUnsealMethod(goos string, methods map[string]vault.Method) string {
+	if _, ok := methods[vault.Keychain{}.Name()]; ok && goos == "darwin" {
+		return vault.Keychain{}.Name()
 	}
 
 	return vault.Passphrase{}.Name()
 }
 
-func methodNames() []string {
-	return slices.Sorted(maps.Keys(unsealMethods))
+func methodNames(methods map[string]vault.Method) []string {
+	return slices.Sorted(maps.Keys(methods))
 }
 
 func run(opts options) error {
@@ -144,12 +165,14 @@ func run(opts options) error {
 	}
 	defer s.Close()
 
-	// The resolver is wired here as it lands.
 	model := tui.New(ctx, tui.Deps{
 		Store:        s,
 		Clock:        time.Now,
 		Providers:    providers,
+		Resolver:     &resolver.System{},
+		SerialChecks: opts.serialChecks,
 		UnsealMethod: opts.unseal,
+		Keychain:     opts.keychain,
 	})
 
 	_, err = tea.NewProgram(model, tea.WithAltScreen()).Run()

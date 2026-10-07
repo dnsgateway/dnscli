@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"slices"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -20,7 +21,11 @@ const (
 // unsealPrompt asks for the passphrase that Unseals the session, or, when
 // none is enrolled yet, for a new one.
 type unsealPrompt struct {
+	// method Unseals: the passphrase, or a method that asks the user
+	// itself, such as the Keychain with Touch ID.
+	method     vault.Method
 	enroll     bool
+	note       string // why the prompt asks for the passphrase
 	field      int
 	passphrase string
 	repeat     string
@@ -49,11 +54,38 @@ func (m *Model) withSecrets(next func() tea.Cmd) tea.Cmd {
 	}
 
 	m.afterUnseal = next
+
+	// A method that asks the user itself, such as Touch ID, starts at once.
+	method := m.deps.unsealMethod()
+	if !vault.AsksForSecret(method) && hasKeySlot(m.slots, method) {
+		m.unseal = &unsealPrompt{method: method}
+
+		return m.startUnseal(nil)
+	}
+
 	// Any key slot means a data key exists: a new one would not open the
 	// secrets sealed with it. The Store has the final say when submitting.
-	m.unseal = &unsealPrompt{enroll: len(m.slots) == 0}
+	// The first data key is always protected by a passphrase, for recovery.
+	m.unseal = &unsealPrompt{method: m.deps.passphrase(), enroll: len(m.slots) == 0}
+	if !vault.AsksForSecret(method) && len(m.slots) > 0 {
+		m.unseal.note = "The " + methodTitle(method) + " is not enrolled: enter your passphrase. " +
+			m.keys.keysFor(ActionEnrollKeychain) + " enrolls it once the session is unsealed."
+	}
 
 	return nil
+}
+
+func hasKeySlot(slots []vault.Slot, m vault.Method) bool {
+	return slices.ContainsFunc(slots, func(s vault.Slot) bool { return s.Method == m.Name() })
+}
+
+// methodTitle names an Unseal Method for the user.
+func methodTitle(m vault.Method) string {
+	if m.Name() == (vault.Keychain{}).Name() {
+		return "Keychain"
+	}
+
+	return m.Name()
 }
 
 // unsealKey handles a key while the Unseal prompt is open.
@@ -120,9 +152,15 @@ func (m *Model) submitUnseal() tea.Cmd {
 		return nil
 	}
 
+	return m.startUnseal([]byte(p.passphrase))
+}
+
+// startUnseal Unseals, or enrolls the first data key, with the prompt's
+// method in the background.
+func (m *Model) startUnseal(secret []byte) tea.Cmd {
+	p := m.unseal
 	p.busy = true
-	method, store, ctx, enroll := m.deps.unsealMethod(), m.deps.Store, m.ctx, p.enroll
-	secret := []byte(p.passphrase)
+	method, store, ctx, enroll := p.method, m.deps.Store, m.ctx, p.enroll
 
 	return func() tea.Msg {
 		return unsealOrEnroll(ctx, store, method, enroll, secret)
@@ -179,6 +217,16 @@ func (m *Model) unsealed(msg unsealedMsg) tea.Cmd {
 		m.slots = msg.slots
 	}
 
+	if msg.err != nil && !vault.AsksForSecret(m.unseal.method) {
+		// When Touch ID fails, the passphrase still Unseals.
+		m.unseal = &unsealPrompt{
+			method: m.deps.passphrase(),
+			err:    "Could not Unseal: " + msg.err.Error() + ". Enter your passphrase instead.",
+		}
+
+		return nil
+	}
+
 	if msg.err != nil {
 		p := m.unseal
 		// A passphrase enrolled elsewhere turns enrolling into Unseal.
@@ -221,7 +269,20 @@ func (m *Model) unsealView() string {
 
 	title, fields := "Unseal", []dialogField{{label: "Passphrase", value: p.passphrase, masked: true}}
 
+	if !vault.AsksForSecret(p.method) {
+		return dialogView(title, nil, 0, false, []string{
+			"This action needs your Account secrets.",
+			"",
+			hintStyle.Render("Confirm with Touch ID to Unseal…"),
+		})
+	}
+
 	var notes []string
+
+	if p.note != "" {
+		notes = append(notes, wrapNote(lipgloss.NewStyle(), p.note, noteWidth)...)
+		notes = append(notes, "")
+	}
 
 	if p.enroll {
 		title = "Choose a passphrase"
