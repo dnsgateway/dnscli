@@ -113,6 +113,43 @@ func TestTheStatusBarSaysWhichMailRecordsTheCachedZoneHas(t *testing.T) {
 	h.assertHides("MX")
 }
 
+// openCachedZone opens mail.example, cached with records, in a new session.
+func openCachedZone(t *testing.T, records ...dns.Record) *harness {
+	t.Helper()
+
+	s, _ := openStore(t)
+	a := mustAccount(t, s, "cloudflare", "personal")
+	z := mustZone(t, s, dns.Zone{AccountID: a.ID, Name: "mail.example", ProviderID: "zm"})
+
+	if err := s.ReplaceRecords(t.Context(), z.ID, records); err != nil {
+		t.Fatalf("cache records: %v", err)
+	}
+
+	h := newHarness(t, s)
+	h.press("enter")
+
+	return h
+}
+
+func TestMXAndSPFRecordsCountOnlyAtTheZoneApex(t *testing.T) {
+	h := openCachedZone(t,
+		dns.Record{Type: "MX", Name: "eu.mail.example", Value: "10 mx.mail.example", TTL: 300},
+		dns.Record{Type: "TXT", Name: "eu.mail.example", Value: `"v=spf1 -all"`, TTL: 300},
+		dns.Record{Type: "A", Name: "mail.example", Value: "192.0.2.1", TTL: 300},
+	)
+
+	h.assertStatusBarShows("mail: none ·")
+}
+
+func TestANullMXSaysTheZoneTakesNoMail(t *testing.T) {
+	h := openCachedZone(t,
+		dns.Record{Type: "MX", Name: "mail.example", Value: "0 .", TTL: 300},
+		dns.Record{Type: "TXT", Name: "mail.example", Value: `"v=spf1 -all"`, TTL: 300},
+	)
+
+	h.assertStatusBarShows("mail: none (null MX)")
+}
+
 func TestAZoneWhoseDNSSECIsPendingSaysSo(t *testing.T) {
 	f := refreshZones()
 	f.SetZoneStatus("zw1", dns.ZoneStatus{DNSSEC: dns.Pending, HSTS: dns.On})

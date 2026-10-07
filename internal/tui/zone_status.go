@@ -39,10 +39,11 @@ func renderZoneStatus(items []string) string {
 	return statusStyle.Render(strings.Join(items, " · ") + " ")
 }
 
-// mailItem says which mail records a Zone has: MX, an SPF TXT record,
-// DMARC at _dmarc and DKIM keys under _domainkey.
+// mailItem says which mail records a Zone has: MX and an SPF TXT record
+// at the apex, DMARC at _dmarc and DKIM keys under _domainkey. A null MX
+// (RFC 7505) says the Zone takes no mail.
 func mailItem(zone string, records []dns.Record) string {
-	var mx, spf, dmarc, dkim bool
+	var mx, nullMX, spf, dmarc, dkim bool
 
 	zone = strings.ToLower(strings.TrimSuffix(zone, "."))
 
@@ -51,7 +52,9 @@ func mailItem(zone string, records []dns.Record) string {
 		value := strings.ToLower(strings.TrimLeft(r.Value, `"`))
 
 		switch {
-		case r.Type == "MX":
+		case r.Type == "MX" && name == zone && isNullMX(r.Value):
+			nullMX = true
+		case r.Type == "MX" && name == zone:
 			mx = true
 		case r.Type == "TXT" && name == "_dmarc."+zone && strings.HasPrefix(value, "v=dmarc1"):
 			dmarc = true
@@ -59,9 +62,13 @@ func mailItem(zone string, records []dns.Record) string {
 			if r.Type == "TXT" || r.Type == "CNAME" {
 				dkim = true
 			}
-		case r.Type == "TXT" && strings.HasPrefix(value, "v=spf1"):
+		case r.Type == "TXT" && name == zone && strings.HasPrefix(value, "v=spf1"):
 			spf = true
 		}
+	}
+
+	if nullMX && !mx {
+		return "mail: none (null MX)"
 	}
 
 	var found []string
@@ -80,4 +87,12 @@ func mailItem(zone string, records []dns.Record) string {
 	}
 
 	return "mail: " + strings.Join(found, " ")
+}
+
+// isNullMX reports whether an MX value, "<preference> <exchange>", is a
+// null MX: its exchange is the root, ".".
+func isNullMX(value string) bool {
+	f := strings.Fields(value)
+
+	return len(f) == 2 && f[1] == "."
 }
