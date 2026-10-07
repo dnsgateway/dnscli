@@ -95,6 +95,18 @@ func TestAnAdditionTheProviderReturnsNoRecordForIsNotCachedAndTheZoneNeedsARefre
 	h.assertShows("_one.work.example", "_two.work.example")
 }
 
+func TestTheRecordsPaneShowsTheAppliedChangesAsSoonAsTheApplyReturns(t *testing.T) {
+	f := refreshZones()
+	h := openValidated(t, f)
+	h.buildChangeset()
+
+	h.press("p")
+	h.step(h.pressHolding("enter")) // any reload of the cache is held back
+
+	h.assertHides("Changes to work.example", "pending change", "203.0.113.20", "10 mail.work.example")
+	h.assertShows("Applied 3 changes to work.example.", "_verify.work.example", "203.0.113.99")
+}
+
 func TestARecordWithoutAProviderIDCannotBeChanged(t *testing.T) {
 	f := fake.New().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial},
 		dns.Record{Type: "TXT", Name: "work.example", Value: "first", TTL: 300},

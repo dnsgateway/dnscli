@@ -1,10 +1,12 @@
 package tui
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -36,6 +38,9 @@ type changesAppliedMsg struct {
 	// saved is false when the Provider confirmed changes that the cache
 	// could not take.
 	saved bool
+	// applied are the confirmed changes saved to the cache, each After
+	// as the Provider stored it.
+	applied []dns.Change
 	// uncached counts the confirmed changes left out of the cache because
 	// the Provider returned no ID for their Record.
 	uncached int
@@ -186,7 +191,7 @@ func apply(ctx context.Context, s *store.Store, key *vault.Key, newProvider prov
 		return msg
 	}
 
-	msg.saved = true
+	msg.saved, msg.applied = true, confirmed
 
 	return msg
 }
@@ -235,10 +240,10 @@ func (m *Model) changesApplied(msg changesAppliedMsg) tea.Cmd {
 		return nil
 	}
 
-	var cmds []tea.Cmd
-
+	// The Records pane shows what was saved to the cache straight away,
+	// in the same step that takes the changes out of the Changeset.
 	if m.open != nil && m.open.ID == msg.zoneID {
-		cmds = append(cmds, m.reloadRecords(msg.zoneID))
+		m.records = applyToRecords(m.records, msg.applied)
 	}
 
 	if r, ok := m.refreshes[msg.zoneID]; ok {
@@ -293,7 +298,29 @@ func (m *Model) changesApplied(msg changesAppliedMsg) tea.Cmd {
 		p.err = m.notice.text
 	}
 
-	return tea.Batch(cmds...)
+	return nil
+}
+
+// applyToRecords returns Records with the applied changes made to them as
+// SaveApply makes them to the cache, in the order the Store lists them.
+func applyToRecords(records []dns.Record, applied []dns.Change) []dns.Record {
+	out := slices.Clone(records)
+
+	for _, c := range applied {
+		if c.Kind != dns.ChangeAdd {
+			out = slices.DeleteFunc(out, func(r dns.Record) bool { return r.ProviderID == c.Before.ProviderID })
+		}
+
+		if c.Kind != dns.ChangeDelete {
+			out = append(out, c.After)
+		}
+	}
+
+	slices.SortFunc(out, func(a, b dns.Record) int {
+		return cmp.Or(strings.Compare(a.Name, b.Name), strings.Compare(a.Type, b.Type), strings.Compare(a.Value, b.Value))
+	})
+
+	return out
 }
 
 // dropApplied takes the changes the Provider confirmed out of the pending
