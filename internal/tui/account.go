@@ -214,7 +214,9 @@ func (m *Model) discoverZones(a dns.Account, relist bool) tea.Cmd {
 }
 
 // discover lists an Account's Zones from its Provider and makes its cached
-// Zones match them. A Provider error leaves the cache untouched.
+// Zones match them. A Provider error leaves the cache untouched, and so
+// does an empty list: an API token without zone read permission lists no
+// Zones, which must not drop the Account's cache.
 func discover(ctx context.Context, s *store.Store, key *vault.Key, newProvider provider.Constructor, a dns.Account) (int, store.ZoneSync, error) {
 	p, err := accountProvider(ctx, s, key, newProvider, a)
 	if err != nil {
@@ -222,7 +224,7 @@ func discover(ctx context.Context, s *store.Store, key *vault.Key, newProvider p
 	}
 
 	zones, err := p.Zones(ctx)
-	if err != nil {
+	if err != nil || len(zones) == 0 {
 		return 0, store.ZoneSync{}, err
 	}
 

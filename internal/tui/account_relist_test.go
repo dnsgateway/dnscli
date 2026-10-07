@@ -98,6 +98,33 @@ func TestAFailedRelistingLeavesTheCacheAndShowsTheError(t *testing.T) {
 	}
 }
 
+func TestRelistingNoZonesKeepsTheCacheAndHintsAtTheTokenPermission(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+
+	workExample := zoneNamed(t, s, "work.example")
+	if err := s.ReplaceRecords(context.Background(), workExample.ID, []dns.Record{
+		{ProviderID: "rw1", Type: "A", Name: "work.example", Value: "192.0.2.80", TTL: 300},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// A token that may not list Zones lists none.
+	h := newAccountHarness(t, s, fake.New())
+
+	h.press("tab", "L")
+	h.unsealWith(passphrase)
+
+	h.assertShows("no Zones listed, cache kept", "Check that its API token may list Zones", "work.example", "work.test")
+
+	if names := zoneNames(t, s); !slices.Equal(names, []string{"work.example", "work.test"}) {
+		t.Fatalf("cached Zones after re-listing no Zones = %v", names)
+	}
+
+	if records, err := s.Records(context.Background(), workExample.ID); err != nil || len(records) != 1 {
+		t.Fatalf("Records after re-listing no Zones = %+v, %v", records, err)
+	}
+}
+
 func TestRelistingNeedsTheAccountsPane(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
 	f := workZones()

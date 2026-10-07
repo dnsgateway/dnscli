@@ -54,7 +54,7 @@ func (m *Model) zonesRelisted(msg zonesDiscoveredMsg) tea.Cmd {
 
 	switch added, gone := len(msg.sync.Added), len(msg.sync.Dropped); {
 	case msg.count == 0:
-		m.notice = notice{text: fmt.Sprintf("Re-listed %s: the Provider listed no Zones, %d dropped. Check that its API token may list Zones.", label, gone)}
+		m.notice = notice{text: "Re-listed " + label + ": no Zones listed, cache kept. Check that its API token may list Zones."}
 	case added == 0 && gone == 0:
 		m.notice = notice{text: "Re-listed " + label + ": no changes, " + zoneCount(msg.count) + "."}
 	default:
