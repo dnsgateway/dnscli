@@ -5,9 +5,12 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/sergelogvinov/dnscli/internal/store"
 	"github.com/sergelogvinov/dnscli/internal/tui"
 )
 
@@ -46,6 +49,57 @@ func (h *harness) domainRow(zone string) string {
 	h.t.Fatalf("no Domains row for %q:\n%s", zone, h.view())
 
 	return ""
+}
+
+// newHarnessHoldingStartup starts the model like newHarnessWith, but holds
+// back the background work the loaded cache starts, so a test can see the
+// view while it is in flight. Pass the result to run to finish the work.
+func newHarnessHoldingStartup(t *testing.T, s *store.Store, deps tui.Deps) (*harness, tea.Cmd) {
+	t.Helper()
+
+	deps.Store = s
+	deps.Clock = func() time.Time { return testNow }
+
+	h := &harness{t: t, store: s}
+	h.model = tui.New(context.Background(), deps)
+	h.send(tea.WindowSizeMsg{Width: 120, Height: 30})
+
+	m, cmd := h.model.Update(h.model.Init()())
+	h.model = m
+
+	return h, cmd
+}
+
+func TestStartupRendersTheCacheWhileSerialChecksRunBoundedInTheBackground(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	h, checks := newHarnessHoldingStartup(t, s, tui.Deps{
+		Resolver:     &fakeResolver{serials: map[string]uint32{"example.com": 2026100701, "two.tv": 1, "example.org": 1}},
+		SerialChecks: 2,
+	})
+
+	h.assertShows("cloudflare.personal", "example.com", "two.tv", "example.org")
+
+	// Zones are listed example.com, example.org, two.tv: the first two are
+	// being checked, and the third waits for a free slot.
+	for zone, want := range map[string]string{"example.com": "…", "example.org": "…", "two.tv": ""} {
+		row := strings.TrimSpace(h.domainRow(zone))
+		if got := strings.TrimSpace(row[strings.Index(row, zone)+len(zone):]); got != want {
+			t.Fatalf("%s marker = %q, want %q (row %q)", zone, got, want, row)
+		}
+	}
+
+	h.press("enter")
+	h.assertShows("checking the serial…", "192.0.2.10")
+
+	h.run(checks)
+
+	for zone, want := range map[string]string{"example.com": "≈", "example.org": "!", "two.tv": "!"} {
+		if row := h.domainRow(zone); !strings.HasSuffix(strings.TrimSpace(row), want) {
+			t.Fatalf("%s row = %q, want marker %q", zone, row, want)
+		}
+	}
 }
 
 func TestAMatchingSerialMarksTheZoneHintCurrentButNotValidated(t *testing.T) {
