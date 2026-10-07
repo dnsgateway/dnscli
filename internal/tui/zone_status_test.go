@@ -109,3 +109,17 @@ func TestTheStatusBarSaysWhichMailRecordsTheCachedZoneHas(t *testing.T) {
 	h.assertStatusBarShows("mail: SPF DMARC DKIM ·")
 	h.assertHides("MX")
 }
+
+func TestAZoneWhoseDNSSECIsPendingSaysSo(t *testing.T) {
+	f := refreshZones()
+	f.SetZoneStatus("zw1", dns.ZoneStatus{DNSSEC: dns.Pending, HSTS: dns.On})
+	h, s, _ := newRefreshHarness(t, f)
+	h.press("enter")
+
+	h.assertStatusBarShows("DNSSEC pending", "HSTS on")
+
+	// From the cache, too.
+	h = newHarness(t, s)
+	h.press("enter")
+	h.assertStatusBarShows("DNSSEC pending")
+}

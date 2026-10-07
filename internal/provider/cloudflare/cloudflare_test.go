@@ -320,9 +320,10 @@ func TestZoneStatusReadsDNSSECAndHSTSFromTheZoneSettings(t *testing.T) {
 	}{
 		{"active", true, dns.ZoneStatus{DNSSEC: dns.On, HSTS: dns.On}},
 		{"disabled", false, dns.ZoneStatus{DNSSEC: dns.Off, HSTS: dns.Off}},
-		// Neither signed nor unsigned yet.
-		{"pending", false, dns.ZoneStatus{DNSSEC: dns.Unknown, HSTS: dns.Off}},
-		{"pending-disabled", true, dns.ZoneStatus{DNSSEC: dns.Unknown, HSTS: dns.On}},
+		// Being signed or unsigned: neither yet.
+		{"pending", false, dns.ZoneStatus{DNSSEC: dns.Pending, HSTS: dns.Off}},
+		{"pending-disabled", true, dns.ZoneStatus{DNSSEC: dns.Pending, HSTS: dns.On}},
+		// Cloudflare could not sign the zone: unknown, not pending.
 		{"error", true, dns.ZoneStatus{DNSSEC: dns.Unknown, HSTS: dns.On}},
 	}
 

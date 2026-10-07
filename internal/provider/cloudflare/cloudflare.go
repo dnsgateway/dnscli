@@ -355,12 +355,15 @@ func (p *Provider) dnssecStatus(ctx context.Context, zone dns.Zone) (dns.Setting
 		return settingError(err, raw)
 	}
 
-	// Pending, pending-disabled and error are neither signed nor unsigned.
+	// Pending and pending-disabled are being signed or unsigned; error is
+	// neither signed nor unsigned.
 	switch res.Status {
 	case cfdns.DNSSECStatusActive:
 		return dns.On, nil
 	case cfdns.DNSSECStatusDisabled:
 		return dns.Off, nil
+	case cfdns.DNSSECStatusPending, cfdns.DNSSECStatusPendingDisabled:
+		return dns.Pending, nil
 	}
 
 	return dns.Unknown, nil

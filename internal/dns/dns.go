@@ -84,24 +84,30 @@ type ZoneStatus struct {
 	HSTS   Setting
 }
 
-// Setting is a Zone setting that is on, off, or unknown, such as when the
-// API token may not read it.
+// Setting is a Zone setting that is on, off, pending a change between
+// the two, or unknown, such as when the API token may not read it.
 type Setting int8
 
-// Settings. The zero value is Unknown.
+// Settings. The zero value is Unknown. The values are stored in the cache:
+// append new ones, never renumber.
 const (
 	Unknown Setting = iota
 	Off
 	On
+	// Pending is a setting the Provider is still turning on or off, such
+	// as DNSSEC waiting for its DS record at the registrar.
+	Pending
 )
 
-// String is "on", "off" or "?".
+// String is "on", "off", "pending" or "?".
 func (s Setting) String() string {
 	switch s {
 	case On:
 		return "on"
 	case Off:
 		return "off"
+	case Pending:
+		return "pending"
 	}
 
 	return "?"
