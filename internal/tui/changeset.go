@@ -250,7 +250,10 @@ func (m *Model) stageDelete(z dns.Zone, row recordRow) {
 	case dns.ChangeAdd, dns.ChangeDelete:
 		cs.Changes = slices.Delete(cs.Changes, row.change, row.change+1)
 	case dns.ChangeModify:
-		cs.Changes[row.change] = dns.Change{Kind: dns.ChangeDelete, Before: row.base}
+		// Like the modification, the deletion is of the Record as the
+		// change was built from it, whatever the cache holds now.
+		c := &cs.Changes[row.change]
+		c.Kind, c.After = dns.ChangeDelete, dns.Record{}
 	default:
 		cs.Changes = append(cs.Changes, dns.Change{Kind: dns.ChangeDelete, Before: row.base})
 	}

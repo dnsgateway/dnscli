@@ -158,6 +158,28 @@ func TestAPartialApplyTheCacheCannotTakeSaysBoth(t *testing.T) {
 		"record is locked", "could not be cached", "Refresh (r) needed")
 }
 
+func TestDeletingAModifiedRecordDeletesItAsTheChangeWasBuiltFrom(t *testing.T) {
+	f := refreshZones()
+	h := openValidated(t, f)
+
+	h.press("e", "tab", "tab")
+	h.clearText(len("20"))
+	h.typeText("99")
+	h.press("enter", "enter")
+	h.assertShows("~ work.example")
+
+	// The Record changes outside dnscli, and a Refresh caches it.
+	changed := liveRecords[0]
+	changed.Value = "203.0.113.21"
+	f.SetRecords("zw1", changed, liveRecords[1])
+	h.press("r")
+	h.assertShows("validated this session", "~ work.example", "203.0.113.99")
+
+	h.press("d", "p")
+
+	h.assertShows("- @ A 203.0.113.20 TTL 300")
+}
+
 func TestARecordWithoutAProviderIDCannotBeChanged(t *testing.T) {
 	f := fake.New().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial},
 		dns.Record{Type: "TXT", Name: "work.example", Value: "first", TTL: 300},

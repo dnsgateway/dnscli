@@ -76,6 +76,15 @@ func (p *Provider) AddZone(z dns.Zone, records ...dns.Record) *Provider {
 	return p
 }
 
+// SetRecords replaces a scripted Zone's Records, as if they were changed
+// outside dnscli.
+func (p *Provider) SetRecords(zoneProviderID string, records ...dns.Record) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.records[zoneProviderID] = slices.Clone(records)
+}
+
 // SetZoneStatus scripts a Zone's Zone Status.
 func (p *Provider) SetZoneStatus(zoneProviderID string, s dns.ZoneStatus) {
 	p.mu.Lock()
