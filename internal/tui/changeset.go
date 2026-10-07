@@ -211,15 +211,37 @@ func (m *Model) recordAction(a Action) tea.Cmd {
 
 // stageAdd adds a Record to a Zone's pending Changeset.
 func (m *Model) stageAdd(z dns.Zone, r dns.Record) {
-	cs := m.changesetFor(z)
-	cs.Changes = append(cs.Changes, dns.Change{Kind: dns.ChangeAdd, After: r})
+	m.addChange(z, r)
 	m.rebuildRecordRows()
 }
 
-// stageEdit changes the Record a row shows to r. Editing an addition
+// stageEdit changes the Record a row shows to r, as editChange does.
+func (m *Model) stageEdit(z dns.Zone, row recordRow, r dns.Record) {
+	m.editChange(z, row, r)
+	m.rebuildRecordRows()
+}
+
+// stageDelete marks a row's Record for deletion, as deleteChange does.
+func (m *Model) stageDelete(z dns.Zone, row recordRow) {
+	m.deleteChange(z, row)
+	m.rebuildRecordRows()
+}
+
+// addChange, editChange and deleteChange stage a change without
+// rebuilding the rows, so that a batch, such as a Template's, rebuilds
+// them once. A row stays valid across the batch as long as the batch only
+// changes rows without a pending change.
+
+// addChange adds a Record to a Zone's pending Changeset.
+func (m *Model) addChange(z dns.Zone, r dns.Record) {
+	cs := m.changesetFor(z)
+	cs.Changes = append(cs.Changes, dns.Change{Kind: dns.ChangeAdd, After: r})
+}
+
+// editChange changes the Record a row shows to r. Editing an addition
 // changes what it adds. Editing a cached Record modifies it, from the
 // Record as cached, and editing it back to that drops the change.
-func (m *Model) stageEdit(z dns.Zone, row recordRow, r dns.Record) {
+func (m *Model) editChange(z dns.Zone, row recordRow, r dns.Record) {
 	cs := m.changesetFor(z)
 
 	switch {
@@ -236,14 +258,12 @@ func (m *Model) stageEdit(z dns.Zone, row recordRow, r dns.Record) {
 	if c := cs.Changes[row.change]; c.Kind == dns.ChangeModify && sameRecord(c.Before, c.After) {
 		cs.Changes = slices.Delete(cs.Changes, row.change, row.change+1)
 	}
-
-	m.rebuildRecordRows()
 }
 
-// stageDelete marks a row's Record for deletion. On a row that has a
+// deleteChange marks a row's Record for deletion. On a row that has a
 // pending change it takes the change back instead: an addition is
 // dropped, a deletion undone, and a modification becomes a deletion.
-func (m *Model) stageDelete(z dns.Zone, row recordRow) {
+func (m *Model) deleteChange(z dns.Zone, row recordRow) {
 	cs := m.changesetFor(z)
 
 	switch row.kind {
@@ -257,8 +277,6 @@ func (m *Model) stageDelete(z dns.Zone, row recordRow) {
 	default:
 		cs.Changes = append(cs.Changes, dns.Change{Kind: dns.ChangeDelete, Before: row.base})
 	}
-
-	m.rebuildRecordRows()
 }
 
 // sameRecord reports whether two Records are the same Record with the same

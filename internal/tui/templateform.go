@@ -235,16 +235,20 @@ func (m *Model) submitTemplateForm() tea.Cmd {
 		return nil
 	}
 
+	// None of the rows has a pending change: stage the whole batch, then
+	// rebuild the rows once.
 	for i, c := range changes {
 		switch c.Kind {
 		case dns.ChangeAdd:
-			m.stageAdd(z, c.After)
+			m.addChange(z, c.After)
 		case dns.ChangeModify:
-			m.stageEdit(z, of[i], unproxied(c.After))
+			m.editChange(z, of[i], unproxied(c.After))
 		case dns.ChangeDelete:
-			m.stageDelete(z, of[i])
+			m.deleteChange(z, of[i])
 		}
 	}
+
+	m.rebuildRecordRows()
 
 	// The status bar now counts the pending changes.
 	m.templateForm = nil
