@@ -281,6 +281,32 @@ func TestAnAccountAddedElsewhereMeanwhileIsReportedAsExisting(t *testing.T) {
 	}
 }
 
+func TestDiscoveryForAnAccountWithoutAnAPITokenSaysSo(t *testing.T) {
+	s, path := enrollFirstAccount(t)
+	f := fake.New()
+	h := newAccountHarness(t, s, f)
+
+	h.fillAddAccount("home", "home-token")
+	h.typeText(passphrase)
+
+	// Step through Unseal and saving by hand, then lose the stored API
+	// token before Zone discovery reads it.
+	unseal := h.pressHolding("enter")
+	m, save := h.model.Update(unseal())
+	h.model = m
+	saved := save()
+
+	execSQL(t, path, `UPDATE accounts SET secret = NULL`)
+	h.send(saved)
+
+	h.assertShows("Zone discovery for cloudflare.home failed: this Account has no API token")
+	h.assertHides("decrypt", "malformed")
+
+	if calls := f.Calls(); len(calls) != 0 {
+		t.Fatalf("the Provider was called without a token: %+v", calls)
+	}
+}
+
 func TestMismatchedPassphrasesAreNotEnrolled(t *testing.T) {
 	s, _ := openStore(t)
 	h := newAccountHarness(t, s, workZones())

@@ -219,6 +219,10 @@ func discover(ctx context.Context, s *store.Store, key *vault.Key, newProvider p
 		return 0, err
 	}
 
+	if sealed == nil {
+		return 0, errors.New("this Account has no API token")
+	}
+
 	token, err := key.Open(sealed, secretLabel(a))
 	if err != nil {
 		return 0, err
