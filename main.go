@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -123,14 +124,7 @@ func defaultUnsealMethod(goos string) string {
 }
 
 func methodNames() []string {
-	names := make([]string, 0, len(unsealMethods))
-	for n := range unsealMethods {
-		names = append(names, n)
-	}
-
-	slices.Sort(names)
-
-	return names
+	return slices.Sorted(maps.Keys(unsealMethods))
 }
 
 func run(opts options) error {

@@ -6,6 +6,7 @@ package provider
 
 import (
 	"context"
+	"maps"
 	"slices"
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
@@ -58,12 +59,5 @@ type Registry map[string]Constructor
 
 // Types returns the registered Provider types, sorted.
 func (r Registry) Types() []string {
-	types := make([]string, 0, len(r))
-	for t := range r {
-		types = append(types, t)
-	}
-
-	slices.Sort(types)
-
-	return types
+	return slices.Sorted(maps.Keys(r))
 }
