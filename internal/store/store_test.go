@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
 	"github.com/sergelogvinov/dnscli/internal/store"
@@ -84,6 +85,47 @@ func TestConcurrentOpensOfAFreshDatabaseAllSucceed(t *testing.T) {
 				t.Fatalf("concurrent open: %v", err)
 			}
 		}
+	}
+}
+
+func TestPutZoneWithoutRefreshMetadataKeepsTheCachedSerialAndRefreshTime(t *testing.T) {
+	ctx := context.Background()
+	s := open(t, filepath.Join(t.TempDir(), "dnscli.db"))
+
+	a, err := s.AddAccount(ctx, dns.Account{Provider: "cloudflare", Name: "work"})
+	if err != nil {
+		t.Fatalf("add account: %v", err)
+	}
+
+	refreshed := time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC)
+
+	first, err := s.PutZone(ctx, dns.Zone{AccountID: a.ID, Name: "example.com", ProviderID: "z1", Serial: 2026100701, RefreshedAt: refreshed})
+	if err != nil {
+		t.Fatalf("put zone: %v", err)
+	}
+
+	// Relisting the Account's Zones knows the zone ID but not the Serial.
+	second, err := s.PutZone(ctx, dns.Zone{AccountID: a.ID, Name: "example.com", ProviderID: "z1-new"})
+	if err != nil {
+		t.Fatalf("put zone again: %v", err)
+	}
+
+	if second.ID != first.ID {
+		t.Fatalf("second PutZone created a new Zone: %d != %d", second.ID, first.ID)
+	}
+
+	zones, err := s.Zones(ctx)
+	if err != nil {
+		t.Fatalf("zones: %v", err)
+	}
+
+	if len(zones) != 1 {
+		t.Fatalf("got %d zones, want 1", len(zones))
+	}
+
+	z := zones[0]
+	if z.ProviderID != "z1-new" || z.Serial != 2026100701 || !z.RefreshedAt.Equal(refreshed) {
+		t.Fatalf("zone after relist = %+v, want provider ID z1-new, serial 2026100701, refreshed %v", z, refreshed)
 	}
 }
 
