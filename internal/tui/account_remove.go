@@ -149,7 +149,7 @@ func (m *Model) forgetZones(ids []int64) {
 			m.records = nil
 			m.recordsErr = nil
 			m.recordsLoading = false
-			m.refilter(paneRecords)
+			m.rebuildRecordRows()
 		}
 	}
 }

@@ -89,7 +89,7 @@ func (m *Model) previewKey(msg tea.KeyMsg) tea.Cmd {
 		n := len(m.changesets[p.zoneID].Changes)
 		delete(m.changesets, p.zoneID)
 		m.preview = nil
-		m.refilter(paneRecords)
+		m.rebuildRecordRows()
 		m.notice = notice{text: fmt.Sprintf("Discarded %s for %s.", plural(n, "pending change"), m.zoneByID[p.zoneID].Name)}
 	case ActionSelect:
 		return m.applyChanges()
@@ -260,6 +260,7 @@ func (m *Model) changesApplied(msg changesAppliedMsg) tea.Cmd {
 	}
 
 	m.dropApplied(msg)
+	m.rebuildRecordRows()
 
 	failed := 0
 
@@ -344,7 +345,6 @@ func (m *Model) dropApplied(msg changesAppliedMsg) {
 	}
 
 	cs.Changes = kept
-	m.refilter(paneRecords)
 }
 
 // plural says how many of a noun, such as "1 change" or "3 pending changes".

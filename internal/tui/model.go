@@ -289,11 +289,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.recordsLoading = false
 		m.recordsErr = msg.err
 		m.records = msg.records
-		m.refilter(paneRecords)
+		m.rebuildRecordRows()
 
 		if !msg.opened {
-			m.cursor[paneRecords] = min(m.cursor[paneRecords], max(len(m.visibleRecords)-1, 0))
-
 			return m, nil
 		}
 
@@ -482,11 +480,17 @@ func (m *Model) refilter(p pane) {
 	case paneDomains:
 		m.visible = filterZones(m.zones, zoneFilter{account: m.accountFilter, query: m.search[paneDomains].query})
 	case paneRecords:
-		m.rows = m.recordRows()
 		m.visibleRecords = filterRecords(m.rows, m.search[paneRecords].query)
 		// Taking back a pending addition removes its row.
 		m.cursor[paneRecords] = min(m.cursor[paneRecords], max(len(m.visibleRecords)-1, 0))
 	}
+}
+
+// rebuildRecordRows lays the open Zone's pending Changeset over its
+// Records again, after either changed, and refilters the Records pane.
+func (m *Model) rebuildRecordRows() {
+	m.rows = m.recordRows()
+	m.refilter(paneRecords)
 }
 
 // openZone shows the highlighted Zone's Records.
@@ -499,7 +503,7 @@ func (m *Model) openZone() tea.Cmd {
 	m.open = &z
 	m.records = nil
 	m.search[paneRecords] = search{}
-	m.refilter(paneRecords)
+	m.rebuildRecordRows()
 	m.recordsLoading = true
 	m.recordsErr = nil
 

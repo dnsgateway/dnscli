@@ -213,7 +213,7 @@ func (m *Model) recordAction(a Action) tea.Cmd {
 func (m *Model) stageAdd(z dns.Zone, r dns.Record) {
 	cs := m.changesetFor(z)
 	cs.Changes = append(cs.Changes, dns.Change{Kind: dns.ChangeAdd, After: r})
-	m.refilter(paneRecords)
+	m.rebuildRecordRows()
 }
 
 // stageEdit changes the Record a row shows to r. Editing an addition
@@ -237,7 +237,7 @@ func (m *Model) stageEdit(z dns.Zone, row recordRow, r dns.Record) {
 		cs.Changes = slices.Delete(cs.Changes, row.change, row.change+1)
 	}
 
-	m.refilter(paneRecords)
+	m.rebuildRecordRows()
 }
 
 // stageDelete marks a row's Record for deletion. On a row that has a
@@ -258,7 +258,7 @@ func (m *Model) stageDelete(z dns.Zone, row recordRow) {
 		cs.Changes = append(cs.Changes, dns.Change{Kind: dns.ChangeDelete, Before: row.base})
 	}
 
-	m.refilter(paneRecords)
+	m.rebuildRecordRows()
 }
 
 // sameRecord reports whether two Records are the same Record with the same
