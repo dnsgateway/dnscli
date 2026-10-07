@@ -286,9 +286,7 @@ func changeMark(k dns.ChangeKind) string {
 
 // describeChange is one line of the Changeset preview.
 func describeChange(zone string, c dns.Change) string {
-	rec := func(r dns.Record) string {
-		return strings.Join([]string{dns.RelativeName(zone, r.Name), r.Type, r.Value, "TTL " + strconv.FormatUint(uint64(r.TTL), 10)}, " ")
-	}
+	rec := func(r dns.Record) string { return describeRecord(zone, r) }
 
 	switch c.Kind {
 	case dns.ChangeAdd:
@@ -298,4 +296,10 @@ func describeChange(zone string, c dns.Change) string {
 	}
 
 	return "~ " + rec(c.Before) + " → " + rec(c.After)
+}
+
+// describeRecord is a Record as the Changeset preview shows it, named
+// relative to its Zone.
+func describeRecord(zone string, r dns.Record) string {
+	return strings.Join([]string{dns.RelativeName(zone, r.Name), r.Type, r.Value, "TTL " + strconv.FormatUint(uint64(r.TTL), 10)}, " ")
 }

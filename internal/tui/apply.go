@@ -23,6 +23,9 @@ type changesetPreview struct {
 	zoneID int64
 	err    string
 	busy   bool // the Changeset is being applied
+	// conflicts describe the Records that changed at the Provider since
+	// the Changeset was built, which stopped the last Apply.
+	conflicts []string
 }
 
 // changesApplied reports the result of applying a Changeset.
@@ -45,6 +48,52 @@ type changesAppliedMsg struct {
 	// uncached counts the confirmed changes left out of the cache because
 	// the Provider returned no ID for their Record.
 	uncached int
+	// conflicts are the Records the Changeset was built from that changed
+	// at the Provider since: nothing was sent.
+	conflicts []conflict
+}
+
+// conflict is a Record a Changeset was built from that changed at the
+// Provider since.
+type conflict struct {
+	// before is the Record as the Changeset was built from it.
+	before dns.Record
+	// now is the Record as the Provider has it; empty when it is gone.
+	now dns.Record
+}
+
+// conflicts returns the Records the changes were built from that the
+// Provider no longer has as they were. An addition is built from no
+// Record, so it never conflicts.
+func conflicts(changes []dns.Change, live []dns.Record) []conflict {
+	byID := map[string]dns.Record{}
+	for _, r := range live {
+		byID[r.ProviderID] = r
+	}
+
+	var out []conflict
+
+	for _, c := range changes {
+		if c.Kind == dns.ChangeAdd {
+			continue
+		}
+
+		now, ok := byID[c.Before.ProviderID]
+		if !ok || !sameRecord(c.Before, now) {
+			out = append(out, conflict{before: c.Before, now: now})
+		}
+	}
+
+	return out
+}
+
+// describe explains a conflict, naming Records relative to zone.
+func (c conflict) describe(zone string) string {
+	if c.now.Type == "" {
+		return describeRecord(zone, c.before) + " no longer exists"
+	}
+
+	return describeRecord(zone, c.before) + " is now " + describeRecord(zone, c.now)
 }
 
 // maxPreviewLines bounds how many changes the preview lists.
@@ -102,7 +151,7 @@ func (m *Model) previewKey(msg tea.KeyMsg) tea.Cmd {
 // write gate.
 func (m *Model) applyChanges() tea.Cmd {
 	p := m.preview
-	p.err = ""
+	p.err, p.conflicts = "", nil
 
 	z, cmd, ok := m.writeGate()
 	if !ok || z.ID != p.zoneID {
@@ -136,8 +185,10 @@ func (m *Model) applyChanges() tea.Cmd {
 	}
 }
 
-// apply sends a Changeset to the Provider and saves the changes it
-// confirmed to the cache, from the Records it returned.
+// apply re-checks the Records a Changeset was built from against the
+// Provider and, when none changed, sends the Changeset and saves the
+// changes the Provider confirmed to the cache, from the Records it
+// returned.
 func apply(ctx context.Context, s *store.Store, key *vault.Key, newProvider provider.Constructor, a dns.Account, cs dns.Changeset) changesAppliedMsg {
 	msg := changesAppliedMsg{zoneID: cs.Zone.ID, sent: cs}
 
@@ -145,6 +196,17 @@ func apply(ctx context.Context, s *store.Store, key *vault.Key, newProvider prov
 	if err != nil {
 		msg.err = err
 
+		return msg
+	}
+
+	live, err := p.Records(ctx, cs.Zone)
+	if err != nil {
+		msg.err = fmt.Errorf("re-check the Records: %w", err)
+
+		return msg
+	}
+
+	if msg.conflicts = conflicts(cs.Changes, live.Records); msg.conflicts != nil {
 		return msg
 	}
 
@@ -230,6 +292,10 @@ func (m *Model) changesApplied(msg changesAppliedMsg) tea.Cmd {
 		p.busy = false
 	}
 
+	if msg.conflicts != nil {
+		return m.applyConflicted(z, msg.conflicts)
+	}
+
 	if msg.failed == nil {
 		text := "Could not apply the changes to " + z.Name + ": " + msg.err.Error()
 		m.notice = notice{text: text, err: true}
@@ -303,6 +369,31 @@ func (m *Model) changesApplied(msg changesAppliedMsg) tea.Cmd {
 	}
 
 	return nil
+}
+
+// applyConflicted reports an Apply that was not sent because Records it
+// was built from changed at the Provider, and Refreshes the Zone. The
+// changes stay pending for the user to review.
+func (m *Model) applyConflicted(z dns.Zone, cs []conflict) tea.Cmd {
+	described := make([]string, len(cs))
+	for i, c := range cs {
+		described[i] = c.describe(z.Name)
+	}
+
+	verb := "have"
+	if len(cs) == 1 {
+		verb = "has"
+	}
+
+	text := fmt.Sprintf("Nothing was applied to %s: %s %s changed at the Provider since the last Refresh. Refreshing it; review the pending changes.",
+		z.Name, plural(len(cs), "Record"), verb)
+	m.notice = notice{text: text + " " + strings.Join(described, "; ") + ".", err: true}
+
+	if p := m.preview; p != nil && p.zoneID == z.ID {
+		p.err, p.conflicts = text, described
+	}
+
+	return m.refreshZone(z)
 }
 
 // applyToRecords returns Records with the applied changes made to them as
@@ -379,6 +470,10 @@ func (m *Model) previewView() string {
 	if p.err != "" {
 		lines = append(lines, "")
 		lines = append(lines, wrapNote(errorStyle, p.err, noteWidth)...)
+	}
+
+	for _, c := range p.conflicts {
+		lines = append(lines, errorStyle.Render("  "+c))
 	}
 
 	if p.busy {
