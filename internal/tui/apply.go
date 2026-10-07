@@ -253,7 +253,7 @@ func (m *Model) changesApplied(msg changesAppliedMsg) tea.Cmd {
 			r.validated = true
 		case msg.saved:
 			*r = zoneRefresh{err: errors.New("the Provider did not return the IDs of the Records it stored")}
-		case !errors.Is(msg.err, store.ErrZoneNotCached):
+		default:
 			*r = zoneRefresh{err: fmt.Errorf("the applied changes could not be cached: %w", msg.err)}
 		}
 	}
@@ -281,11 +281,11 @@ func (m *Model) changesApplied(msg changesAppliedMsg) tea.Cmd {
 		m.notice = notice{text: fmt.Sprintf("Applied %d of %d changes to %s; %d failed and are still pending: %v",
 			applied, len(msg.sent.Changes), z.Name, failed, first), err: true}
 	case !msg.saved:
-		m.notice = notice{text: fmt.Sprintf("Applied %s to %s, but could not cache them: %v. Refresh the Zone (%s).",
-			changeCount(applied), z.Name, msg.err, m.keys.keysFor(ActionRefresh)), err: true}
+		m.notice = notice{text: fmt.Sprintf("Applied %s to %s. Refresh (%s) needed: they could not be cached: %v",
+			changeCount(applied), z.Name, m.keys.keysFor(ActionRefresh), msg.err), err: true}
 	case msg.uncached > 0:
-		m.notice = notice{text: fmt.Sprintf("Applied %s to %s, but the Provider did not return the IDs of %d to cache: Refresh (%s) needed.",
-			changeCount(applied), z.Name, msg.uncached, m.keys.keysFor(ActionRefresh)), err: true}
+		m.notice = notice{text: fmt.Sprintf("Applied %s to %s. Refresh (%s) needed: the Provider did not return the IDs of %d to cache.",
+			changeCount(applied), z.Name, m.keys.keysFor(ActionRefresh), msg.uncached), err: true}
 	default:
 		m.notice = notice{text: fmt.Sprintf("Applied %s to %s.", changeCount(applied), z.Name)}
 	}

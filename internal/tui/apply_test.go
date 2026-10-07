@@ -107,6 +107,38 @@ func TestTheRecordsPaneShowsTheAppliedChangesAsSoonAsTheApplyReturns(t *testing.
 	h.assertShows("Applied 3 changes to work.example.", "_verify.work.example", "203.0.113.99")
 }
 
+// applyDroppingTheZone applies the pending Changeset, but the Zone leaves
+// the cache while the Provider applies it, so the cache cannot take the
+// changes it confirms.
+func (h *harness) applyDroppingTheZone() {
+	h.t.Helper()
+
+	h.press("p")
+	cmd := h.pressHolding("enter")
+
+	other := cachedZone(h.t, h.store, "work.test")
+	if _, err := h.store.SyncAccountZones(context.Background(), other.AccountID, []dns.Zone{other}); err != nil {
+		h.t.Fatalf("sync zones: %v", err)
+	}
+
+	h.run(cmd)
+}
+
+func TestAnApplyTheCacheCannotTakeLeavesTheZoneNeedingARefresh(t *testing.T) {
+	f := refreshZones()
+	h := openValidated(t, f)
+	h.buildChangeset()
+
+	h.applyDroppingTheZone()
+
+	h.assertShows("Applied 3 changes to work.example. Refresh (r) needed: they could not be cached")
+	h.assertHides("pending change")
+
+	h.press("i")
+	h.assertShows("work.example is a Stale Zone")
+	h.assertHides("Add Record")
+}
+
 func TestARecordWithoutAProviderIDCannotBeChanged(t *testing.T) {
 	f := fake.New().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial},
 		dns.Record{Type: "TXT", Name: "work.example", Value: "first", TTL: 300},
