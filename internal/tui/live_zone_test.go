@@ -8,6 +8,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/sergelogvinov/dnscli/internal/dns"
+	"github.com/sergelogvinov/dnscli/internal/provider"
+	"github.com/sergelogvinov/dnscli/internal/provider/fake"
 	"github.com/sergelogvinov/dnscli/internal/store"
 	"github.com/sergelogvinov/dnscli/internal/tui"
 )
@@ -162,6 +165,72 @@ func TestTheDelegationViewSaysWhyTheLiveZoneIsUnknown(t *testing.T) {
 	// example.org's expected nameservers were never cached.
 	h.press("j", "N")
 	h.assertShows("Delegation of example.org", "not cached", "Live Zone unknown")
+}
+
+// addWorkAccount adds cloudflare.work, backed by f, in a session that asks r.
+func addWorkAccount(t *testing.T, f *fake.Provider, r tui.Resolver) (*harness, *store.Store) {
+	t.Helper()
+
+	s, _ := openStore(t)
+	h := newHarnessWith(t, s, tui.Deps{
+		Providers:    provider.Registry{"cloudflare": f.New},
+		UnsealMethod: fastPassphrase(),
+		Resolver:     r,
+	})
+	h.fillAddAccount("work", token)
+	h.typeText(passphrase)
+	h.press("tab")
+	h.typeText(passphrase)
+	h.press("enter")
+	h.assertShows("work.example", "work.test")
+
+	return h, s
+}
+
+var cruzDee = []string{"cruz.ns.cloudflare.com", "dee.ns.cloudflare.com"}
+
+func TestZoneDiscoveryCachesTheNameserversEachZoneExpects(t *testing.T) {
+	f := fake.New().
+		AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Nameservers: cruzDee}).
+		AddZone(dns.Zone{Name: "work.test", ProviderID: "zw2", Nameservers: []string{"ada.ns.cloudflare.com", "bob.ns.cloudflare.com"}})
+
+	h, s := addWorkAccount(t, f, &fakeResolver{ns: map[string][]string{"work.example": cruzDee, "work.test": cruzDee}})
+
+	h.assertLive("work.example", true)
+	h.assertLive("work.test", false)
+
+	// A later, sealed session marks the Live Zone from the cache alone.
+	later := newHarnessWith(t, s, tui.Deps{Resolver: &fakeResolver{ns: map[string][]string{"work.example": cruzDee}}})
+	later.assertShows("sealed")
+	later.assertLive("work.example", true)
+}
+
+func TestZonesListedWithoutNameserversExpectTheAccountsNameservers(t *testing.T) {
+	f := fake.New().
+		AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1"}).
+		AddZone(dns.Zone{Name: "work.test", ProviderID: "zw2", Nameservers: []string{"ada.ns.cloudflare.com", "bob.ns.cloudflare.com"}})
+	f.SetNameservers(cruzDee...)
+
+	h, _ := addWorkAccount(t, f, &fakeResolver{ns: map[string][]string{"work.example": cruzDee, "work.test": cruzDee}})
+
+	h.assertLive("work.example", true)
+	// A Zone's own nameservers outrank the Account's.
+	h.assertLive("work.test", false)
+}
+
+func TestAFailureToReadTheAccountsNameserversStillCachesItsZones(t *testing.T) {
+	f := fake.New().
+		AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1"}).
+		AddZone(dns.Zone{Name: "work.test", ProviderID: "zw2"})
+	f.Fail(fake.OpNameservers, errors.New("forbidden"))
+
+	h, _ := addWorkAccount(t, f, &fakeResolver{ns: map[string][]string{"work.example": cruzDee}})
+
+	h.assertShows("Discovered 2 Zones for cloudflare.work.")
+	h.assertLive("work.example", false)
+
+	h.press("N")
+	h.assertShows("not cached", "Live Zone unknown")
 }
 
 func TestAResolverFailureLeavesTheLiveZoneUnknownWithoutAnError(t *testing.T) {

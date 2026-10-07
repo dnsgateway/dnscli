@@ -73,8 +73,9 @@ func TestRelistingAddsNewZonesAndDropsGoneOnesKeepingTheCacheOfTheRest(t *testin
 		t.Fatalf("Records of another Account = %+v, %v", records, err)
 	}
 
+	// The listed Zones carry no nameservers, so the Account's are asked for.
 	calls := f.Calls()
-	if len(calls) != 2 || calls[0].Op != fake.OpNew || calls[0].Account.Label() != "cloudflare.work" || calls[0].Token != token || calls[1].Op != fake.OpZones {
+	if len(calls) != 3 || calls[0].Op != fake.OpNew || calls[0].Account.Label() != "cloudflare.work" || calls[0].Token != token || calls[1].Op != fake.OpZones || calls[2].Op != fake.OpNameservers {
 		t.Fatalf("provider calls = %+v", calls)
 	}
 }

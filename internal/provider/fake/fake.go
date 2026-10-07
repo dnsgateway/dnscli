@@ -68,7 +68,7 @@ func (p *Provider) AddZone(z dns.Zone, records ...dns.Record) *Provider {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	p.zones = append(p.zones, dns.Zone{Name: z.Name, ProviderID: z.ProviderID})
+	p.zones = append(p.zones, dns.Zone{Name: z.Name, ProviderID: z.ProviderID, Nameservers: slices.Clone(z.Nameservers)})
 	p.records[z.ProviderID] = slices.Clone(records)
 	p.serials[z.ProviderID] = z.Serial
 

@@ -228,12 +228,35 @@ func discover(ctx context.Context, s *store.Store, key *vault.Key, newProvider p
 		return 0, store.ZoneSync{}, err
 	}
 
+	expectAccountNameservers(ctx, p, zones)
+
 	sync, err := s.SyncAccountZones(ctx, a.ID, zones)
 	if err != nil {
 		return 0, store.ZoneSync{}, err
 	}
 
 	return len(zones), sync, nil
+}
+
+// expectAccountNameservers gives each Zone the Provider listed without
+// nameservers the ones its Account expects, asking the Provider only when
+// such a Zone exists. Not knowing them leaves the Live Zone unknown, so a
+// failure here does not fail the discovery.
+func expectAccountNameservers(ctx context.Context, p provider.Provider, zones []dns.Zone) {
+	if !slices.ContainsFunc(zones, func(z dns.Zone) bool { return len(z.Nameservers) == 0 }) {
+		return
+	}
+
+	ns, err := p.Nameservers(ctx)
+	if err != nil {
+		return
+	}
+
+	for i := range zones {
+		if len(zones[i].Nameservers) == 0 {
+			zones[i].Nameservers = ns
+		}
+	}
 }
 
 // zonesDiscovered reports a discovery or re-listing. The result for an
