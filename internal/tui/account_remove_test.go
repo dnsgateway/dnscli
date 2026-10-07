@@ -6,8 +6,10 @@ import (
 	"testing"
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
+	"github.com/sergelogvinov/dnscli/internal/provider"
 	"github.com/sergelogvinov/dnscli/internal/provider/fake"
 	"github.com/sergelogvinov/dnscli/internal/store"
+	"github.com/sergelogvinov/dnscli/internal/tui"
 )
 
 // zoneNamed returns the cached Zone with the given name, failing the test
@@ -219,4 +221,65 @@ func TestRemovingAnAccountNeedsTheAccountsPane(t *testing.T) {
 
 	h.assertShows("Highlight an Account in the Accounts pane first.")
 	h.assertHides("Remove Account", "Passphrase")
+}
+
+func TestRemovingTheAccountOfTheOpenZoneClosesIt(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+
+	workExample := zoneNamed(t, s, "work.example")
+	if err := s.ReplaceRecords(context.Background(), workExample.ID, []dns.Record{
+		{ProviderID: "rw1", Type: "TXT", Name: "work.example", Value: "v=work", TTL: 300},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	withPersonalAccount(t, s)
+
+	h := newAccountHarness(t, s, fake.New())
+
+	// Unseal first, then open work.example: Zones are listed by name.
+	h.press("tab", "X")
+	h.unsealWith(passphrase)
+	h.press("esc", "shift+tab", "j", "enter")
+	h.assertShows("v=work")
+
+	h.press("tab", "j", "X")
+	h.typeText("cloudflare.work")
+	h.press("enter")
+
+	h.assertShows("Removed cloudflare.work.")
+	h.assertHides("v=work", "work.example")
+}
+
+func TestAZoneThatReusesARemovedZonesIDGetsItsOwnSerialCheck(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+
+	// work.example is possibly stale; the resolver has no answer for home.example.
+	h := newHarnessWith(t, s, tui.Deps{
+		Providers:    provider.Registry{"cloudflare": fake.New().AddZone(dns.Zone{Name: "home.example", ProviderID: "zh1"}).New},
+		UnsealMethod: fastPassphrase(),
+		Resolver:     &fakeResolver{serials: map[string]uint32{"work.example": 5, "work.test": 5}},
+	})
+
+	if row := h.domainRow("work.example"); !strings.Contains(row, "!") {
+		t.Fatalf("work.example row = %q, want the possibly-stale marker", row)
+	}
+
+	h.press("tab", "X")
+	h.unsealWith(passphrase)
+	h.typeText("cloudflare.work")
+	h.press("enter")
+	h.assertShows("Removed cloudflare.work.")
+
+	// The emptied table hands home.example the ID work.example had.
+	h.fillAddAccount("home", "home-token")
+	h.assertShows("cloudflare.home")
+
+	if z := zoneNamed(t, s, "home.example"); z.ID != 1 {
+		t.Fatalf("home.example has ID %d; the test needs it to reuse ID 1", z.ID)
+	}
+
+	if row := h.domainRow("home.example"); !strings.Contains(row, "?") {
+		t.Fatalf("home.example row = %q, want its own failed Serial Check", row)
+	}
 }
