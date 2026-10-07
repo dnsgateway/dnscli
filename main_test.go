@@ -2,9 +2,12 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/sergelogvinov/dnscli/internal/vault"
 )
 
 func TestTheUnsealMethodComesFromTheFlagThenTheEnvironment(t *testing.T) {
@@ -34,7 +37,7 @@ func TestTheUnsealMethodComesFromTheFlagThenTheEnvironment(t *testing.T) {
 		{name: "single-dash long flag is refused", args: []string{"-db", "x.db"}, goos: "linux", wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			opts, err := parseOptions(tc.args, env(tc.env), tc.goos, io.Discard)
+			opts, err := parseOptions(tc.args, env(tc.env), tc.goos, unsealMethods(nil), io.Discard)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("parseOptions succeeded, want an error")
@@ -54,8 +57,71 @@ func TestTheUnsealMethodComesFromTheFlagThenTheEnvironment(t *testing.T) {
 	}
 }
 
+// fakeKeychain stands in for the macOS Keychain; option parsing never uses it.
+type fakeKeychain struct{}
+
+func (fakeKeychain) Store([]byte) ([]byte, error) { return nil, errors.New("unused") }
+func (fakeKeychain) Load([]byte) ([]byte, error)  { return nil, errors.New("unused") }
+
+func TestTheKeychainIsTheDefaultUnsealMethodOnMacOS(t *testing.T) {
+	withKeychain := unsealMethods(fakeKeychain{})
+
+	for _, tc := range []struct {
+		name    string
+		args    []string
+		env     string
+		goos    string
+		methods map[string]vault.Method
+		want    string
+	}{
+		{name: "macOS", goos: "darwin", methods: withKeychain, want: "keychain"},
+		{name: "macOS, passphrase by flag", args: []string{"--unseal", "passphrase"}, goos: "darwin", methods: withKeychain, want: "passphrase"},
+		{name: "macOS, passphrase by environment", env: "passphrase", goos: "darwin", methods: withKeychain, want: "passphrase"},
+		{name: "macOS build without the Keychain", goos: "darwin", methods: unsealMethods(nil), want: "passphrase"},
+		{name: "Linux, even with a Keychain", goos: "linux", methods: withKeychain, want: "passphrase"},
+		{name: "keychain chosen explicitly", env: "keychain", goos: "linux", methods: withKeychain, want: "keychain"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			getenv := func(k string) string {
+				if k == unsealEnv {
+					return tc.env
+				}
+
+				return ""
+			}
+
+			opts, err := parseOptions(tc.args, getenv, tc.goos, tc.methods, io.Discard)
+			if err != nil {
+				t.Fatalf("parseOptions: %v", err)
+			}
+
+			if opts.unseal.Name() != tc.want {
+				t.Fatalf("Unseal Method = %s, want %s", opts.unseal.Name(), tc.want)
+			}
+
+			if _, has := tc.methods["keychain"]; has != (opts.keychain != nil) {
+				t.Fatalf("Keychain offered for enrolling = %v, want %v", opts.keychain != nil, has)
+			}
+		})
+	}
+}
+
+func TestWithoutAKeychainItCannotBeChosenOrEnrolled(t *testing.T) {
+	var stderr bytes.Buffer
+
+	opts, err := parseOptions([]string{"--unseal", "keychain"}, func(string) string { return "" }, "darwin", unsealMethods(nil), &stderr)
+	if err == nil || !strings.Contains(stderr.String(), "not available") {
+		t.Fatalf("parseOptions = %v; stderr:\n%s", err, stderr.String())
+	}
+
+	opts, err = parseOptions(nil, func(string) string { return "" }, "linux", unsealMethods(nil), io.Discard)
+	if err != nil || opts.keychain != nil {
+		t.Fatalf("parseOptions = %+v, %v; want no Keychain to enroll", opts, err)
+	}
+}
+
 func TestTheDatabasePathComesFromTheDBFlag(t *testing.T) {
-	opts, err := parseOptions([]string{"--db", "/tmp/x.db"}, func(string) string { return "" }, "linux", io.Discard)
+	opts, err := parseOptions([]string{"--db", "/tmp/x.db"}, func(string) string { return "" }, "linux", unsealMethods(nil), io.Discard)
 	if err != nil || opts.dbPath != "/tmp/x.db" {
 		t.Fatalf("parseOptions = %+v, %v", opts, err)
 	}
@@ -66,7 +132,7 @@ func TestAnInvalidCommandLinePrintsUsageAndExitsWithStatus2(t *testing.T) {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			var stderr bytes.Buffer
 
-			if code := runMain(args, func(string) string { return "" }, "linux", &stderr); code != 2 {
+			if code := runMain(args, func(string) string { return "" }, "linux", unsealMethods(nil), &stderr); code != 2 {
 				t.Fatalf("exit status = %d, want 2", code)
 			}
 
@@ -80,7 +146,7 @@ func TestAnInvalidCommandLinePrintsUsageAndExitsWithStatus2(t *testing.T) {
 func TestHelpPrintsUsageAndExitsWithStatus0(t *testing.T) {
 	var stderr bytes.Buffer
 
-	if code := runMain([]string{"--help"}, func(string) string { return "" }, "linux", &stderr); code != 0 {
+	if code := runMain([]string{"--help"}, func(string) string { return "" }, "linux", unsealMethods(nil), &stderr); code != 0 {
 		t.Fatalf("exit status = %d, want 0", code)
 	}
 
