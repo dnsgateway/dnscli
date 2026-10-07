@@ -18,6 +18,7 @@ const (
 	ActionUp
 	ActionDown
 	ActionSelect
+	ActionSearch
 	ActionHelp
 	ActionClose
 	ActionQuit
@@ -48,6 +49,7 @@ func DefaultShortcutProfile() ShortcutProfile {
 			{Action: ActionUp, Keys: []string{"up", "k"}, Help: "move up"},
 			{Action: ActionDown, Keys: []string{"down", "j"}, Help: "move down"},
 			{Action: ActionSelect, Keys: []string{"enter"}, Help: "open / select"},
+			{Action: ActionSearch, Keys: []string{"/"}, Help: "search"},
 			{Action: ActionHelp, Keys: []string{"?"}, Help: "toggle help"},
 			{Action: ActionClose, Keys: []string{"esc"}, Help: "close"},
 			{Action: ActionQuit, Keys: []string{"q", "ctrl+c"}, Help: "quit"},
