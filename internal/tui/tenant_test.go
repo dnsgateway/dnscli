@@ -35,10 +35,11 @@ func TestAnAccountWhoseTokenReachesOneTenantActsWithinIt(t *testing.T) {
 	tb := &tenantBuilds{}
 	discoverRefreshAndApply(t, f, tb)
 
-	// The first build lists the Tenants; every later one is scoped.
+	// The first build verifies the token as typed and the second lists
+	// the Tenants; every later one is scoped.
 	built := tb.built()
-	if len(built) < 4 || built[0] != "" || slices.ContainsFunc(built[1:], func(id string) bool { return id != acmeTenant }) {
-		t.Errorf("built with Tenants %q, want the first unscoped and every later one scoped to %s", built, acmeTenant)
+	if len(built) < 5 || built[0] != "" || built[1] != "" || slices.ContainsFunc(built[2:], func(id string) bool { return id != acmeTenant }) {
+		t.Errorf("built with Tenants %q, want the first two unscoped and every later one scoped to %s", built, acmeTenant)
 	}
 
 	if n := f.count(providertest.OpTenants); n != 1 {

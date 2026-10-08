@@ -1,10 +1,12 @@
 package tui_test
 
 import (
+	"maps"
 	"slices"
 	"sync"
 
 	"github.com/dnsgateway/dnsprovider"
+	"github.com/dnsgateway/dnsprovider/providers"
 	"github.com/dnsgateway/dnsprovider/providertest"
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
@@ -170,4 +172,46 @@ func (f *fakeProvider) count(op providertest.Op) int {
 	}
 
 	return n
+}
+
+// fieldBuilds keeps the field map of each Provider built through a
+// realFieldsRegistry.
+type fieldBuilds struct {
+	mu    sync.Mutex
+	built []map[string]string
+}
+
+// realFieldsRegistry registers the fake under each of the module's
+// Provider types, taking that Provider's Fields, so the Account forms show
+// them; fb keeps the field map of each build.
+func (f *fakeProvider) realFieldsRegistry(fb *fieldBuilds) dnsprovider.Registry {
+	inner := f.Factory()
+	out := dnsprovider.Registry{}
+
+	for typ, real := range providers.Registry() {
+		out[typ] = dnsprovider.Factory{
+			Fields: real.Fields,
+			New: func(m map[string]string, opts ...dnsprovider.Option) (dnsprovider.Provider, error) {
+				fb.mu.Lock()
+				fb.built = append(fb.built, maps.Clone(m))
+				fb.mu.Unlock()
+
+				return inner.New(map[string]string{"token": typ}, opts...)
+			},
+		}
+	}
+
+	return out
+}
+
+// last is the field map of the latest build; nil before any.
+func (fb *fieldBuilds) last() map[string]string {
+	fb.mu.Lock()
+	defer fb.mu.Unlock()
+
+	if len(fb.built) == 0 {
+		return nil
+	}
+
+	return maps.Clone(fb.built[len(fb.built)-1])
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -22,25 +23,30 @@ import (
 const notDisposableWarning = "dnscli keeps Accounts in its local database: it is not a disposable cache. " +
 	"Back it up, and keep an Unseal Method enrolled: losing every one makes the stored secrets unrecoverable."
 
-// Fields of the add-Account dialog; addFieldCount is also the Save button.
+// The first fields of the add-Account dialog; the Provider's credential
+// fields follow them, then the Save button.
 const (
 	addFieldProvider = iota
 	addFieldName
-	addFieldToken
-	addFieldCount
+	addFieldCreds // the first credential field
 )
 
 // addAccountForm is the add-Account dialog, which also edits an Account.
 type addAccountForm struct {
 	field    int
+	reg      dnsprovider.Registry
 	types    []string // the registered Provider types
 	provider int      // index into types
 	name     string
-	token    string
-	err      string
-	busy     bool // the Account is being saved
+	// creds are the chosen Provider's Fields the user types, in form
+	// order: every one but the Tenant, which dnscli finds itself.
+	creds []dnsprovider.Field
+	// values are what is typed into creds.
+	values []string
+	err    string
+	busy   bool // the Account is being saved
 	// editing is the Account being edited; nil when adding one. Its
-	// Provider is fixed, and an empty token keeps its API token.
+	// Provider is fixed, and an empty credential field keeps its value.
 	editing *dns.Account
 	// caret is the focused text field's caret, in runes back from its end.
 	caret int
@@ -67,8 +73,33 @@ func (m *Model) accountAction(a Action) tea.Cmd {
 
 // openAddAccount opens the add-Account dialog.
 func (m *Model) openAddAccount() {
-	m.addForm = &addAccountForm{types: m.deps.Providers.Types()}
+	m.addForm = &addAccountForm{reg: m.deps.Providers, types: m.deps.Providers.Types()}
+	m.addForm.chooseProvider(0)
 	m.addForm.size = m.measureAccountForm()
+}
+
+// chooseProvider makes types[i] the Account's Provider, with an empty
+// input for each of its credential fields.
+func (f *addAccountForm) chooseProvider(i int) {
+	f.provider = i
+	f.creds, f.values = nil, nil
+
+	if i >= len(f.types) {
+		return
+	}
+
+	for _, fd := range f.reg[f.types[i]].Fields {
+		if !fd.Tenant {
+			f.creds = append(f.creds, fd)
+		}
+	}
+
+	f.values = make([]string, len(f.creds))
+}
+
+// saveField is the index of the Save button, after the credential fields.
+func (f *addAccountForm) saveField() int {
+	return addFieldCreds + len(f.creds)
 }
 
 // editAccount opens the edit-Account dialog for the highlighted Account,
@@ -81,7 +112,8 @@ func (m *Model) editAccount() tea.Cmd {
 	}
 
 	return m.withSecrets(func() tea.Cmd {
-		m.addForm = &addAccountForm{field: addFieldName, types: []string{a.Provider}, name: a.Name, editing: &a}
+		m.addForm = &addAccountForm{field: addFieldName, reg: m.deps.Providers, types: []string{a.Provider}, name: a.Name, editing: &a}
+		m.addForm.chooseProvider(0)
 		m.addForm.size = m.measureAccountForm()
 
 		return nil
@@ -112,24 +144,26 @@ func (m *Model) addAccountKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 	}
 
-	switch f.field {
-	case addFieldName:
+	switch i := f.field - addFieldCreds; {
+	case f.field == addFieldName:
 		if m.keys.typeInto(&f.name, &f.caret, msg) {
 			return nil
 		}
-	case addFieldToken:
-		if m.keys.typeInto(&f.token, &f.caret, msg) {
+	case i >= 0 && i < len(f.values):
+		if m.keys.typeInto(&f.values[i], &f.caret, msg) {
 			return nil
 		}
 	}
+
+	count := f.saveField() + 1
 
 	switch a {
 	case ActionClose:
 		m.addForm = nil
 	case ActionNextPane, ActionDown:
-		f.field = (f.field + 1) % (addFieldCount + 1)
+		f.field = (f.field + 1) % count
 	case ActionPrevPane, ActionUp:
-		f.field = (f.field + addFieldCount) % (addFieldCount + 1)
+		f.field = (f.field + count - 1) % count
 	case ActionPaneLeft, ActionPaneRight:
 		if f.choosesProvider() {
 			step := 1
@@ -137,22 +171,33 @@ func (m *Model) addAccountKey(msg tea.KeyMsg) tea.Cmd {
 				step = len(f.types) - 1
 			}
 
-			f.provider = (f.provider + step) % len(f.types)
+			m.chooseAccountProvider((f.provider + step) % len(f.types))
 		}
 	case ActionSelect:
 		switch {
-		case f.field == addFieldCount && f.editing != nil:
+		case f.field == f.saveField() && f.editing != nil:
 			return m.submitEditAccount()
-		case f.field == addFieldCount:
+		case f.field == f.saveField():
 			return m.submitAddAccount()
 		case f.choosesProvider():
-			f.picker = &picker{title: "Provider", options: f.types, cursor: f.provider, pick: func(i int) { f.provider = i }}
+			f.picker = &picker{title: "Provider", options: f.types, cursor: f.provider, pick: m.chooseAccountProvider}
 		default:
 			f.field++
 		}
 	}
 
 	return nil
+}
+
+// chooseAccountProvider changes the Provider of the Account being added,
+// which changes the credential fields, and so the dialog's size.
+func (m *Model) chooseAccountProvider(i int) {
+	if i == m.addForm.provider {
+		return
+	}
+
+	m.addForm.chooseProvider(i)
+	m.addForm.size = m.measureAccountForm()
 }
 
 // choosesProvider reports whether the focused field is a Provider that
@@ -195,16 +240,32 @@ func (m *Model) submitAddAccount() tea.Cmd {
 		return nil
 	}
 
-	if f.token == "" {
-		f.err = "Enter the API token."
-		f.field = addFieldToken
+	for i, v := range f.values {
+		if v == "" {
+			f.err = "Enter the " + f.creds[i].Label + "."
+			f.field = addFieldCreds + i
 
-		return nil
+			return nil
+		}
 	}
 
-	token := f.token
+	fields := f.typed()
 
-	return m.withSecrets(func() tea.Cmd { return m.saveAccount(a, token) })
+	return m.withSecrets(func() tea.Cmd { return m.saveAccount(a, fields) })
+}
+
+// typed is the field map of the credential fields typed into the dialog;
+// empty ones are left out.
+func (f *addAccountForm) typed() map[string]string {
+	fields := map[string]string{}
+
+	for i, v := range f.values {
+		if v != "" {
+			fields[f.creds[i].Name] = v
+		}
+	}
+
+	return fields
 }
 
 // validName checks the Account name typed into the dialog: a's label must
@@ -227,7 +288,7 @@ func (f *addAccountForm) validName(accounts []dns.Account, a dns.Account) bool {
 }
 
 // submitEditAccount validates the edit-Account dialog and saves the
-// Account's new name or API token. Changing neither just closes it.
+// Account's new name or credentials. Changing neither just closes it.
 func (m *Model) submitEditAccount() tea.Cmd {
 	f := m.addForm
 	f.err = ""
@@ -240,60 +301,71 @@ func (m *Model) submitEditAccount() tea.Cmd {
 		return nil
 	}
 
-	if a.Name == old.Name && f.token == "" {
+	typed := f.typed()
+
+	if a.Name == old.Name && len(typed) == 0 {
 		m.addForm = nil
 
 		return nil
 	}
 
-	token := f.token
-
-	return m.withSecrets(func() tea.Cmd { return m.updateAccount(old, a, token) })
+	return m.withSecrets(func() tea.Cmd { return m.updateAccount(old, a, typed) })
 }
 
-// accountEditedMsg reports that an Account was renamed or given a new API
-// token.
+// accountEditedMsg reports that an Account was renamed or given new
+// credentials.
 type accountEditedMsg struct {
 	account dns.Account
 	err     error
 }
 
-// updateAccount stores the edited Account with its API token sealed for its
-// new label. An empty token keeps the current one, which is opened under
-// the old label and sealed again.
-func (m *Model) updateAccount(old, a dns.Account, token string) tea.Cmd {
+// updateAccount stores the edited Account with its credentials sealed for
+// its new label: the current ones, opened under the old label, with the
+// typed fields replacing theirs. New credentials are verified with the
+// Provider first. The credentials are sealed as a field map, so an
+// Account still holding an old single API token is rewritten.
+func (m *Model) updateAccount(old, a dns.Account, typed map[string]string) tea.Cmd {
 	if m.addForm != nil {
 		m.addForm.busy = true
 	}
 
-	key, store, ctx := m.key, m.deps.Store, m.ctx
+	key, store, ctx, providers := m.key, m.deps.Store, m.ctx, m.providers
 
 	return func() tea.Msg {
-		plain := []byte(token)
+		fields, err := accountCredentials(ctx, store, key, providers, old)
+		if err != nil {
+			return accountEditedMsg{account: a, err: err}
+		}
 
-		if token == "" {
-			sealed, err := store.AccountSecret(ctx, old.ID)
-			if err != nil {
-				return accountEditedMsg{account: a, err: err}
-			}
+		// An Account without an API token is only renamed.
+		if fields == nil && len(typed) == 0 {
+			return accountEditedMsg{account: a, err: store.UpdateAccountWithSecret(ctx, a, nil)}
+		}
 
-			// An Account without an API token is only renamed.
-			if sealed == nil {
-				return accountEditedMsg{account: a, err: store.UpdateAccountWithSecret(ctx, a, nil)}
-			}
+		if fields == nil {
+			fields = map[string]string{}
+		}
 
-			if plain, err = key.Open(sealed, secretLabel(old)); err != nil {
-				return accountEditedMsg{account: a, err: err}
+		maps.Copy(fields, typed)
+
+		if len(typed) > 0 {
+			if err := providers.Verify(ctx, a.Provider, fields); err != nil {
+				return accountEditedMsg{account: a, err: notAccepted(err)}
 			}
 		}
 
-		sealed, err := key.Seal(plain, secretLabel(a))
+		sealed, err := key.Seal(provider.EncodeCredentials(fields), secretLabel(a))
 		if err != nil {
 			return accountEditedMsg{account: a, err: err}
 		}
 
 		return accountEditedMsg{account: a, err: store.UpdateAccountWithSecret(ctx, a, sealed)}
 	}
+}
+
+// notAccepted reports credentials the Provider refused.
+func notAccepted(err error) error {
+	return fmt.Errorf("the Provider did not accept the credentials: %w", err)
 }
 
 // accountEdited reports an edit. A saved Account replaces the one this
@@ -340,16 +412,22 @@ func secretLabel(a dns.Account) string {
 	return "dnscli account secret " + a.Label()
 }
 
-// saveAccount stores the Account with its API token sealed by the data key.
-func (m *Model) saveAccount(a dns.Account, token string) tea.Cmd {
+// saveAccount verifies the Account's credentials with its Provider, then
+// stores the Account with them sealed by the data key, as a field map.
+// Credentials the Provider refuses save nothing.
+func (m *Model) saveAccount(a dns.Account, fields map[string]string) tea.Cmd {
 	if m.addForm != nil {
 		m.addForm.busy = true
 	}
 
-	key, store, ctx := m.key, m.deps.Store, m.ctx
+	key, store, ctx, providers := m.key, m.deps.Store, m.ctx, m.providers
 
 	return func() tea.Msg {
-		sealed, err := key.Seal([]byte(token), secretLabel(a))
+		if err := providers.Verify(ctx, a.Provider, fields); err != nil {
+			return accountAddedMsg{account: a, err: notAccepted(err)}
+		}
+
+		sealed, err := key.Seal(provider.EncodeCredentials(fields), secretLabel(a))
 		if err != nil {
 			return accountAddedMsg{err: err}
 		}
@@ -493,7 +571,7 @@ func (m *Model) zonesDiscovered(msg zonesDiscoveredMsg) tea.Cmd {
 func (m *Model) addAccountView() string {
 	f := m.addForm
 
-	notes := []string{saveRow(f.field == addFieldCount)}
+	notes := []string{saveRow(f.field == f.saveField())}
 
 	if f.err != "" {
 		notes = append(notes, "")
@@ -504,7 +582,7 @@ func (m *Model) addAccountView() string {
 		notes = append(notes, f.busyLines()...)
 	}
 
-	fields := f.dialogFields(f.name, f.token)
+	fields := f.dialogFields(f.name, f.values)
 	if f.field < len(fields) {
 		fields[f.field].caret = f.caret
 	}
@@ -529,18 +607,24 @@ func (f *addAccountForm) title() string {
 	return "Add Account"
 }
 
-// dialogFields are the rows of the dialog with the name and token shown.
-func (f *addAccountForm) dialogFields(name, token string) []dialogField {
+// dialogFields are the rows of the dialog with the name and credential
+// values shown; secret ones are masked.
+func (f *addAccountForm) dialogFields(name string, values []string) []dialogField {
 	provider := "none available"
 	if len(f.types) > 0 {
 		provider = f.types[f.provider]
 	}
 
-	return []dialogField{
+	fields := []dialogField{
 		{label: "Provider", value: provider, choice: f.editing == nil, fixed: f.editing != nil},
 		{label: "Name", value: name},
-		{label: "API token", value: token, masked: true},
 	}
+
+	for i, fd := range f.creds {
+		fields = append(fields, dialogField{label: fd.Label, value: values[i], masked: fd.Secret})
+	}
+
+	return fields
 }
 
 // accountFormHints are the lines at the bottom of the dialog with field
@@ -551,23 +635,20 @@ func (m *Model) accountFormHints(field int) []string {
 
 	var hint string
 
-	switch field {
-	case addFieldProvider:
+	switch i := field - addFieldCreds; {
+	case field == addFieldProvider:
 		hint = "The DNS hosting Provider the Account is at."
 		if f.editing != nil {
 			hint = "An Account keeps its Provider: add another Account for another Provider."
 		}
-	case addFieldName:
+	case field == addFieldName:
 		hint = "The Account shows as <provider>.<name>, such as cloudflare.work; the name has no dots or spaces."
-	case addFieldToken:
-		hint = "The API token the Provider issued for the Account; dnscli seals it in its local database."
-		if f.editing != nil {
-			hint = "Type a new API token, or leave it empty to keep the current one."
-		}
+	case i < len(f.creds):
+		hint = credentialHint(f.creds[i], f.editing != nil)
 	default:
-		hint = "Saves the Account, then discovers its Zones."
+		hint = "Checks the credentials with the Provider, saves the Account, then discovers its Zones."
 		if f.editing != nil {
-			hint = "Saves the Account's new name or API token."
+			hint = "Saves the Account's new name or credentials, checking new ones with the Provider."
 		}
 	}
 
@@ -581,13 +662,31 @@ func (m *Model) accountFormHints(field int) []string {
 	return hints
 }
 
+// credentialHint is the hint of a credential field.
+func credentialHint(fd dnsprovider.Field, editing bool) string {
+	switch {
+	case editing:
+		return "Type a new " + fd.Label + ", or leave it empty to keep the current one."
+	case fd.Secret:
+		return "The " + fd.Label + " the Provider issued for the Account; dnscli seals it in its local database."
+	default:
+		return "The " + fd.Label + " the Provider gave the Account; dnscli seals it with the Account's secrets."
+	}
+}
+
 // measureAccountForm works out the largest size the dialog takes, over
 // every focused field, with the values as wide as the dialog shows them.
 // The dialog then keeps that size, saving included; only an error grows it.
 func (m *Model) measureAccountForm() dialogSize {
 	f := m.addForm
 	widest := strings.Repeat("W", maxValueWidth)
-	fields := f.dialogFields(widest, widest)
+
+	values := make([]string, len(f.creds))
+	for i := range values {
+		values[i] = widest
+	}
+
+	fields := f.dialogFields(widest, values)
 
 	if len(f.types) > 0 {
 		fields[addFieldProvider].value = slices.MaxFunc(f.types, func(a, b string) int { return len(a) - len(b) })
@@ -595,9 +694,9 @@ func (m *Model) measureAccountForm() dialogSize {
 
 	var size dialogSize
 
-	for field := range addFieldCount + 1 {
-		notes := []string{saveRow(field == addFieldCount)}
-		if field == addFieldCount {
+	for field := range f.saveField() + 1 {
+		notes := []string{saveRow(field == f.saveField())}
+		if field == f.saveField() {
 			notes = append(notes, f.busyLines()...)
 		}
 

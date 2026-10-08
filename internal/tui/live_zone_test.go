@@ -266,9 +266,10 @@ func TestAZoneListedWithoutNameserversExpectsTheOnesItsAccountsOtherZonesShare(t
 
 	h.assertLive("work.example", true)
 
-	// The listed Zones already say which nameservers the Account expects.
-	if n := nameserversCalls(f); n != 0 {
-		t.Fatalf("Nameservers calls = %d, want none", n)
+	// The listed Zones already say which nameservers the Account expects:
+	// Account was only asked to verify the token.
+	if n := nameserversCalls(f); n != 1 {
+		t.Fatalf("Account calls = %d, want 1", n)
 	}
 }
 
@@ -287,20 +288,28 @@ func TestAZoneListedWithoutNameserversInAnAccountWithSeveralSetsHasNoneExpected(
 	h.press("N")
 	h.assertShows("Delegation of work.example", "not cached", "Live Zone unknown")
 
-	if n := nameserversCalls(f); n != 0 {
-		t.Fatalf("Nameservers calls = %d, want none", n)
+	if n := nameserversCalls(f); n != 1 {
+		t.Fatalf("Account calls = %d, want 1, to verify the token", n)
 	}
 }
 
 func TestAFailureToReadTheAccountsNameserversStillCachesItsZones(t *testing.T) {
-	f := newFake().
-		AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1"}).
-		AddZone(dns.Zone{Name: "work.test", ProviderID: "zw2"})
+	// The Account was added, its token verified, in an earlier session.
+	s, _ := enrollFirstAccount(t)
+
+	f := workZones()
 	f.Fail(providertest.OpAccount, errors.New("forbidden"))
 
-	h, _ := addWorkAccount(t, f, &fakeResolver{ns: map[string][]string{"work.example": cruzDee}})
+	h := newHarnessWith(t, s, tui.Deps{
+		Providers:    f.registry(),
+		UnsealMethod: fastPassphrase(),
+		Resolver:     &fakeResolver{ns: map[string][]string{"work.example": cruzDee}},
+	})
 
-	h.assertShows("Discovered 2 Zones for cloudflare.work.")
+	h.press("shift+tab", "L")
+	h.unsealWith(passphrase)
+	h.assertShows("Re-listed cloudflare.work")
+	h.press("tab")
 	h.assertLive("work.example", false)
 
 	h.press("N")

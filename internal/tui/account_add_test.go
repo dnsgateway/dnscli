@@ -110,10 +110,13 @@ func TestAddingTheFirstAccountEnrollsAPassphraseAndDiscoversItsZones(t *testing.
 		t.Fatalf("stored accounts = %+v, %v", accounts, err)
 	}
 
-	// The fake Provider was built with the token decrypted from the Store.
-	// Its Zones list no nameservers, so the Account's are asked for.
+	// The token was verified with Account before the Account was saved,
+	// then the fake Provider was built with the token decrypted from the
+	// Store. Its Zones list no nameservers: the Account's, read when
+	// verifying, are not asked again.
 	calls := f.Calls()
-	if len(calls) != 3 || calls[0].Op != providertest.OpNew || calls[0].Fields["token"] != token || calls[1].Op != providertest.OpZones || calls[2].Op != providertest.OpAccount {
+	if len(calls) != 4 || calls[0].Op != providertest.OpNew || calls[0].Fields["token"] != token || calls[1].Op != providertest.OpAccount ||
+		calls[2].Op != providertest.OpNew || calls[2].Fields["token"] != token || calls[3].Op != providertest.OpZones {
 		t.Fatalf("provider calls = %+v", calls)
 	}
 
@@ -206,7 +209,8 @@ func TestOneUnsealPerSessionUnlocksEveryAccount(t *testing.T) {
 	h.assertHides("Unseal ", "Passphrase")
 	h.assertShows("cloudflare.lab")
 
-	if tokens, want := f.tokens(), []string{"home-token", "lab-token"}; !slices.Equal(tokens, want) {
+	// Each is built to verify its token, then to discover its Zones.
+	if tokens, want := f.tokens(), []string{"home-token", "home-token", "lab-token", "lab-token"}; !slices.Equal(tokens, want) {
 		t.Fatalf("Provider built with %v, want %v", tokens, want)
 	}
 }
@@ -277,8 +281,9 @@ func TestAnAccountAddedElsewhereMeanwhileIsReportedAsExisting(t *testing.T) {
 	h.assertShows("Add Account", "cloudflare.home already exists.")
 	h.assertHides("UNIQUE", "constraint")
 
-	if calls := f.Calls(); len(calls) != 0 {
-		t.Fatalf("the Provider was called for a duplicate Account: %+v", calls)
+	// Its token was verified, but no Zones were discovered for it.
+	if n := f.count(providertest.OpZones); n != 0 {
+		t.Fatalf("Zones were listed for a duplicate Account: %+v", f.Calls())
 	}
 }
 
@@ -303,8 +308,9 @@ func TestDiscoveryForAnAccountWithoutAnAPITokenSaysSo(t *testing.T) {
 	h.assertShows("Zone discovery for cloudflare.home failed: this Account has no API token")
 	h.assertHides("decrypt", "malformed")
 
-	if calls := f.Calls(); len(calls) != 0 {
-		t.Fatalf("the Provider was called without a token: %+v", calls)
+	// Only the typed token was verified before saving.
+	if n := f.count(providertest.OpZones); n != 0 {
+		t.Fatalf("Zones were listed without a token: %+v", f.Calls())
 	}
 }
 
