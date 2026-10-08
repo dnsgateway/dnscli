@@ -2,6 +2,7 @@ package tui_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
 	"github.com/sergelogvinov/dnscli/internal/store"
+	"github.com/sergelogvinov/dnscli/internal/tui"
 )
 
 // withZoneStatus caches a Zone's Zone Status, as a Refresh read it.
@@ -244,6 +246,70 @@ func TestChangingOneZoneSettingKeepsTheOtherAsCachedWhenTheProviderCannotReadIt(
 	if got := zoneNamed(t, s, "work.example"); got.Status != want {
 		t.Fatalf("cached status = %+v, want %+v", got.Status, want)
 	}
+}
+
+func TestAZoneSettingChangedButNotCachedClosesTheDialogNamingTheZone(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	status := dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Off, HSTS: dnsprovider.Off}
+	z := withZoneStatus(t, s, "work.example", status)
+
+	f := settingsFake(status, true)
+	h := newAccountHarness(t, s, f)
+
+	h.press("S")
+	h.unsealWith(passphrase)
+	h.press("enter")
+
+	// Another zone takes the name at the Provider meanwhile.
+	mustZone(t, s, dns.Zone{AccountID: z.AccountID, Name: "work.example", ProviderID: "zw9"})
+
+	h.press("enter")
+
+	if calls := updateZoneCalls(f); len(calls) != 1 {
+		t.Fatalf("UpdateZone calls = %+v, want one", calls)
+	}
+
+	h.assertShows("Turn DNSSEC on for work.example was done")
+	h.assertHides("Zone settings of", "changing…")
+
+	// The dialog no longer holds the keys.
+	h.press("S")
+	h.assertShows("Zone settings of work.example")
+}
+
+// partialUpdater is a ZoneUpdater that writes DNSSEC, then fails.
+type partialUpdater struct{ dnsprovider.Provider }
+
+func (partialUpdater) UpdateZone(context.Context, dnsprovider.Zone, dnsprovider.ZoneUpdate) (dnsprovider.ZoneStatus, error) {
+	return dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Pending, HSTS: dnsprovider.Unknown}, errors.New("a later write failed")
+}
+
+func TestAZoneSettingWrittenBeforeTheProviderFailsIsCachedWithTheError(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	withZoneStatus(t, s, "work.example", dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Off, HSTS: dnsprovider.On})
+
+	fake := workZones().Factory()
+	h := newHarnessWith(t, s, tui.Deps{
+		Providers: dnsprovider.Registry{"cloudflare": {Fields: fake.Fields, New: func(m map[string]string, opts ...dnsprovider.Option) (dnsprovider.Provider, error) {
+			p, err := fake.New(m, opts...)
+
+			return partialUpdater{p}, err
+		}}},
+		UnsealMethod: fastPassphrase(),
+	})
+
+	h.press("S")
+	h.unsealWith(passphrase)
+	h.press("enter", "enter")
+
+	h.assertShows("Zone settings of work.example", "Could not turn DNSSEC on", "a later write failed")
+
+	want := dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Pending, HSTS: dnsprovider.On}
+	if got := zoneNamed(t, s, "work.example"); got.Status != want || !got.StatusAt.Equal(testNow) {
+		t.Fatalf("cached Zone = %+v, want status %+v written now", got, want)
+	}
+
+	h.assertShows("DNSSEC pending")
 }
 
 func TestTurningDNSSECOffWarnsToRemoveTheDSRecordAtTheRegistrarFirst(t *testing.T) {

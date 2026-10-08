@@ -114,11 +114,14 @@ type zoneSettingsOpenedMsg struct {
 }
 
 // zoneSettingsSavedMsg reports a change of a Zone's settings: the Zone as
-// cached with the Zone Status its Provider returned.
+// cached with the Zone Status its Provider returned when cached is set,
+// else the Zone the change was made to.
 type zoneSettingsSavedMsg struct {
 	change zoneSettingChange
 	zone   dns.Zone
-	err    error
+	cached bool
+	// err is why the Provider failed the change.
+	err error
 	// saveErr is why the returned Zone Status could not be cached, after
 	// the Provider made the change.
 	saveErr error
@@ -273,52 +276,66 @@ func (m *Model) zoneSettingsKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 // changeZoneSetting makes the change picked, and caches the Zone Status
-// the Provider returns, read now.
+// the Provider returns, written now. A change that fails still caches
+// the setting when the Provider says how it is, as one written before the
+// failure.
 func (m *Model) changeZoneSetting(d *zoneSettings) tea.Cmd {
 	ctx, s, now := m.ctx, m.deps.Store, m.deps.now
 	z, p, c := d.zone, d.p, d.changes[d.cursor]
 
 	return func() tea.Msg {
 		st, err := p.UpdateZone(ctx, provider.ModuleZone(z), c.update())
-		if err != nil {
+		if err != nil && c.setting.of(st) == dnsprovider.Unknown {
 			return zoneSettingsSavedMsg{change: c, zone: z, err: err}
 		}
 
-		saved, err := s.SaveZoneStatus(ctx, z, c.update(), st, now())
+		saved, saveErr := s.SaveZoneStatus(ctx, z, c.update(), st, now())
+		if saveErr != nil {
+			return zoneSettingsSavedMsg{change: c, zone: z, err: err, saveErr: saveErr}
+		}
 
-		return zoneSettingsSavedMsg{change: c, zone: saved, saveErr: err}
+		return zoneSettingsSavedMsg{change: c, zone: saved, cached: true, err: err}
 	}
 }
 
 // zoneSettingsSaved reports a change of a Zone's settings. A change the
-// Provider refused leaves the dialog open with the error; a made one
-// closes it and updates the Zone wherever the session holds it.
+// Provider failed leaves the dialog open with the error; a made one, or
+// one that could not be cached, closes it. The Zone Status cached is
+// updated wherever the session holds the Zone, with a setting written
+// before a failure too.
 func (m *Model) zoneSettingsSaved(msg zoneSettingsSavedMsg) {
 	d := m.zoneSettings
+	if d != nil && d.zone.ID != msg.zone.ID {
+		d = nil
+	}
 
-	if msg.err != nil {
-		if d != nil && d.zone.ID == msg.zone.ID {
+	if msg.cached {
+		m.updateZone(msg.zone)
+	}
+
+	switch {
+	case msg.saveErr != nil:
+		if d != nil {
+			m.zoneSettings = nil
+		}
+
+		m.notice = notice{text: msg.change.text() + " for " + msg.zone.Name + " was done, but could not be cached: " + msg.saveErr.Error(), err: true}
+	case msg.err != nil:
+		if d != nil {
+			d.zone = msg.zone
+			d.changes = settingChanges(msg.zone.Status)
+			d.cursor = min(d.cursor, len(d.changes)-1)
 			d.busy, d.confirming = false, false
 			d.err = "Could not turn " + msg.change.setting.name + " " + onOrOff(msg.change.on) + ": " + msg.err.Error()
 		}
+	default:
+		if d != nil {
+			m.zoneSettings = nil
+		}
 
-		return
+		st := msg.change.setting.of(msg.zone.Status)
+		m.notice = notice{text: msg.change.setting.name + " of " + msg.zone.Name + " is " + settingWord(st) + "."}
 	}
-
-	if d != nil && d.zone.ID == msg.zone.ID {
-		m.zoneSettings = nil
-	}
-
-	if msg.saveErr != nil {
-		m.notice = notice{text: msg.change.text() + " for " + msg.zone.Name + " was done, but could not be cached: " + msg.saveErr.Error(), err: true}
-
-		return
-	}
-
-	m.updateZone(msg.zone)
-
-	st := msg.change.setting.of(msg.zone.Status)
-	m.notice = notice{text: msg.change.setting.name + " of " + msg.zone.Name + " is " + settingWord(st) + "."}
 }
 
 // settingWord says what a setting is: "on", "off", "pending" or "unknown".
