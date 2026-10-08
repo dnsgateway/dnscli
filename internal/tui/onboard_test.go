@@ -83,14 +83,14 @@ func TestOnboardingAZoneNameAsksToConfirmThenCachesItPendingWithItsNameservers(t
 
 func TestAZoneNameIsCheckedBeforeTheProviderIsAsked(t *testing.T) {
 	cases := map[string]string{
-		"":                                   "Enter a zone name",
-		"example":                            "a domain such as example.com",
-		"bad name.example":                   "letters, digits and hyphens",
-		"-bad.example":                       "letters, digits and hyphens",
-		"bad..example":                       "letters, digits and hyphens",
-		"bücher.example":                     "punycode",
-		"Work.Example.":                      "cloudflare.work has work.example already",
-		strings.Repeat("a", 64) + ".example": "63",
+		"":                                    "Enter a zone name",
+		"example":                             "a domain such as example.com",
+		"bad name.example":                    "letters, digits and hyphens",
+		"bad..example":                        "letters, digits and hyphens",
+		"bücher.example":                      "punycode",
+		"Work.Example.":                       "cloudflare.work has work.example already",
+		strings.Repeat("a", 64) + ".example":  "63",
+		strings.Repeat("a.", 127) + "example": "253",
 	}
 
 	for typed, want := range cases {

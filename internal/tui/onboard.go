@@ -287,34 +287,21 @@ func (m *Model) checkOnboardName(a dns.Account, typed string) (string, error) {
 	return name, nil
 }
 
-// maxZoneName is the longest domain name, in characters, without the
-// trailing dot.
-const maxZoneName = 253
-
 // checkZoneName checks that name, in lower case without a trailing dot,
-// is a domain name a zone can be Onboarded for.
+// is a domain name a zone can be Onboarded for: in ASCII, of two labels
+// at least, and a host name as the module checks one. The Provider
+// refuses a name it cannot host, such as one no registry holds.
 func checkZoneName(name string) error {
 	switch {
 	case name == "":
 		return errors.New("Enter a zone name, such as example.com.")
 	case strings.ContainsFunc(name, func(r rune) bool { return r > unicode.MaxASCII }):
 		return errors.New("Enter the zone name in ASCII: an internationalized name in its punycode form (xn--…).")
-	case len(name) > maxZoneName:
-		return fmt.Errorf("A zone name is at most %d characters long.", maxZoneName)
 	case !strings.Contains(name, "."):
 		return errors.New("Enter a domain such as example.com, not a top-level domain alone.")
-	}
-
-	for _, label := range strings.Split(name, ".") {
-		if len(label) > 63 {
-			return errors.New("Each label of a zone name is at most 63 characters long.")
-		}
-
-		if label == "" || label[0] == '-' || label[len(label)-1] == '-' ||
-			strings.ContainsFunc(label, func(r rune) bool { return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-') }) {
-			return errors.New("A zone name is labels of letters, digits and hyphens, joined by dots; " +
-				"no label starts or ends with a hyphen.")
-		}
+	case dnsprovider.CheckValue("CNAME", name) != nil:
+		return errors.New("A zone name is labels of letters, digits and hyphens, joined by dots, " +
+			"each label at most 63 characters, the name at most 253.")
 	}
 
 	return nil
