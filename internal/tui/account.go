@@ -902,7 +902,12 @@ func discover(ctx context.Context, s *store.Store, key *vault.Key, providers *pr
 		return 0, store.ZoneSync{}, err
 	}
 
-	zones := servedZones(provider.CacheZones(listed))
+	cached, err := cachedZoneIDs(ctx, s, a.ID)
+	if err != nil {
+		return 0, store.ZoneSync{}, err
+	}
+
+	zones := servedZones(provider.CacheZones(listed), cached)
 
 	expectAccountNameservers(zones, func() ([]string, error) {
 		return providers.Nameservers(ctx, p, a.Provider, fields)
@@ -916,11 +921,21 @@ func discover(ctx context.Context, s *store.Store, key *vault.Key, providers *pr
 	return len(zones), sync, nil
 }
 
-// servedZones keeps one Zone per zone name, as the cache holds them: an
-// unscoped Cloudflare token lists a zone name once per Tenant holding it.
-// It keeps the Active one, else the Pending one, else the first listed,
-// as the module's Zone(name) prefers them, in the order listed.
-func servedZones(zones []dns.Zone) []dns.Zone {
+// servedZones keeps one Zone per zone name, as the cache holds them, in
+// the order the names were first listed. A zone name can be listed more
+// than once: an unscoped Cloudflare token lists it once per Tenant holding
+// it, and a single Tenant can hold a Moved copy next to one Onboarded
+// again. Names compare as DNS names, by nameKey (the module's ZoneName
+// rule), and are kept in that form.
+//
+// It keeps the Active copy, else the Pending one, else any other. This
+// mirrors the preference of the module's Cloudflare Zone(name)
+// (providers/cloudflare in github.com/dnsgateway/dnsprovider), which the
+// module does not export for a list; keep the two in step. Unlike Zone(name),
+// which falls back to listing order, a tie keeps the copy cached as
+// cachedIDs[name], else the smallest Provider zone ID, so a listing in
+// another order does not swap the cached Zone.
+func servedZones(zones []dns.Zone, cachedIDs map[string]string) []dns.Zone {
 	rank := func(s dnsprovider.HostingState) int {
 		switch s {
 		case dnsprovider.HostingActive:
@@ -932,10 +947,25 @@ func servedZones(zones []dns.Zone) []dns.Zone {
 		}
 	}
 
+	// better reports whether z is preferred to the copy kept so far.
+	better := func(z, kept dns.Zone) bool {
+		if r, k := rank(z.State), rank(kept.State); r != k {
+			return r < k
+		}
+
+		if cached, ok := cachedIDs[z.Name]; ok && (cached == kept.ProviderID || cached == z.ProviderID) {
+			return cached == z.ProviderID
+		}
+
+		return z.ProviderID < kept.ProviderID
+	}
+
 	at := map[string]int{}
 	out := zones[:0:0]
 
 	for _, z := range zones {
+		z.Name = nameKey(z.Name)
+
 		i, seen := at[z.Name]
 		if !seen {
 			at[z.Name] = len(out)
@@ -944,12 +974,31 @@ func servedZones(zones []dns.Zone) []dns.Zone {
 			continue
 		}
 
-		if rank(z.State) < rank(out[i].State) {
+		if better(z, out[i]) {
 			out[i] = z
 		}
 	}
 
 	return out
+}
+
+// cachedZoneIDs returns the Provider zone ID of each of an Account's
+// cached Zones, by nameKey.
+func cachedZoneIDs(ctx context.Context, s *store.Store, accountID int64) (map[string]string, error) {
+	zones, err := s.Zones(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	out := map[string]string{}
+
+	for _, z := range zones {
+		if z.AccountID == accountID {
+			out[nameKey(z.Name)] = z.ProviderID
+		}
+	}
+
+	return out, nil
 }
 
 // expectAccountNameservers gives each Zone the Provider listed without

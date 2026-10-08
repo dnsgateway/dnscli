@@ -271,3 +271,82 @@ func TestRelistingThatReplacesAZonesProviderIDForgetsItsChangesetAndValidation(t
 		t.Fatalf("work.example row = %q, still validated", row)
 	}
 }
+
+// Of several copies of a zone name in the same Hosting State, the cache
+// keeps the one it already holds, else the smallest Provider zone ID, so
+// the Provider's listing order does not swap the cached Zone.
+func TestATieBetweenCopiesOfAZoneNameKeepsTheCachedZoneElseTheSmallestID(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+
+	f := newFake().
+		AddZone(dns.Zone{Name: "work.example", ProviderID: "zw9"}).
+		AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1"}).
+		AddZone(dns.Zone{Name: "work.test", ProviderID: "zw5"}).
+		AddZone(dns.Zone{Name: "work.test", ProviderID: "zw3"})
+	for _, id := range []string{"zw9", "zw1", "zw5", "zw3"} {
+		f.SetHostingState(id, dnsprovider.HostingMoved)
+	}
+
+	h := newAccountHarness(t, s, f)
+	h.press("shift+tab", "L")
+	h.unsealWith(passphrase)
+	h.assertShows("Re-listed cloudflare.work")
+
+	if z := zoneNamed(t, s, "work.example"); z.ProviderID != "zw1" {
+		t.Errorf("work.example = %+v, want the cached zw1", z)
+	}
+
+	// work.test was cached as zw2, which is no longer listed.
+	if z := zoneNamed(t, s, "work.test"); z.ProviderID != "zw3" {
+		t.Errorf("work.test = %+v, want zw3, the smallest ID", z)
+	}
+}
+
+// Zone names compare as DNS names: case and a trailing dot do not make
+// another zone name.
+func TestCopiesOfAZoneNameSpelledDifferentlyAreCachedOnce(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+
+	f := newFake().
+		AddZone(dns.Zone{Name: "Work.Example.", ProviderID: "zw8"}).
+		AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1"}).
+		AddZone(dns.Zone{Name: "work.test", ProviderID: "zw2"})
+	f.SetHostingState("zw8", dnsprovider.HostingMoved)
+
+	h := newAccountHarness(t, s, f)
+	h.press("shift+tab", "L")
+	h.unsealWith(passphrase)
+	h.assertShows("Re-listed cloudflare.work: no changes, 2 Zones.")
+
+	if names := zoneNames(t, s); !slices.Equal(names, []string{"work.example", "work.test"}) {
+		t.Fatalf("cached Zones = %v", names)
+	}
+
+	if z := zoneNamed(t, s, "work.example"); z.ProviderID != "zw1" || z.State != dnsprovider.HostingActive {
+		t.Errorf("work.example = %+v, want zw1 active", z)
+	}
+}
+
+// One Tenant can hold a Moved copy of a zone name and the copy Onboarded
+// again: a scoped Account caches the one waiting for Delegation.
+func TestAScopedAccountCachesTheOnboardedAgainCopyOfAMovedZone(t *testing.T) {
+	f := newFake().
+		AddZone(dns.Zone{Name: "work.example", ProviderID: "zw8"}).
+		AddZone(dns.Zone{Name: "work.example", ProviderID: "zw9"})
+	f.SetHostingState("zw8", dnsprovider.HostingMoved)
+	f.SetHostingState("zw9", dnsprovider.HostingPending)
+	f.SetTenants(dnsprovider.Tenant{ID: acmeTenant, Name: "Acme Ltd"})
+
+	h, s := newTenantHarness(t, f)
+	h.fillAddAccount("work", "tok")
+	h.enrollPassphrase()
+	h.assertShows("Discovered 1 Zone for cloudflare.work.")
+
+	if got := storedFields(t, s, accountLabeled(t, s, "cloudflare.work"))["account"]; got != acmeTenant {
+		t.Fatalf("Tenant = %q, want the Account scoped to %s", got, acmeTenant)
+	}
+
+	if z := zoneNamed(t, s, "work.example"); z.ProviderID != "zw9" || z.State != dnsprovider.HostingPending {
+		t.Errorf("work.example = %+v, want zw9 pending", z)
+	}
+}
