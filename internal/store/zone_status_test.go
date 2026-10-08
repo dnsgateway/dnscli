@@ -245,6 +245,50 @@ func TestSaveZoneStatusStoresTheSettingsTheUpdateSetsAndReturnsTheZone(t *testin
 	}
 }
 
+func TestARefreshWhoseZoneStatusReadBeganBeforeTheCachedOneWasWrittenKeepsTheCachedOne(t *testing.T) {
+	ctx := context.Background()
+	s := open(t, filepath.Join(t.TempDir(), "dnscli.db"))
+
+	z := putZone(t, s, dns.Zone{Name: "example.com", ProviderID: "z1"})
+
+	// DNSSEC is turned on while a Refresh that read it off is in flight.
+	written := time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC)
+	if _, err := s.SaveZoneStatus(ctx, z, dnsprovider.ZoneUpdate{DNSSEC: &on}, dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Pending}, written); err != nil {
+		t.Fatal(err)
+	}
+
+	refreshed := written.Add(2 * time.Second)
+
+	for _, began := range []time.Time{written.Add(-time.Second), written} {
+		z.Status, z.StatusAt = dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Off, HSTS: dnsprovider.Off}, began
+
+		got, err := s.SaveRefresh(ctx, z, nil, 0, refreshed)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if got.Status.DNSSEC != dnsprovider.Pending || !got.StatusAt.Equal(written) || !got.RefreshedAt.Equal(refreshed) {
+			t.Fatalf("read began %v: refreshed = %+v, want the Zone Status written at %v kept, Refreshed at %v", began, got, written, refreshed)
+		}
+	}
+
+	// One whose read began after it is newer, and read at the Refresh.
+	z.Status, z.StatusAt = dnsprovider.ZoneStatus{DNSSEC: dnsprovider.On, HSTS: dnsprovider.Off}, written.Add(time.Second)
+
+	got, err := s.SaveRefresh(ctx, z, nil, 0, refreshed)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got.Status != z.Status || !got.StatusAt.Equal(refreshed) {
+		t.Fatalf("refreshed = %+v, want its Zone Status, read at %v", got, refreshed)
+	}
+
+	if cached := onlyZone(t, s); cached.Status != z.Status || !cached.StatusAt.Equal(refreshed) {
+		t.Fatalf("cached = %+v, want the newer Zone Status", cached)
+	}
+}
+
 func TestSaveZoneStatusOfAZoneNoLongerCachedIsErrZoneNotCached(t *testing.T) {
 	ctx := context.Background()
 	s := open(t, filepath.Join(t.TempDir(), "dnscli.db"))

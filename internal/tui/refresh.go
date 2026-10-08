@@ -255,7 +255,8 @@ type refreshResult struct {
 //
 // A Zone Status that cannot be read does not fail the Refresh: the cached
 // one is kept, and shows as older than the Refresh. Why it could not be
-// read is returned as statusErr.
+// read is returned as statusErr. So is one written while it was read,
+// such as by a change of the Zone's settings, which it may have missed.
 func refresh(ctx context.Context, s *store.Store, key *vault.Key, providers *provider.Opener, a dns.Account, z dns.Zone, q serialQuery, now func() time.Time) refreshResult {
 	p, _, err := accountProvider(ctx, s, key, providers, a)
 	if err != nil {
@@ -268,6 +269,9 @@ func refresh(ctx context.Context, s *store.Store, key *vault.Key, providers *pro
 	defer cancel()
 
 	read := make(chan zoneStatusRead, 1)
+	// The Zone Status is as new as the start of its read: one written
+	// since, such as by a change of its settings, may have been missed.
+	readFrom := now()
 
 	go func() {
 		status, err := dnsprovider.ZoneStatusOf(statusCtx, p, provider.ModuleZone(z))
@@ -304,7 +308,7 @@ func refresh(ctx context.Context, s *store.Store, key *vault.Key, providers *pro
 
 	z.Status, z.StatusAt = dnsprovider.ZoneStatus{}, time.Time{}
 	if status.err == nil {
-		z.Status, z.StatusAt = status.status, at
+		z.Status, z.StatusAt = status.status, readFrom
 	}
 
 	res.statusErr = status.err

@@ -272,9 +272,13 @@ var ErrZoneNotCached = errors.New("the Zone is no longer cached")
 // SaveRefresh stores the result of a Refresh in one transaction: it
 // replaces the Zone's cached Records and sets its SOA serial and its last
 // Refresh time. A zero serial, when the Provider did not report one, keeps
-// the cached serial, as PutZone does. It also stores z's Zone Status when
-// z.StatusAt is set, and keeps the cached one when it is zero, such as
-// when the Refresh could not read it. It returns the Zone as stored.
+// the cached serial, as PutZone does. It also stores z's Zone Status, as
+// read at the Refresh, when z.StatusAt, the time its read began, is set
+// and later than the cached one, and keeps the cached one otherwise: when
+// the Refresh could not read it, or when it was written meanwhile, such
+// as by SaveZoneStatus, and the read may have missed that. Times are
+// stored to the second, so a read that began in the second the cached
+// one was written keeps it too. It returns the Zone as stored.
 //
 // It returns ErrZoneNotCached unless the cache still has that very Zone:
 // the same ID, Account, zone name and Provider zone ID. A Zone removed
@@ -292,9 +296,9 @@ func (s *Store) SaveRefresh(ctx context.Context, z dns.Zone, records []dns.Recor
 		UPDATE zones SET
 			soa_serial   = IIF(?1 = 0, soa_serial, ?1),
 			refreshed_at = ?2,
-			dnssec       = IIF(?7 = 0, dnssec, ?8),
-			hsts         = IIF(?7 = 0, hsts, ?9),
-			status_at    = IIF(?7 = 0, status_at, ?7)
+			dnssec       = IIF(?7 = 0 OR status_at >= ?7, dnssec, ?8),
+			hsts         = IIF(?7 = 0 OR status_at >= ?7, hsts, ?9),
+			status_at    = IIF(?7 = 0 OR status_at >= ?7, status_at, ?2)
 		WHERE id = ?3 AND account_id = ?4 AND name = ?5 AND provider_zone_id = ?6
 		RETURNING soa_serial, refreshed_at, dnssec, hsts, status_at`,
 		serial, unixOrZero(at), z.ID, z.AccountID, z.Name, z.ProviderID,
@@ -327,9 +331,11 @@ func (s *Store) SaveRefresh(ctx context.Context, z dns.Zone, records []dns.Recor
 // them with, and returns the Zone as cached. The settings u leaves nil
 // keep their cached value, which a Provider that could not read them
 // again would have answered Unknown. The Zone Status is then as of at,
-// the time it was written. The rest of the cache is left alone. Like
-// SaveRefresh, it returns ErrZoneNotCached unless the cache still has
-// that very Zone: the same ID, Account, zone name and Provider zone ID.
+// the time it was written: a Refresh whose read of it began earlier
+// does not replace it (see SaveRefresh). The rest of the cache is left
+// alone. Like SaveRefresh, it returns ErrZoneNotCached unless the cache
+// still has that very Zone: the same ID, Account, zone name and Provider
+// zone ID.
 func (s *Store) SaveZoneStatus(ctx context.Context, z dns.Zone, u dnsprovider.ZoneUpdate, status dnsprovider.ZoneStatus, at time.Time) (dns.Zone, error) {
 	var (
 		refreshed, statusAt int64
