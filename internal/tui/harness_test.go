@@ -75,7 +75,7 @@ func mustAccount(t *testing.T, s *store.Store, provider, name string) dns.Accoun
 func mustZone(t *testing.T, s *store.Store, z dns.Zone) dns.Zone {
 	t.Helper()
 
-	z, err := s.PutZone(context.Background(), z)
+	z, _, err := s.PutZone(context.Background(), z)
 	if err != nil {
 		t.Fatalf("put zone: %v", err)
 	}

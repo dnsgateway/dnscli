@@ -35,7 +35,7 @@ func TestSaveApplyRefusesAChangeWithoutAProviderRecordID(t *testing.T) {
 				t.Fatalf("add account: %v", err)
 			}
 
-			z, err := s.PutZone(ctx, dns.Zone{AccountID: a.ID, Name: "example.com", ProviderID: "z1"})
+			z, _, err := s.PutZone(ctx, dns.Zone{AccountID: a.ID, Name: "example.com", ProviderID: "z1"})
 			if err != nil {
 				t.Fatalf("put zone: %v", err)
 			}

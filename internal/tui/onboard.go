@@ -31,7 +31,10 @@ type onboardDialog struct {
 	busy       bool // the zone name is being Onboarded
 	// done is the Zone Onboarded, as cached; nil until then.
 	done *dns.Zone
-	err  string
+	// unsaid is set when done is the zone name alone, uncached: the
+	// Provider did not say its ID or nameservers.
+	unsaid bool
+	err    string
 }
 
 // onboardOpenedMsg reports the Provider opened for the Onboard dialog;
@@ -50,9 +53,15 @@ type zoneOnboardedMsg struct {
 	name    string
 	zone    dns.Zone
 	cached  bool
-	// replaced is the ID of the cached Zone of that name the new one
-	// replaced, such as one Moved; zero when none.
-	replaced int64
+	// replaced is set when the new Zone replaced a cached Zone of that
+	// name, such as one Moved.
+	replaced bool
+	// unsaid is set when the Provider took the create without saying the
+	// new Zone's ID or nameservers. Such a Zone is not cached: the cache
+	// would hold a Zone nothing can address at the Provider, shown and
+	// acted on as any other, until a re-list, which the user is told to
+	// run, lists it whole.
+	unsaid bool
 	// err is why the Provider failed the Onboarding.
 	err error
 	// saveErr is why the new Zone could not be cached, after the
@@ -297,17 +306,11 @@ func checkZoneName(name string) error {
 }
 
 // createZone Onboards the zone name confirmed, and caches the Zone the
-// Provider returns, in place of a cached one of that name it replaces.
+// Provider returns, in place of a cached one of that name it replaces. A
+// Zone the Provider returns without its ID is not cached: see
+// zoneOnboardedMsg.unsaid.
 func (m *Model) createZone(d *onboardDialog) tea.Cmd {
 	ctx, s, p, a, name := m.ctx, m.deps.Store, d.p, d.account, d.name
-
-	var replaced int64
-
-	for _, z := range m.zones {
-		if z.AccountID == a.ID && nameKey(z.Name) == nameKey(name) {
-			replaced = z.ID
-		}
-	}
 
 	return func() tea.Msg {
 		mz, err := p.CreateZone(ctx, name)
@@ -318,7 +321,11 @@ func (m *Model) createZone(d *onboardDialog) tea.Cmd {
 		z := provider.CacheZone(mz)
 		z.AccountID = a.ID
 
-		saved, err := s.PutZone(ctx, z)
+		if z.ProviderID == "" {
+			return zoneOnboardedMsg{account: a, name: name, zone: z, unsaid: true}
+		}
+
+		saved, replaced, err := s.PutZone(ctx, z)
 		if err != nil {
 			return zoneOnboardedMsg{account: a, name: name, zone: z, saveErr: err}
 		}
@@ -355,25 +362,35 @@ func (m *Model) zoneOnboarded(msg zoneOnboardedMsg) tea.Cmd {
 		}
 
 		m.notice = notice{text: msg.name + " was Onboarded at " + msg.account.Label() + ", but could not be cached: " +
-			msg.saveErr.Error() + ". Re-list the Account's Zones (" + m.keys.keysFor(ActionRelistZones) + " in the Accounts pane).", err: true}
+			msg.saveErr.Error() + ". " + m.reList(), err: true}
 
 		return nil
 	}
 
-	if msg.replaced != 0 && msg.replaced == msg.zone.ID {
+	if msg.replaced {
 		// The Zone cached under that name is another zone at the Provider:
 		// nothing this session built on it holds.
-		m.forgetZones([]int64{msg.replaced})
+		m.forgetZones([]int64{msg.zone.ID})
 	}
 
 	if d != nil {
 		z := msg.zone
-		d.busy, d.done = false, &z
+		d.busy, d.done, d.unsaid = false, &z, msg.unsaid
 	}
 
 	m.notice = notice{text: msg.zone.Name + " is Onboarded at " + msg.account.Label() + ", pending until Delegation names its nameservers."}
+	if msg.unsaid {
+		m.notice = notice{text: msg.zone.Name + " is Onboarded at " + msg.account.Label() + ". " + m.reList()}
+
+		return nil
+	}
 
 	return m.loadCache
+}
+
+// reList tells the user to re-list the Account's Zones.
+func (m *Model) reList() string {
+	return "Re-list the Account's Zones (" + m.keys.keysFor(ActionRelistZones) + " in the Accounts pane)."
 }
 
 func (m *Model) onboardView() string {
@@ -390,7 +407,11 @@ func (m *Model) onboardView() string {
 			notes = append(notes, "  "+ns)
 		}
 
-		if len(z.Nameservers) == 0 {
+		switch {
+		case d.unsaid:
+			notes = append(notes, wrapNote(errorStyle, "The Provider took it but did not say its ID or nameservers, "+
+				"so it is not cached yet. "+m.reList(), noteWidth)...)
+		case len(z.Nameservers) == 0:
 			notes = append(notes, wrapNote(errorStyle, "The Provider named no nameservers: see its console.", noteWidth)...)
 		}
 

@@ -28,7 +28,7 @@ func putZone(t *testing.T, s *store.Store, z dns.Zone) dns.Zone {
 
 	z.AccountID = a.ID
 
-	z, err = s.PutZone(ctx, z)
+	z, _, err = s.PutZone(ctx, z)
 	if err != nil {
 		t.Fatalf("put zone: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestTheZoneStatusAndNameserversRoundTrip(t *testing.T) {
 	}
 
 	// A relist that lists no nameservers keeps the cached ones and the status.
-	if _, err := s.PutZone(ctx, dns.Zone{AccountID: z.AccountID, Name: "example.com", ProviderID: "z1"}); err != nil {
+	if _, _, err := s.PutZone(ctx, dns.Zone{AccountID: z.AccountID, Name: "example.com", ProviderID: "z1"}); err != nil {
 		t.Fatalf("put zone again: %v", err)
 	}
 
@@ -90,7 +90,7 @@ func TestAZoneRelistedWithAnotherProviderIDForgetsItsStatusAndSerial(t *testing.
 	}
 
 	// The zone was deleted and created again at the Provider.
-	if _, err := s.PutZone(ctx, dns.Zone{AccountID: z.AccountID, Name: "example.com", ProviderID: "z2"}); err != nil {
+	if _, _, err := s.PutZone(ctx, dns.Zone{AccountID: z.AccountID, Name: "example.com", ProviderID: "z2"}); err != nil {
 		t.Fatalf("put zone again: %v", err)
 	}
 
@@ -296,7 +296,7 @@ func TestSaveZoneStatusOfAZoneNoLongerCachedIsErrZoneNotCached(t *testing.T) {
 	z := putZone(t, s, dns.Zone{Name: "example.com", ProviderID: "z1"})
 
 	// Another zone took the name at the Provider meanwhile.
-	if _, err := s.PutZone(ctx, dns.Zone{AccountID: z.AccountID, Name: "example.com", ProviderID: "z2"}); err != nil {
+	if _, _, err := s.PutZone(ctx, dns.Zone{AccountID: z.AccountID, Name: "example.com", ProviderID: "z2"}); err != nil {
 		t.Fatal(err)
 	}
 

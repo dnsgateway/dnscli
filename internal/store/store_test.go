@@ -100,13 +100,13 @@ func TestPutZoneWithoutRefreshMetadataKeepsTheCachedSerialAndRefreshTime(t *test
 
 	refreshed := time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC)
 
-	first, err := s.PutZone(ctx, dns.Zone{AccountID: a.ID, Name: "example.com", ProviderID: "z1", Serial: 2026100701, RefreshedAt: refreshed})
+	first, _, err := s.PutZone(ctx, dns.Zone{AccountID: a.ID, Name: "example.com", ProviderID: "z1", Serial: 2026100701, RefreshedAt: refreshed})
 	if err != nil {
 		t.Fatalf("put zone: %v", err)
 	}
 
 	// Relisting the Account's Zones knows the zone ID but not the Serial.
-	second, err := s.PutZone(ctx, dns.Zone{AccountID: a.ID, Name: "example.com", ProviderID: "z1"})
+	second, _, err := s.PutZone(ctx, dns.Zone{AccountID: a.ID, Name: "example.com", ProviderID: "z1"})
 	if err != nil {
 		t.Fatalf("put zone again: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestARefreshOfAZoneWhoseIDWasReusedIsRefused(t *testing.T) {
 		t.Fatalf("add account: %v", err)
 	}
 
-	old, err := s.PutZone(ctx, dns.Zone{AccountID: a.ID, Name: "example.com", ProviderID: "z1"})
+	old, _, err := s.PutZone(ctx, dns.Zone{AccountID: a.ID, Name: "example.com", ProviderID: "z1"})
 	if err != nil {
 		t.Fatalf("put zone: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestARefreshOfAZoneWhoseIDWasReusedIsRefused(t *testing.T) {
 		t.Fatalf("add account: %v", err)
 	}
 
-	reused, err := s.PutZone(ctx, dns.Zone{AccountID: b.ID, Name: "example.com", ProviderID: "z9"})
+	reused, _, err := s.PutZone(ctx, dns.Zone{AccountID: b.ID, Name: "example.com", ProviderID: "z9"})
 	if err != nil {
 		t.Fatalf("put zone: %v", err)
 	}
@@ -213,5 +213,29 @@ func TestOpenAcceptsARelativePath(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join("dnscli", "a#b.db")); err != nil {
 		t.Fatalf("database is not at the relative path: %v", err)
+	}
+}
+
+func TestPutZoneReportsWhetherItReplacedAnotherZoneOfTheName(t *testing.T) {
+	ctx := context.Background()
+	s := open(t, filepath.Join(t.TempDir(), "dnscli.db"))
+
+	a, err := s.AddAccount(ctx, dns.Account{Provider: "cloudflare", Name: "work"})
+	if err != nil {
+		t.Fatalf("add account: %v", err)
+	}
+
+	for _, step := range []struct {
+		providerID string
+		replaced   bool
+	}{
+		{"z1", false}, // new
+		{"z1", false}, // the same zone again
+		{"z2", true},  // another zone of the name
+	} {
+		_, replaced, err := s.PutZone(ctx, dns.Zone{AccountID: a.ID, Name: "example.com", ProviderID: step.providerID})
+		if err != nil || replaced != step.replaced {
+			t.Fatalf("PutZone %s: replaced = %v, %v; want %v", step.providerID, replaced, err, step.replaced)
+		}
 	}
 }

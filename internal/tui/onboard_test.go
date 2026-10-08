@@ -374,3 +374,39 @@ func TestOnboardingIsRefusedForAnAccountTheFakeBuildsWithinNoTenant(t *testing.T
 		t.Fatalf("CreateZone calls = %q, want none", calls)
 	}
 }
+
+// unsaidCreator Onboards through the fake, but answers, as Cloudflare
+// may when it took the create without saying what it made, with the
+// name alone, Pending, without an ID or nameservers.
+type unsaidCreator struct{ dnsprovider.Provider }
+
+func (u unsaidCreator) CreateZone(ctx context.Context, name string) (dnsprovider.Zone, error) {
+	z, err := u.Provider.(dnsprovider.ZoneCreator).CreateZone(ctx, name)
+	if err != nil {
+		return z, err
+	}
+
+	return dnsprovider.Zone{Name: z.Name, State: dnsprovider.HostingPending}, nil
+}
+
+func TestAZoneOnboardedWithoutAnIDIsNotCachedAndTheUserIsToldToReList(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	f := onboardFake()
+	h := newHarnessWith(t, s, tui.Deps{
+		Providers:    wrapped(f, func(p dnsprovider.Provider) dnsprovider.Provider { return unsaidCreator{p} }),
+		UnsealMethod: fastPassphrase(),
+	})
+	before := zonesCached(t, s)
+
+	h.press("i")
+	h.unsealWith(passphrase)
+	h.typeText("new.example")
+	h.press("enter", "enter")
+
+	h.assertShows("new.example is Onboarded at cloudflare.work", "did not say", "Re-list")
+	h.assertHides("onboarding…")
+
+	if got := zonesCached(t, s); got != before {
+		t.Fatalf("cached Zones = %d, want %d: a Zone without its Provider ID is not cached", got, before)
+	}
+}

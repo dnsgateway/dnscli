@@ -26,24 +26,24 @@ import (
 // A changed Provider zone ID is another zone at the Provider, so it
 // forgets, in the same transaction, everything cached of the old one: its
 // Records, serial, last Refresh time, nameservers and Zone Status. Only
-// what z itself sets is stored.
-func (s *Store) PutZone(ctx context.Context, z dns.Zone) (dns.Zone, error) {
+// what z itself sets is stored. replaced reports that it did so.
+func (s *Store) PutZone(ctx context.Context, z dns.Zone) (stored dns.Zone, replaced bool, err error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return dns.Zone{}, fmt.Errorf("put zone %s: %w", z.Name, err)
+		return dns.Zone{}, false, fmt.Errorf("put zone %s: %w", z.Name, err)
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	z, _, err = putZone(ctx, tx, z, false)
+	z, replaced, err = putZone(ctx, tx, z, false)
 	if err != nil {
-		return dns.Zone{}, err
+		return dns.Zone{}, false, err
 	}
 
 	if err := tx.Commit(); err != nil {
-		return dns.Zone{}, fmt.Errorf("put zone %s: %w", z.Name, err)
+		return dns.Zone{}, false, fmt.Errorf("put zone %s: %w", z.Name, err)
 	}
 
-	return z, nil
+	return z, replaced, nil
 }
 
 // execQueryRower is a transaction, or a connection inside one, that runs

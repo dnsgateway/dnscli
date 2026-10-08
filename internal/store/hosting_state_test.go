@@ -52,7 +52,7 @@ func TestPutZoneWithoutAHostingStateKeepsTheCachedOne(t *testing.T) {
 
 	z := putZone(t, s, dns.Zone{Name: "example.com", ProviderID: "z1", State: dnsprovider.HostingMoved})
 
-	stored, err := s.PutZone(ctx, dns.Zone{AccountID: z.AccountID, Name: "example.com", ProviderID: "z1"})
+	stored, _, err := s.PutZone(ctx, dns.Zone{AccountID: z.AccountID, Name: "example.com", ProviderID: "z1"})
 	if err != nil {
 		t.Fatalf("put zone: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestPutZoneWithoutAHostingStateKeepsTheCachedOne(t *testing.T) {
 		t.Fatalf("zone = %+v, returned %+v; want moved kept", got, stored)
 	}
 
-	if _, err := s.PutZone(ctx, dns.Zone{AccountID: z.AccountID, Name: "example.com", ProviderID: "z1", State: dnsprovider.HostingActive}); err != nil {
+	if _, _, err := s.PutZone(ctx, dns.Zone{AccountID: z.AccountID, Name: "example.com", ProviderID: "z1", State: dnsprovider.HostingActive}); err != nil {
 		t.Fatalf("put zone: %v", err)
 	}
 
@@ -70,7 +70,7 @@ func TestPutZoneWithoutAHostingStateKeepsTheCachedOne(t *testing.T) {
 	}
 
 	// Another zone at the Provider: the old one's state is not its.
-	if _, err := s.PutZone(ctx, dns.Zone{AccountID: z.AccountID, Name: "example.com", ProviderID: "z2"}); err != nil {
+	if _, _, err := s.PutZone(ctx, dns.Zone{AccountID: z.AccountID, Name: "example.com", ProviderID: "z2"}); err != nil {
 		t.Fatalf("put zone: %v", err)
 	}
 
