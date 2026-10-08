@@ -133,6 +133,9 @@ type Model struct {
 	// tenantPick asks which Tenant an Account acts within; nil when
 	// closed.
 	tenantPick *tenantPick
+	// zoneSettings turns a Zone's DNSSEC or HSTS on or off; nil when
+	// closed.
+	zoneSettings *zoneSettings
 	// editAfterPick is the ID of the Account whose edit dialog was asked
 	// for while the Tenant picker was open; zero when none was. It opens
 	// once the picker closes, rather than over it.
@@ -335,6 +338,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.changesApplied(msg)
 	case tenantPinnedMsg:
 		return m, m.tenantPinned(msg)
+	case zoneSettingsOpenedMsg:
+		m.zoneSettingsOpened(msg)
+	case zoneSettingsSavedMsg:
+		m.zoneSettingsSaved(msg)
 	case recordsLoadedMsg:
 		if m.open == nil || m.open.ID != msg.zoneID {
 			return m, nil // the user has moved on to another Zone
@@ -371,6 +378,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.remove != nil {
 			return m, m.removeAccountKey(msg)
+		}
+
+		if m.zoneSettings != nil {
+			return m, m.zoneSettingsKey(msg)
 		}
 
 		if m.recordForm != nil {
@@ -476,6 +487,8 @@ func (m *Model) handle(a Action) tea.Cmd {
 		return m.previewChanges()
 	case ActionApplyTemplate:
 		return m.openTemplateForm()
+	case ActionZoneSettings:
+		return m.openZoneSettings()
 	}
 
 	return nil

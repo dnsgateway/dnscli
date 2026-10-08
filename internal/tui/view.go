@@ -98,6 +98,8 @@ func (m *Model) View() string {
 		view = overlay(view, m.keychainView(), m.width, m.height)
 	case m.remove != nil:
 		view = overlay(view, m.removeAccountView(), m.width, m.height)
+	case m.zoneSettings != nil:
+		view = overlay(view, m.zoneSettingsView(), m.width, m.height)
 	case m.recordForm != nil:
 		view = overlay(view, m.recordFormView(), m.width, m.height)
 		if m.recordForm.picker != nil {

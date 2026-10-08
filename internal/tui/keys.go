@@ -72,6 +72,11 @@ const (
 	// built-in Template's Records into the open Zone's pending Changeset.
 	// Like editing, it obeys the write gate.
 	ActionApplyTemplate
+	// ActionZoneSettings, in the Domains pane, opens the Zone settings
+	// dialog, which turns the highlighted Zone's DNSSEC or HSTS on or off
+	// once confirmed: a Zone write, after Unseal, offered only by a
+	// Provider that can change them.
+	ActionZoneSettings
 )
 
 // Binding maps one Action to its keys.
@@ -117,6 +122,7 @@ func DefaultShortcutProfile() ShortcutProfile {
 			{Action: ActionDiscardChanges, Keys: []string{"D"}, Help: "discard the pending changes (in the preview)"},
 			{Action: ActionApplyOver, Keys: []string{"O"}, Help: "apply over the current values (in the preview, after a conflict)"},
 			{Action: ActionRelistZones, Keys: []string{"L"}},
+			{Action: ActionZoneSettings, Keys: []string{"S"}},
 			{Action: ActionEnrollKeychain, Keys: []string{"K"}, Help: "enroll the Keychain (Touch ID)"},
 			{Action: ActionHelp, Keys: []string{"?"}, Help: "toggle help"},
 			{Action: ActionClose, Keys: []string{"esc"}, Help: "close"},
@@ -137,6 +143,7 @@ type paneBinding struct {
 var paneHelp = map[pane][]paneBinding{
 	paneDomains: {
 		{ActionSelect, "show the Zone's Records"},
+		{ActionZoneSettings, "turn the Zone's DNSSEC or HSTS on or off"},
 	},
 	paneRecords: {
 		{ActionInsert, "insert a new Record"},
