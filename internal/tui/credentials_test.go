@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/dnsgateway/dnsprovider"
+	"github.com/dnsgateway/dnsprovider/providers"
 	"github.com/dnsgateway/dnsprovider/providertest"
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
@@ -305,7 +306,7 @@ func TestEditingOneFieldKeepsTheOthers(t *testing.T) {
 	h.assertShows("Edit Account namecheap.home", "API user", "API key", "Whitelisted client IPv4")
 
 	h.press("down", "down", "down")
-	h.assertShows("Type a new Whitelisted client IPv4")
+	h.clearText(len("192.0.2.10"))
 	h.typeText("198.51.100.4")
 	h.press("enter", "enter")
 
@@ -343,4 +344,158 @@ func TestCredentialFieldsAreTrimmedAndBlankOnesAreMissing(t *testing.T) {
 	if got := storedFields(t, s, accountLabeled(t, s, "namecheap.home")); !maps.Equal(got, want) {
 		t.Errorf("sealed fields = %v, want %v", got, want)
 	}
+}
+
+func TestEditingShowsTheStoredFieldsThatAreNotSecret(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	addOldAccount(t, s, "namecheap", "home", "apiuser:apikey:192.0.2.10")
+
+	f := newFake()
+	h := newFieldsHarness(t, s, f, &fieldBuilds{})
+
+	h.press("shift+tab", "j", "e")
+	h.unsealWith(passphrase)
+	h.assertShows("Edit Account namecheap.home", "apiuser", "192.0.2.10")
+	h.assertHides("apikey")
+
+	// The API key is secret: left empty, it keeps the stored one.
+	h.press("down", "down")
+	h.assertShows("Type a new API key")
+
+	// Retyping a stored value changes nothing: there is nothing to verify.
+	h.press("down")
+	h.clearText(len("192.0.2.10"))
+	h.typeText("192.0.2.10")
+	h.press("enter", "enter")
+
+	h.assertHides("Edit Account")
+
+	if n := f.count(providertest.OpAccount); n != 0 {
+		t.Errorf("Account asked %d times, want none for unchanged credentials", n)
+	}
+}
+
+func TestAnAccountWithUnreadableCredentialsCanBeRenamedOrRepaired(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	addOldAccount(t, s, "godaddy", "old", "only-a-key")
+
+	f := newFake()
+	fb := &fieldBuilds{}
+	h := newFieldsHarness(t, s, f, fb)
+
+	h.press("shift+tab", "j", "e")
+	h.unsealWith(passphrase)
+	h.assertShows("Edit Account godaddy.old", "cannot read the stored credentials", "KEY:SECRET")
+
+	// A rename reseals the credentials as they are.
+	h.typeText("2")
+	h.press("down", "down", "down", "enter")
+	h.assertShows("Saved godaddy.old2.")
+
+	if got := storedPlaintext(t, s, accountLabeled(t, s, "godaddy.old2")); got != "only-a-key" {
+		t.Errorf("renaming resealed the credentials as %q, want them as they were", got)
+	}
+
+	// Typing one field cannot fill the others from them.
+	h.press("e")
+	h.press("down")
+	h.typeText("gd-key")
+	h.press("down", "down", "enter")
+	h.assertShows("Enter the API secret.")
+
+	// Typed anew in full, they replace them.
+	h.typeText("gd-secret")
+	h.press("down", "enter")
+	h.assertShows("Saved godaddy.old2.")
+
+	want := map[string]string{"key": "gd-key", "secret": "gd-secret"}
+	if got := storedFields(t, s, accountLabeled(t, s, "godaddy.old2")); !maps.Equal(got, want) {
+		t.Errorf("sealed fields = %v, want %v", got, want)
+	}
+
+	if got := fb.last(); !maps.Equal(got, want) {
+		t.Errorf("verified with %v, want %v", got, want)
+	}
+}
+
+func TestAnAccountOfAProviderTypeNotInThisBuildCanBeRenamed(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	addOldAccount(t, s, "route53", "old", "r53-token")
+
+	h := newFieldsHarness(t, s, newFake(), &fieldBuilds{})
+
+	h.press("shift+tab", "j", "j", "j", "e")
+	h.unsealWith(passphrase)
+	h.assertShows("Edit Account route53.old", "not available in this build")
+
+	h.typeText("2")
+	h.press("down", "enter")
+	h.assertShows("Saved route53.old2.")
+
+	if got := storedPlaintext(t, s, accountLabeled(t, s, "route53.old2")); got != "r53-token" {
+		t.Errorf("renaming resealed the credentials as %q, want them as they were", got)
+	}
+}
+
+func TestAnAccountWithoutCredentialsNeedsEveryField(t *testing.T) {
+	s, path := enrollFirstAccount(t)
+	addOldAccount(t, s, "godaddy", "home", "gd-key:gd-secret")
+	execSQL(t, path, `UPDATE accounts SET secret = NULL WHERE name = 'home'`)
+
+	f := newFake()
+	h := newFieldsHarness(t, s, f, &fieldBuilds{})
+
+	h.press("shift+tab", "j", "e")
+	h.unsealWith(passphrase)
+
+	h.press("down")
+	h.typeText("gd-key")
+	h.press("down", "down", "enter")
+	h.assertShows("Enter the API secret.")
+	h.assertHides("did not accept")
+
+	if n := f.count(providertest.OpAccount); n != 0 {
+		t.Errorf("Account asked %d times for partial credentials", n)
+	}
+}
+
+func TestFieldsTheProviderCannotBeBuiltFromAreNotItsRefusal(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	h := newHarnessWith(t, s, tui.Deps{Providers: providers.Registry(), UnsealMethod: fastPassphrase()})
+
+	h.fillAccountFields(2, "home", "apiuser", "apikey", "not-an-ip")
+	h.unsealWith(passphrase)
+
+	h.assertShows("Add Account", "The credentials are not valid", "IPv4")
+	h.assertHides("did not accept", "Could not add")
+}
+
+func TestEscCancelsVerifyingAndSavesNothing(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	f := newFake()
+	h := newFieldsHarness(t, s, f, &fieldBuilds{})
+
+	h.fillAccountFields(0, "home", "cf-token")
+	h.typeText(passphrase)
+
+	// Hold the save while the credentials are verified.
+	unseal := h.pressHolding("enter")
+	m, save := h.model.Update(unseal())
+	h.model = m
+
+	h.assertShows("adding…")
+	h.press("esc")
+	h.assertShows("Add Account", "Cancelled: nothing was saved.")
+	h.assertHides("adding…")
+
+	h.send(save())
+	h.assertShows("Add Account", "Cancelled")
+
+	if accounts, _ := s.Accounts(context.Background()); len(accounts) != 1 {
+		t.Fatalf("stored Accounts = %+v, want only cloudflare.work", accounts)
+	}
+
+	// The dialog saves again.
+	h.press("enter")
+	h.assertShows("Discovered no Zones for cloudflare.home")
 }

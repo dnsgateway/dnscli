@@ -45,9 +45,16 @@ type addAccountForm struct {
 	values []string
 	err    string
 	busy   bool // the Account is being saved
+	// attempt counts the dialog's saves; cancel stops the one in flight.
+	attempt int
+	cancel  context.CancelFunc
 	// editing is the Account being edited; nil when adding one. Its
 	// Provider is fixed, and an empty credential field keeps its value.
 	editing *dns.Account
+	// stored are the values the edited Account's credentials hold for
+	// creds, in form order; empty where they hold none, or could not be
+	// read. Only the ones that are not secret are shown.
+	stored []string
 	// caret is the focused text field's caret, in runes back from its end.
 	caret int
 	// picker lists the Provider types; nil when closed.
@@ -112,12 +119,51 @@ func (m *Model) editAccount() tea.Cmd {
 	}
 
 	return m.withSecrets(func() tea.Cmd {
-		m.addForm = &addAccountForm{field: addFieldName, reg: m.deps.Providers, types: []string{a.Provider}, name: a.Name, editing: &a}
-		m.addForm.chooseProvider(0)
-		m.addForm.size = m.measureAccountForm()
+		key, store, ctx, providers := m.key, m.deps.Store, m.ctx, m.providers
 
-		return nil
+		return func() tea.Msg {
+			fields, err := accountCredentials(ctx, store, key, providers, a)
+
+			return editAccountMsg{account: a, fields: fields, err: err}
+		}
 	})
+}
+
+// editAccountMsg carries an Account to edit, with its credentials as
+// stored, or why they could not be read.
+type editAccountMsg struct {
+	account dns.Account
+	fields  map[string]string
+	err     error
+}
+
+// openEditAccount opens the edit-Account dialog, showing the stored
+// credential fields that are not secret. Credentials that cannot be read
+// do not stop it: the Account can still be renamed, or its credentials
+// typed anew.
+func (m *Model) openEditAccount(msg editAccountMsg) {
+	if errors.Is(msg.err, store.ErrAccountNotFound) {
+		return
+	}
+
+	a := msg.account
+	f := &addAccountForm{field: addFieldName, reg: m.deps.Providers, types: []string{a.Provider}, name: a.Name, editing: &a}
+	f.chooseProvider(0)
+
+	f.stored = make([]string, len(f.creds))
+	for i, fd := range f.creds {
+		f.stored[i] = msg.fields[fd.Name]
+		if !fd.Secret {
+			f.values[i] = f.stored[i]
+		}
+	}
+
+	if msg.err != nil {
+		f.err = "dnscli cannot read the stored credentials: " + msg.err.Error() + ". Type every field to replace them, or save to only rename the Account."
+	}
+
+	m.addForm = f
+	f.size = m.measureAccountForm()
 }
 
 // addAccountKey handles a key while the add- or edit-Account dialog is
@@ -133,6 +179,10 @@ func (m *Model) addAccountKey(msg tea.KeyMsg) tea.Cmd {
 	}
 
 	if f.busy {
+		if a == ActionClose {
+			f.cancelSaving()
+		}
+
 		return nil
 	}
 
@@ -209,6 +259,7 @@ func (f *addAccountForm) choosesProvider() bool {
 // accountAddedMsg reports that an Account was saved with its sealed secret.
 type accountAddedMsg struct {
 	account dns.Account
+	attempt int // the dialog's save attempt
 	err     error
 }
 
@@ -240,13 +291,8 @@ func (m *Model) submitAddAccount() tea.Cmd {
 		return nil
 	}
 
-	for i := range f.values {
-		if f.value(i) == "" {
-			f.err = "Enter the " + f.creds[i].Label + "."
-			f.field = addFieldCreds + i
-
-			return nil
-		}
+	if !f.complete() {
+		return nil
 	}
 
 	fields := f.typed()
@@ -307,66 +353,195 @@ func (m *Model) submitEditAccount() tea.Cmd {
 		return nil
 	}
 
-	typed := f.typed()
-
-	if a.Name == old.Name && len(typed) == 0 {
+	if a.Name == old.Name && !f.changed() {
 		m.addForm = nil
 
 		return nil
 	}
 
-	return m.withSecrets(func() tea.Cmd { return m.updateAccount(old, a, typed) })
+	if f.changed() && !f.complete() {
+		return nil
+	}
+
+	typed, changed := f.typed(), f.changed()
+
+	return m.withSecrets(func() tea.Cmd { return m.updateAccount(old, a, typed, changed) })
+}
+
+// changed reports whether a credential field holds a value other than
+// the stored one; an empty one keeps it.
+func (f *addAccountForm) changed() bool {
+	for i := range f.creds {
+		if v := f.value(i); v != "" && v != f.stored[i] {
+			return true
+		}
+	}
+
+	return false
+}
+
+// complete checks that each credential field has a value, typed or
+// stored, else focuses the first without one.
+func (f *addAccountForm) complete() bool {
+	for i, fd := range f.creds {
+		if f.value(i) == "" && (f.editing == nil || f.stored[i] == "") {
+			f.err = "Enter the " + fd.Label + "."
+			f.field = addFieldCreds + i
+
+			return false
+		}
+	}
+
+	return true
 }
 
 // accountEditedMsg reports that an Account was renamed or given new
 // credentials.
 type accountEditedMsg struct {
 	account dns.Account
+	attempt int // the dialog's save attempt
 	err     error
 }
 
 // updateAccount stores the edited Account with its credentials sealed for
-// its new label: the current ones, opened under the old label, with the
-// typed fields replacing theirs. New credentials are verified with the
-// Provider first. The credentials are sealed as a field map, so an
-// Account still holding an old single API token is rewritten.
-func (m *Model) updateAccount(old, a dns.Account, typed map[string]string) tea.Cmd {
-	if m.addForm != nil {
-		m.addForm.busy = true
-	}
-
-	key, store, ctx, providers := m.key, m.deps.Store, m.ctx, m.providers
+// its new label: the stored ones, opened under the old label, with the
+// typed fields replacing theirs. Changed credentials are verified with the
+// Provider first; typed anew in full, they need not be read. Credentials
+// readable as a field map are sealed as one, so an Account still holding
+// an old single API token is rewritten; ones that are not are only
+// resealed for a rename.
+func (m *Model) updateAccount(old, a dns.Account, typed map[string]string, changed bool) tea.Cmd {
+	key, store, providers := m.key, m.deps.Store, m.providers
+	ctx, cancel, attempt := m.startSaving()
+	required := m.addForm.requiredFields()
 
 	return func() tea.Msg {
-		fields, err := accountCredentials(ctx, store, key, providers, old)
+		defer cancel()
+
+		sealed, err := store.AccountSecret(ctx, old.ID)
 		if err != nil {
-			return accountEditedMsg{account: a, err: err}
+			return accountEditedMsg{account: a, attempt: attempt, err: err}
 		}
 
-		// An Account without credentials is only renamed.
-		if fields == nil && len(typed) == 0 {
-			return accountEditedMsg{account: a, err: store.UpdateAccountWithSecret(ctx, a, nil)}
-		}
+		var plain []byte
 
-		if fields == nil {
-			fields = map[string]string{}
-		}
+		var fields map[string]string
 
-		maps.Copy(fields, typed)
-
-		if len(typed) > 0 {
-			if err := providers.Verify(ctx, a.Provider, fields); err != nil {
-				return accountEditedMsg{account: a, err: notAccepted(err)}
+		if sealed != nil {
+			if plain, err = key.Open(sealed, secretLabel(old)); err == nil {
+				fields, err = providers.Credentials(old.Provider, plain)
 			}
 		}
 
-		sealed, err := key.Seal(provider.EncodeCredentials(fields), secretLabel(a))
-		if err != nil {
-			return accountEditedMsg{account: a, err: err}
+		switch {
+		case !changed && sealed == nil:
+			// An Account without credentials is only renamed.
+			return accountEditedMsg{account: a, attempt: attempt, err: saveIfLive(ctx, func() error { return store.UpdateAccountWithSecret(ctx, a, nil) })}
+		case !changed && fields != nil:
+			// Read as a field map, they are sealed as one.
+			plain = provider.EncodeCredentials(fields)
+		case !changed && plain == nil:
+			// Credentials that cannot be opened cannot be resealed.
+			return accountEditedMsg{account: a, attempt: attempt, err: err}
+		case !changed:
+			// Opened but not readable as fields: resealed as they are.
+		default:
+			// Stored fields that cannot be read are replaced in full.
+			if fields == nil {
+				fields = map[string]string{}
+			}
+
+			maps.Copy(fields, typed)
+
+			for _, name := range required {
+				if fields[name] == "" {
+					if err == nil {
+						err = fmt.Errorf("the credentials have no %s", name)
+					}
+
+					return accountEditedMsg{account: a, attempt: attempt, err: err}
+				}
+			}
+
+			if err := verifyCredentials(ctx, providers, a.Provider, fields); err != nil {
+				return accountEditedMsg{account: a, attempt: attempt, err: err}
+			}
+
+			plain = provider.EncodeCredentials(fields)
 		}
 
-		return accountEditedMsg{account: a, err: store.UpdateAccountWithSecret(ctx, a, sealed)}
+		resealed, err := key.Seal(plain, secretLabel(a))
+		if err != nil {
+			return accountEditedMsg{account: a, attempt: attempt, err: err}
+		}
+
+		return accountEditedMsg{account: a, attempt: attempt, err: saveIfLive(ctx, func() error { return store.UpdateAccountWithSecret(ctx, a, resealed) })}
 	}
+}
+
+// requiredFields are the names of the credential fields the dialog asks
+// for, each of which the credentials must hold.
+func (f *addAccountForm) requiredFields() []string {
+	if f == nil {
+		return nil
+	}
+
+	names := make([]string, len(f.creds))
+	for i, fd := range f.creds {
+		names[i] = fd.Name
+	}
+
+	return names
+}
+
+// startSaving marks the dialog busy saving, and returns the context the
+// save runs in, which Esc cancels, its cancel func, and the attempt it is.
+func (m *Model) startSaving() (context.Context, context.CancelFunc, int) {
+	ctx, cancel := context.WithCancel(m.ctx)
+
+	f := m.addForm
+	if f == nil {
+		return ctx, cancel, 0
+	}
+
+	f.busy = true
+	f.attempt++
+	f.cancel = cancel
+
+	return ctx, cancel, f.attempt
+}
+
+// cancelSaving stops the save in flight, which saves nothing, and returns
+// to the dialog. The cancelled attempt's failure is not shown.
+func (f *addAccountForm) cancelSaving() {
+	if f.cancel != nil {
+		f.cancel()
+	}
+
+	f.busy = false
+	f.attempt++
+	f.err = "Cancelled: nothing was saved."
+}
+
+// saveIfLive runs save unless ctx ended, as when the user cancelled
+// while the credentials were verified.
+func saveIfLive(ctx context.Context, save func() error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	return save()
+}
+
+// verifyCredentials asks the Provider whether it accepts the credentials.
+// Fields its Provider cannot be built from are refused without asking it.
+func verifyCredentials(ctx context.Context, providers *provider.Opener, typ string, fields map[string]string) error {
+	err := providers.Verify(ctx, typ, fields)
+	if err == nil || ctx.Err() != nil || errors.As(err, new(*provider.InvalidCredentialsError)) {
+		return err
+	}
+
+	return notAccepted(err)
 }
 
 // notAcceptedError reports credentials the Provider refused when they
@@ -387,7 +562,7 @@ func (e notAcceptedError) Unwrap() error { return e.err }
 // meanwhile must open them with.
 func (m *Model) accountEdited(msg accountEditedMsg) tea.Cmd {
 	if msg.err != nil {
-		m.accountSaveFailed("Could not save the Account: ", msg.account, msg.err)
+		m.accountSaveFailed("Could not save the Account: ", msg.account, msg.attempt, msg.err)
 
 		return nil
 	}
@@ -404,18 +579,24 @@ func (m *Model) accountEdited(msg accountEditedMsg) tea.Cmd {
 	return m.loadCache
 }
 
-// accountSaveFailed shows in the open Account dialog why saving a failed.
-func (m *Model) accountSaveFailed(prefix string, a dns.Account, err error) {
+// accountSaveFailed shows in the open Account dialog why its save attempt
+// failed; a cancelled attempt has nothing to show.
+func (m *Model) accountSaveFailed(prefix string, a dns.Account, attempt int, err error) {
 	f := m.addForm
-	if f == nil {
+	if f == nil || attempt != f.attempt {
 		return
 	}
 
 	f.busy = false
 	f.err = prefix + err.Error()
 
-	if errors.As(err, new(notAcceptedError)) {
+	var invalid *provider.InvalidCredentialsError
+
+	switch {
+	case errors.As(err, new(notAcceptedError)):
 		f.err = err.Error()
+	case errors.As(err, &invalid):
+		f.err = "The credentials are not valid: " + invalid.Err.Error()
 	}
 
 	if errors.Is(err, store.ErrAccountExists) {
@@ -431,36 +612,41 @@ func secretLabel(a dns.Account) string {
 
 // saveAccount verifies the Account's credentials with its Provider, then
 // stores the Account with them sealed by the data key, as a field map.
-// Credentials the Provider refuses save nothing.
+// Credentials the Provider refuses save nothing, nor does a cancelled save.
 func (m *Model) saveAccount(a dns.Account, fields map[string]string) tea.Cmd {
-	if m.addForm != nil {
-		m.addForm.busy = true
-	}
-
-	key, store, ctx, providers := m.key, m.deps.Store, m.ctx, m.providers
+	key, store, providers := m.key, m.deps.Store, m.providers
+	ctx, cancel, attempt := m.startSaving()
 
 	return func() tea.Msg {
-		if err := providers.Verify(ctx, a.Provider, fields); err != nil {
-			return accountAddedMsg{account: a, err: notAccepted(err)}
+		defer cancel()
+
+		if err := verifyCredentials(ctx, providers, a.Provider, fields); err != nil {
+			return accountAddedMsg{account: a, attempt: attempt, err: err}
 		}
 
 		sealed, err := key.Seal(provider.EncodeCredentials(fields), secretLabel(a))
 		if err != nil {
-			return accountAddedMsg{err: err}
+			return accountAddedMsg{account: a, attempt: attempt, err: err}
 		}
 
-		added, err := store.AddAccountWithSecret(ctx, a, sealed)
+		var added dns.Account
+
+		err = saveIfLive(ctx, func() error {
+			added, err = store.AddAccountWithSecret(ctx, a, sealed)
+
+			return err
+		})
 		if err != nil {
-			return accountAddedMsg{account: a, err: err}
+			return accountAddedMsg{account: a, attempt: attempt, err: err}
 		}
 
-		return accountAddedMsg{account: added}
+		return accountAddedMsg{account: added, attempt: attempt}
 	}
 }
 
 func (m *Model) accountAdded(msg accountAddedMsg) tea.Cmd {
 	if msg.err != nil {
-		m.accountSaveFailed("Could not add the Account: ", msg.account, msg.err)
+		m.accountSaveFailed("Could not add the Account: ", msg.account, msg.attempt, msg.err)
 
 		return nil
 	}
@@ -610,10 +796,10 @@ func (m *Model) addAccountView() string {
 // busyLines are the dialog's lines while the Account is being saved.
 func (f *addAccountForm) busyLines() []string {
 	if f.editing != nil {
-		return []string{"", hintStyle.Render("saving…")}
+		return []string{"", hintStyle.Render("saving… Esc cancels")}
 	}
 
-	return []string{"", hintStyle.Render("adding…")}
+	return []string{"", hintStyle.Render("adding… Esc cancels")}
 }
 
 func (f *addAccountForm) title() string {
@@ -682,8 +868,10 @@ func (m *Model) accountFormHints(field int) []string {
 // credentialHint is the hint of a credential field.
 func credentialHint(fd dnsprovider.Field, editing bool) string {
 	switch {
-	case editing:
+	case editing && fd.Secret:
 		return "Type a new " + fd.Label + ", or leave it empty to keep the current one."
+	case editing:
+		return "The " + fd.Label + " the Provider gave the Account; left empty, it keeps the current one."
 	case fd.Secret:
 		return "The " + fd.Label + " the Provider issued for the Account; dnscli seals it in its local database."
 	default:

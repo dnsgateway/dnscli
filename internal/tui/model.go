@@ -296,6 +296,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.accountAdded(msg)
 	case zonesDiscoveredMsg:
 		return m, m.zonesDiscovered(msg)
+	case editAccountMsg:
+		m.openEditAccount(msg)
 	case accountEditedMsg:
 		return m, m.accountEdited(msg)
 	case accountRemovedMsg:
