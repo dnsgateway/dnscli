@@ -2,6 +2,7 @@ package tui_test
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/dnsgateway/dnsprovider"
@@ -73,4 +74,37 @@ func TestOnboardingAZoneNameAsksToConfirmThenCachesItPendingWithItsNameservers(t
 	h.press("esc")
 	h.assertHides("Onboard a zone at", "bob.ns.cloudflare.com")
 	h.assertShows("new.example · pending")
+}
+
+func TestAZoneNameIsCheckedBeforeTheProviderIsAsked(t *testing.T) {
+	cases := map[string]string{
+		"":                                   "Enter a zone name",
+		"example":                            "a domain such as example.com",
+		"bad name.example":                   "letters, digits and hyphens",
+		"-bad.example":                       "letters, digits and hyphens",
+		"bad..example":                       "letters, digits and hyphens",
+		"bücher.example":                     "punycode",
+		"Work.Example.":                      "cloudflare.work has work.example already",
+		strings.Repeat("a", 64) + ".example": "63",
+	}
+
+	for typed, want := range cases {
+		t.Run(typed, func(t *testing.T) {
+			s, _ := enrollFirstAccount(t)
+			f := onboardFake()
+			h := newAccountHarness(t, s, f)
+
+			h.press("i")
+			h.unsealWith(passphrase)
+			h.typeText(typed)
+			h.press("enter")
+
+			h.assertShows("Onboard a zone at cloudflare.work", want)
+			h.assertHides("at cloudflare.work?")
+
+			if calls := createZoneCalls(f); len(calls) != 0 {
+				t.Fatalf("CreateZone calls = %q, want none", calls)
+			}
+		})
+	}
 }

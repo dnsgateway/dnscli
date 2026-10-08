@@ -2,7 +2,9 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"strings"
+	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -244,9 +246,55 @@ func (m *Model) onboardKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 // checkOnboardName checks a zone name typed to Onboard in an Account, and
-// returns it as Providers list it.
+// returns it as Providers list it: lower case, without a trailing dot. It
+// must be a domain name, in ASCII, of two labels at least, and not one
+// the Account already hosts; a Moved Zone's name may be Onboarded again.
 func (m *Model) checkOnboardName(a dns.Account, typed string) (string, error) {
-	return strings.ToLower(strings.TrimSuffix(strings.TrimSpace(typed), ".")), nil
+	name := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(typed), "."))
+	if err := checkZoneName(name); err != nil {
+		return "", err
+	}
+
+	for _, z := range m.zones {
+		if z.AccountID == a.ID && nameKey(z.Name) == name && z.State != dnsprovider.HostingMoved {
+			return "", fmt.Errorf("%s has %s already.", a.Label(), name)
+		}
+	}
+
+	return name, nil
+}
+
+// maxZoneName is the longest domain name, in characters, without the
+// trailing dot.
+const maxZoneName = 253
+
+// checkZoneName checks that name, in lower case without a trailing dot,
+// is a domain name a zone can be Onboarded for.
+func checkZoneName(name string) error {
+	switch {
+	case name == "":
+		return errors.New("Enter a zone name, such as example.com.")
+	case strings.ContainsFunc(name, func(r rune) bool { return r > unicode.MaxASCII }):
+		return errors.New("Enter the zone name in ASCII: an internationalized name in its punycode form (xn--…).")
+	case len(name) > maxZoneName:
+		return fmt.Errorf("A zone name is at most %d characters long.", maxZoneName)
+	case !strings.Contains(name, "."):
+		return errors.New("Enter a domain such as example.com, not a top-level domain alone.")
+	}
+
+	for _, label := range strings.Split(name, ".") {
+		if len(label) > 63 {
+			return errors.New("Each label of a zone name is at most 63 characters long.")
+		}
+
+		if label == "" || label[0] == '-' || label[len(label)-1] == '-' ||
+			strings.ContainsFunc(label, func(r rune) bool { return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-') }) {
+			return errors.New("A zone name is labels of letters, digits and hyphens, joined by dots; " +
+				"no label starts or ends with a hyphen.")
+		}
+	}
+
+	return nil
 }
 
 // createZone Onboards the zone name confirmed, and caches the Zone the
