@@ -35,11 +35,11 @@ func TestAnAccountWhoseTokenReachesOneTenantActsWithinIt(t *testing.T) {
 	tb := &tenantBuilds{}
 	discoverRefreshAndApply(t, f, tb)
 
-	// The first build verifies the token as typed and the second lists
-	// the Tenants; every later one is scoped.
+	// The first build lists the Tenants, while the token is verified;
+	// every later one is scoped.
 	built := tb.built()
-	if len(built) < 5 || built[0] != "" || built[1] != "" || slices.ContainsFunc(built[2:], func(id string) bool { return id != acmeTenant }) {
-		t.Errorf("built with Tenants %q, want the first two unscoped and every later one scoped to %s", built, acmeTenant)
+	if len(built) < 4 || built[0] != "" || slices.ContainsFunc(built[1:], func(id string) bool { return id != acmeTenant }) {
+		t.Errorf("built with Tenants %q, want the first unscoped and every later one scoped to %s", built, acmeTenant)
 	}
 
 	if n := f.count(providertest.OpTenants); n != 1 {
@@ -73,4 +73,23 @@ func TestAnAccountWhoseTokenReachesSeveralTenantsOrMayNotListThemRunsUnscoped(t 
 			}
 		})
 	}
+}
+
+func TestAnAccountOwnedTokenIsVerifiedWithinItsTenant(t *testing.T) {
+	f := refreshZones()
+	f.SetTenants(dnsprovider.Tenant{ID: acmeTenant, Name: "Acme Ltd"})
+
+	s, _ := openStore(t)
+	h := newHarnessWith(t, s, tui.Deps{Providers: f.tenantRegistry(&tenantBuilds{}), UnsealMethod: fastPassphrase()})
+
+	// Cloudflare verifies an account-owned token only within its account,
+	// which the form does not ask for.
+	h.fillAddAccount("work", ownedTokenPrefix+"tok")
+	h.typeText(passphrase)
+	h.press("tab")
+	h.typeText(passphrase)
+	h.press("enter")
+
+	h.assertShows("work.example")
+	h.assertHides("did not accept")
 }

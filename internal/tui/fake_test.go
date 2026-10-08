@@ -1,8 +1,10 @@
 package tui_test
 
 import (
+	"context"
 	"maps"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/dnsgateway/dnsprovider"
@@ -149,9 +151,30 @@ func (f *fakeProvider) tenantRegistry(tb *tenantBuilds) dnsprovider.Registry {
 			tb.tenants = append(tb.tenants, m["account"])
 			tb.mu.Unlock()
 
-			return inner.New(map[string]string{"token": m["token"]}, opts...)
+			p, err := inner.New(map[string]string{"token": m["token"]}, opts...)
+			if err != nil || m["account"] != "" || !strings.HasPrefix(m["token"], ownedTokenPrefix) {
+				return p, err
+			}
+
+			return unscopedOwned{p}, nil
 		},
 	}}
+}
+
+// ownedTokenPrefix marks a Cloudflare account-owned token, which only
+// verifies within its Tenant.
+const ownedTokenPrefix = "owned-"
+
+// unscopedOwned is an account-owned token's Provider built without its
+// Tenant: Cloudflare refuses to verify the token outside it.
+type unscopedOwned struct{ dnsprovider.Provider }
+
+func (u unscopedOwned) Tenants(ctx context.Context) ([]dnsprovider.Tenant, error) {
+	return u.Provider.(dnsprovider.TenantLister).Tenants(ctx)
+}
+
+func (unscopedOwned) Account(context.Context) (dnsprovider.AccountInfo, error) {
+	return dnsprovider.AccountInfo{}, dnsprovider.ErrUnauthorized
 }
 
 func (tb *tenantBuilds) built() []string {

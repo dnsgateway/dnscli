@@ -88,18 +88,14 @@ func (o *Opener) Open(ctx context.Context, typ string, fields map[string]string)
 	return f.New(fields, o.opts...)
 }
 
-// Verify builds the Provider of type typ from fields as they are, without
-// looking for a Tenant, and asks it for its Account, which proves the
-// credentials work. It is the check made before an Account is saved. The
-// nameservers the Account expects are kept for the credentials, as
-// Nameservers would keep them.
+// Verify builds the Provider of type typ from fields as Open does,
+// scoped to the Tenant it finds, and asks it for its Account, which
+// proves the credentials work: a Tenant-owned token is only verified
+// within its Tenant. It is the check made before an Account is saved.
+// The Tenant and the nameservers the Account expects are kept for the
+// credentials, as Open and Nameservers would keep them.
 func (o *Opener) Verify(ctx context.Context, typ string, fields map[string]string) error {
-	f, ok := o.reg[typ]
-	if !ok || f.New == nil {
-		return fmt.Errorf("Provider type %q is not available in this build", typ)
-	}
-
-	p, err := f.New(maps.Clone(fields), o.opts...)
+	p, err := o.Open(ctx, typ, fields)
 	if err != nil {
 		return err
 	}

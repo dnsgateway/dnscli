@@ -146,9 +146,46 @@ func (r *tenanted) registry() dnsprovider.Registry {
 			r.built = append(r.built, m["scope"])
 			r.mu.Unlock()
 
-			return inner.New(map[string]string{"token": m["token"]}, opts...)
+			p, err := inner.New(map[string]string{"token": m["token"]}, opts...)
+			if err != nil {
+				return nil, err
+			}
+
+			return scoped{Provider: p, scope: m["scope"], owned: strings.HasPrefix(m["token"], ownedPrefix)}, nil
 		},
 	}}
+}
+
+// ownedPrefix marks a token owned by a Tenant, as Cloudflare's
+// account-owned tokens are: it verifies only within its Tenant.
+const ownedPrefix = "owned-"
+
+// scoped is a Provider built by tenanted, which honours the Tenant it was
+// built with, as Cloudflare does: unscoped, a Tenant-owned token is
+// refused; scoped, the Account names its Tenant and expects nameservers
+// of its own, ns.<Tenant>.
+type scoped struct {
+	dnsprovider.Provider
+	scope string
+	owned bool
+}
+
+func (s scoped) Tenants(ctx context.Context) ([]dnsprovider.Tenant, error) {
+	return s.Provider.(dnsprovider.TenantLister).Tenants(ctx)
+}
+
+func (s scoped) Account(ctx context.Context) (dnsprovider.AccountInfo, error) {
+	if s.scope == "" && s.owned {
+		return dnsprovider.AccountInfo{}, dnsprovider.ErrUnauthorized
+	}
+
+	info, err := s.Provider.Account(ctx)
+	if err == nil && s.scope != "" {
+		info.Tenant = dnsprovider.Tenant{ID: s.scope}
+		info.Nameservers = []string{"ns." + s.scope}
+	}
+
+	return info, err
 }
 
 func (r *tenanted) builds() []string {
@@ -383,7 +420,7 @@ func TestOpenDoesNotChangeTheFieldMapItIsGiven(t *testing.T) {
 	}
 }
 
-func TestVerifyAsksTheAccountWithTheFieldsAsTyped(t *testing.T) {
+func TestVerifyRefusesCredentialsTheProviderRefuses(t *testing.T) {
 	r := newTenanted(dnsprovider.Tenant{ID: tenantID})
 	r.fake.Fail(providertest.OpAccount, dnsprovider.ErrUnauthorized)
 
@@ -392,18 +429,51 @@ func TestVerifyAsksTheAccountWithTheFieldsAsTyped(t *testing.T) {
 		t.Fatalf("Verify = %v, want ErrUnauthorized", err)
 	}
 
-	if b := r.builds(); !slices.Equal(b, []string{""}) {
-		t.Errorf("built with Tenants %q, want one build as typed", b)
-	}
-
-	if n := count(r.fake, providertest.OpTenants); n != 0 {
-		t.Errorf("Tenants listed %d times, want none", n)
-	}
-
 	r.fake.Fail(providertest.OpAccount, nil)
 
 	if err := provider.NewOpener(r.registry()).Verify(context.Background(), "tenanted", creds("good")); err != nil {
 		t.Errorf("Verify of a good token = %v", err)
+	}
+}
+
+func TestVerifyScopesATenantOwnedTokenToTheOnlyTenantItReaches(t *testing.T) {
+	r := newTenanted(dnsprovider.Tenant{ID: tenantID, Name: "Acme Ltd"})
+	o := provider.NewOpener(r.registry())
+
+	if err := o.Verify(context.Background(), "tenanted", creds(ownedPrefix+"tok")); err != nil {
+		t.Fatalf("Verify of a Tenant-owned token = %v, want it verified within its Tenant", err)
+	}
+
+	if b := r.builds(); len(b) == 0 || b[len(b)-1] != tenantID {
+		t.Errorf("built with Tenants %q, want the only one last", b)
+	}
+
+	// Opening the saved credentials keeps the Tenant Verify found.
+	open(t, o, ownedPrefix+"tok")
+
+	if n := count(r.fake, providertest.OpTenants); n != 1 {
+		t.Errorf("Tenants listed %d times, want once", n)
+	}
+}
+
+func TestVerifyKeepsTheNameserversOfTheProviderOpenBuilds(t *testing.T) {
+	r := newTenanted(dnsprovider.Tenant{ID: tenantID})
+	r.fake.SetAccount(dnsprovider.AccountInfo{Nameservers: []string{"ns.unscoped"}})
+
+	o := provider.NewOpener(r.registry())
+	ctx := context.Background()
+
+	if err := o.Verify(ctx, "tenanted", creds("tok")); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+
+	p, err := o.Open(ctx, "tenanted", creds("tok"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	if ns, err := o.Nameservers(ctx, p, "tenanted", creds("tok")); err != nil || !slices.Equal(ns, []string{"ns." + tenantID}) {
+		t.Errorf("Nameservers = %q, %v; want the scoped Account's", ns, err)
 	}
 }
 
