@@ -109,8 +109,9 @@ func TestTheAccountsPaneInsertsAnAccountWithTheRecordKeys(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
 	h := newAccountHarness(t, s, newFake())
 
-	// Outside the Accounts and Records panes, the keys say where they act.
-	for _, key := range []string{"i", "e", "d"} {
+	// Outside the Accounts and Records panes, the keys say where they act;
+	// insert, in the Domains pane, Onboards a zone name.
+	for _, key := range []string{"e", "d"} {
 		h.press(key)
 		h.assertShows("Accounts in the Accounts pane")
 		h.assertHides("Add Account", "Edit Account", "Remove Account", "Unseal")

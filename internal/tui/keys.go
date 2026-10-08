@@ -143,6 +143,7 @@ type paneBinding struct {
 var paneHelp = map[pane][]paneBinding{
 	paneDomains: {
 		{ActionSelect, "show the Zone's Records"},
+		{ActionInsert, "Onboard a zone name in the Account shown (starts hosting, never registers)"},
 		{ActionZoneSettings, "turn the Zone's DNSSEC or HSTS on or off"},
 	},
 	paneRecords: {

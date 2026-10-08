@@ -136,6 +136,8 @@ type Model struct {
 	// zoneSettings turns a Zone's DNSSEC or HSTS on or off; nil when
 	// closed.
 	zoneSettings *zoneSettings
+	// onboard Onboards a zone name in an Account; nil when closed.
+	onboard *onboardDialog
 	// editAfterPick is the ID of the Account whose edit dialog was asked
 	// for while the Tenant picker was open; zero when none was. It opens
 	// once the picker closes, rather than over it.
@@ -342,6 +344,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.zoneSettingsOpened(msg)
 	case zoneSettingsSavedMsg:
 		m.zoneSettingsSaved(msg)
+	case onboardOpenedMsg:
+		m.onboardOpened(msg)
+	case zoneOnboardedMsg:
+		return m, m.zoneOnboarded(msg)
 	case recordsLoadedMsg:
 		if m.open == nil || m.open.ID != msg.zoneID {
 			return m, nil // the user has moved on to another Zone
@@ -382,6 +388,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.zoneSettings != nil {
 			return m, m.zoneSettingsKey(msg)
+		}
+
+		if m.onboard != nil {
+			return m, m.onboardKey(msg)
 		}
 
 		if m.recordForm != nil {
@@ -503,6 +513,8 @@ func (m *Model) itemAction(a Action) tea.Cmd {
 		return m.accountAction(a)
 	case m.focus == paneRecords:
 		return m.recordAction(a)
+	case a == ActionInsert:
+		return m.openOnboard()
 	}
 
 	m.notice = notice{text: fmt.Sprintf("Records are edited in the Records pane, Accounts in the Accounts pane (%s).", m.keys.keysFor(ActionNextPane)), err: true}
