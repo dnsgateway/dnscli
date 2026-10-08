@@ -217,3 +217,31 @@ func TestRelistingStoresEachZonesHostingState(t *testing.T) {
 		}
 	}
 }
+
+// An unscoped Cloudflare token can list a zone name once per Tenant it
+// reaches: the cache keeps the one the Provider serves.
+func TestAZoneNameListedTwiceIsCachedInItsServedHostingState(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+
+	f := newFake().
+		AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1"}).
+		AddZone(dns.Zone{Name: "work.example", ProviderID: "zw8"}).
+		AddZone(dns.Zone{Name: "work.test", ProviderID: "zw2"}).
+		AddZone(dns.Zone{Name: "work.test", ProviderID: "zw9"})
+	f.SetHostingState("zw8", dnsprovider.HostingMoved)
+	f.SetHostingState("zw2", dnsprovider.HostingMoved)
+	f.SetHostingState("zw9", dnsprovider.HostingPending)
+
+	h := newAccountHarness(t, s, f)
+	h.press("shift+tab", "L")
+	h.unsealWith(passphrase)
+	h.assertShows("Re-listed cloudflare.work")
+
+	if z := zoneNamed(t, s, "work.example"); z.ProviderID != "zw1" || z.State != dnsprovider.HostingActive {
+		t.Errorf("work.example = %+v, want zw1 active", z)
+	}
+
+	if z := zoneNamed(t, s, "work.test"); z.ProviderID != "zw9" || z.State != dnsprovider.HostingPending {
+		t.Errorf("work.test = %+v, want zw9 pending", z)
+	}
+}

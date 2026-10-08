@@ -902,7 +902,7 @@ func discover(ctx context.Context, s *store.Store, key *vault.Key, providers *pr
 		return 0, store.ZoneSync{}, err
 	}
 
-	zones := provider.CacheZones(listed)
+	zones := servedZones(provider.CacheZones(listed))
 
 	expectAccountNameservers(zones, func() ([]string, error) {
 		return providers.Nameservers(ctx, p, a.Provider, fields)
@@ -914,6 +914,42 @@ func discover(ctx context.Context, s *store.Store, key *vault.Key, providers *pr
 	}
 
 	return len(zones), sync, nil
+}
+
+// servedZones keeps one Zone per zone name, as the cache holds them: an
+// unscoped Cloudflare token lists a zone name once per Tenant holding it.
+// It keeps the Active one, else the Pending one, else the first listed,
+// as the module's Zone(name) prefers them, in the order listed.
+func servedZones(zones []dns.Zone) []dns.Zone {
+	rank := func(s dnsprovider.HostingState) int {
+		switch s {
+		case dnsprovider.HostingActive:
+			return 0
+		case dnsprovider.HostingPending:
+			return 1
+		default:
+			return 2
+		}
+	}
+
+	at := map[string]int{}
+	out := zones[:0:0]
+
+	for _, z := range zones {
+		i, seen := at[z.Name]
+		if !seen {
+			at[z.Name] = len(out)
+			out = append(out, z)
+
+			continue
+		}
+
+		if rank(z.State) < rank(out[i].State) {
+			out[i] = z
+		}
+	}
+
+	return out
 }
 
 // expectAccountNameservers gives each Zone the Provider listed without
