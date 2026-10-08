@@ -532,18 +532,3 @@ func (m *Model) onboardView() string {
 
 	return dialogView(title, fields, 0, !d.confirming && !d.busy, notes)
 }
-
-// hostingWord says a Hosting State: "active", "pending", "moved" or
-// "unknown".
-func hostingWord(s dnsprovider.HostingState) string {
-	switch s {
-	case dnsprovider.HostingActive:
-		return "active"
-	case dnsprovider.HostingPending:
-		return "pending"
-	case dnsprovider.HostingMoved:
-		return "moved"
-	}
-
-	return "unknown"
-}

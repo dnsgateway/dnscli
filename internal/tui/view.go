@@ -233,14 +233,26 @@ func markedLabel(label, mark string, w int) string {
 // Onboarded and waiting for Delegation, or one whose Delegation left. An
 // Active Zone, or one whose Hosting State is not known yet, has none.
 func hostingMark(s dnsprovider.HostingState) string {
-	switch s {
-	case dnsprovider.HostingPending:
-		return " · pending"
-	case dnsprovider.HostingMoved:
-		return " · moved"
-	default:
-		return ""
+	if s == dnsprovider.HostingPending || s == dnsprovider.HostingMoved {
+		return " · " + hostingWord(s)
 	}
+
+	return ""
+}
+
+// hostingWord says a Hosting State: "active", "pending", "moved" or
+// "unknown".
+func hostingWord(s dnsprovider.HostingState) string {
+	switch s {
+	case dnsprovider.HostingActive:
+		return "active"
+	case dnsprovider.HostingPending:
+		return "pending"
+	case dnsprovider.HostingMoved:
+		return "moved"
+	}
+
+	return "unknown"
 }
 
 func (m *Model) accountLines(w, h int) []string {
