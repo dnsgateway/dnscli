@@ -230,7 +230,7 @@ func (m *Model) recordLines(w, h int) []string {
 			"",
 			fmt.Sprintf("  No Accounts yet: press %s to add your first Account.", m.keys.keysFor(ActionInsert)),
 			"",
-			"  An Account is a Provider, a name and an API token.",
+			"  An Account is a Provider, a name and its credentials.",
 			hintStyle.Render("  dnscli keeps Accounts in its local database; it is not a disposable cache."),
 		}
 	case m.open == nil:

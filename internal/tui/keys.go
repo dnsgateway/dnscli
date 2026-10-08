@@ -148,7 +148,7 @@ var paneHelp = map[pane][]paneBinding{
 	paneAccounts: {
 		{ActionSelect, "show only the Account's Zones"},
 		{ActionInsert, "add an Account"},
-		{ActionEdit, "edit the Account: its name or API token"},
+		{ActionEdit, "edit the Account: its name or credentials"},
 		{ActionDelete, "remove the Account"},
 		{ActionRelistZones, "re-list the Account's Zones"},
 	},

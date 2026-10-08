@@ -176,7 +176,7 @@ func (m *Model) removeAccountView() string {
 	label := c.account.Label()
 
 	notes := wrapNote(lipgloss.NewStyle(), "Removing "+label+" deletes "+zoneCount(c.zones)+
-		", their cached Records and its API token from this database. Nothing changes at the Provider.", noteWidth)
+		", their cached Records and its credentials from this database. Nothing changes at the Provider.", noteWidth)
 	notes = append(notes, "")
 	notes = append(notes, wrapNote(lipgloss.NewStyle(), "Type "+label+" to confirm.", noteWidth)...)
 

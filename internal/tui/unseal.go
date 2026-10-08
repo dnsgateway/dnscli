@@ -301,7 +301,7 @@ func (m *Model) unsealView() string {
 	if p.enroll {
 		title = "Choose a passphrase"
 		fields = append(fields, dialogField{label: "Repeat", value: p.repeat, masked: true})
-		notes = append(notes, wrapNote(lipgloss.NewStyle(), "The passphrase protects the API tokens of every Account. dnscli asks for it once per session.", noteWidth)...)
+		notes = append(notes, wrapNote(lipgloss.NewStyle(), "The passphrase protects the credentials of every Account. dnscli asks for it once per session.", noteWidth)...)
 		notes = append(notes, "")
 		notes = append(notes, wrapNote(hintStyle, notDisposableWarning, noteWidth)...)
 	} else {

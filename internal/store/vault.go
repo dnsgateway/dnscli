@@ -10,7 +10,7 @@ import (
 	"github.com/sergelogvinov/dnscli/internal/vault"
 )
 
-// AddAccountWithSecret stores a new Account with its API token, already
+// AddAccountWithSecret stores a new Account with its credentials, already
 // sealed with the data key, and returns it with its ID set.
 func (s *Store) AddAccountWithSecret(ctx context.Context, a dns.Account, sealed []byte) (dns.Account, error) {
 	res, err := s.db.ExecContext(ctx, `INSERT INTO accounts (provider, name, secret) VALUES (?, ?, ?)`, a.Provider, a.Name, sealed)
@@ -26,10 +26,10 @@ func (s *Store) AddAccountWithSecret(ctx context.Context, a dns.Account, sealed 
 	return a, nil
 }
 
-// UpdateAccountWithSecret renames a stored Account and replaces its API
-// token, already sealed with the data key for its new label: the sealed
-// token is bound to the label, so the two change together; nil keeps an
-// Account without a token without one. It returns
+// UpdateAccountWithSecret renames a stored Account and replaces its
+// credentials, already sealed with the data key for its new label: the
+// sealed credentials are bound to the label, so the two change together;
+// nil keeps an Account without credentials without them. It returns
 // ErrAccountExists when another Account has the new label, and
 // ErrAccountNotFound when the Account is not stored.
 func (s *Store) UpdateAccountWithSecret(ctx context.Context, a dns.Account, sealed []byte) error {
@@ -49,7 +49,7 @@ func (s *Store) UpdateAccountWithSecret(ctx context.Context, a dns.Account, seal
 	return nil
 }
 
-// AccountSecret returns an Account's sealed API token; nil when it has none.
+// AccountSecret returns an Account's sealed credentials; nil when it has none.
 // It returns ErrAccountNotFound when the Account is not stored.
 func (s *Store) AccountSecret(ctx context.Context, accountID int64) ([]byte, error) {
 	var sealed []byte

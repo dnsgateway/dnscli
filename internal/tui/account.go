@@ -103,7 +103,7 @@ func (f *addAccountForm) saveField() int {
 }
 
 // editAccount opens the edit-Account dialog for the highlighted Account,
-// which renames it or replaces its API token. Either reseals the token, so
+// which renames it or replaces its credentials. Either reseals them, so
 // a sealed session Unseals first.
 func (m *Model) editAccount() tea.Cmd {
 	a, ok := m.highlightedAccount()
@@ -223,7 +223,7 @@ type zonesDiscoveredMsg struct {
 }
 
 // submitAddAccount validates the dialog and saves the Account, after
-// Unseal: sealing its API token needs the data key.
+// Unseal: sealing its credentials needs the data key.
 func (m *Model) submitAddAccount() tea.Cmd {
 	f := m.addForm
 	f.err = ""
@@ -376,9 +376,9 @@ func (e notAcceptedError) Error() string {
 func (e notAcceptedError) Unwrap() error { return e.err }
 
 // accountEdited reports an edit. A saved Account replaces the one this
-// session holds at once, not only when the cache reloads: its API token is
-// already sealed for its new label, which a Refresh or Apply started
-// meanwhile must open it with.
+// session holds at once, not only when the cache reloads: its credentials
+// are already sealed for its new label, which a Refresh or Apply started
+// meanwhile must open them with.
 func (m *Model) accountEdited(msg accountEditedMsg) tea.Cmd {
 	if msg.err != nil {
 		m.accountSaveFailed("Could not save the Account: ", msg.account, msg.err)
@@ -418,7 +418,7 @@ func (m *Model) accountSaveFailed(prefix string, a dns.Account, err error) {
 	}
 }
 
-// secretLabel binds a sealed API token to its Account.
+// secretLabel binds sealed credentials to their Account.
 func secretLabel(a dns.Account) string {
 	return "dnscli account secret " + a.Label()
 }
