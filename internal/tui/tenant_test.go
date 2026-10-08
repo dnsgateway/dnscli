@@ -576,6 +576,34 @@ func TestEveryRefreshThatAskedForTheTenantRunsAgainOnceItIsPicked(t *testing.T) 
 	}
 }
 
+func TestAnEditDialogDoesNotOpenOverTheTenantPicker(t *testing.T) {
+	f := refreshZones()
+	f.SetTenants(twoTenants...)
+
+	h, s := newUpgradedHarness(t, f)
+	h.press("L")
+	h.unsealWith(passphrase)
+	h.press("esc")
+
+	// The edit dialog reads the credentials while a re-listing asks for
+	// the Tenant.
+	readCredentials := h.pressHolding("e")
+	h.press("L")
+	h.assertShows("Tenant of cloudflare.old")
+	h.run(readCredentials)
+
+	h.assertShows("Tenant of cloudflare.old")
+	h.assertHides("Edit Account")
+
+	// Picked, the edit dialog opens.
+	h.press("enter")
+	h.assertShows("Edit Account cloudflare.old")
+
+	if got := storedFields(t, s, accountLabeled(t, s, "cloudflare.old"))["account"]; got != acmeTenant {
+		t.Errorf("stored Tenant = %q, want %s", got, acmeTenant)
+	}
+}
+
 func TestTheTenantPickerActsOnTheAccountAsItIsWhenPicked(t *testing.T) {
 	f := refreshZones()
 	f.SetTenants(twoTenants...)

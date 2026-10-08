@@ -87,7 +87,8 @@ func (m *Model) dialogOpen() bool {
 }
 
 // tenantPickKey handles a key while the Tenant picker is open: Enter
-// saves the Tenant picked, Esc leaves the Account without one.
+// saves the Tenant picked, Esc leaves the Account without one. An edit
+// dialog asked for while it was open opens once it closes.
 func (m *Model) tenantPickKey(msg tea.KeyMsg) tea.Cmd {
 	a := m.keys.action(msg.String())
 	if quitsDialog(a, msg) {
@@ -100,6 +101,7 @@ func (m *Model) tenantPickKey(msg tea.KeyMsg) tea.Cmd {
 	}
 
 	m.tenantPick = nil
+	edit := m.editHeldBack()
 
 	account, ok := m.account(tp.accountID)
 
@@ -107,16 +109,30 @@ func (m *Model) tenantPickKey(msg tea.KeyMsg) tea.Cmd {
 	case !ok:
 		m.notice = notice{text: "The Account was removed meanwhile."}
 
-		return nil
+		return edit
 	case tp.picked == nil:
 		m.notice = notice{text: account.Label() + " acts within no Tenant yet: it is asked for on its next use."}
 
-		return nil
+		return edit
 	}
 
 	m.notice = notice{text: "Saving the Tenant of " + account.Label() + "…"}
 
-	return m.pinTenant(account, tp)
+	return tea.Batch(m.pinTenant(account, tp), edit)
+}
+
+// editHeldBack opens the edit dialog held back while the Tenant picker
+// was open, reading the Account and its credentials as they are now.
+func (m *Model) editHeldBack() tea.Cmd {
+	id := m.editAfterPick
+	m.editAfterPick = 0
+
+	a, ok := m.account(id)
+	if id == 0 || !ok {
+		return nil
+	}
+
+	return m.editAccountOf(a)
 }
 
 // tenantPinnedMsg reports that an Account's credentials were saved with

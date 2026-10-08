@@ -133,6 +133,10 @@ type Model struct {
 	// tenantPick asks which Tenant an Account acts within; nil when
 	// closed.
 	tenantPick *tenantPick
+	// editAfterPick is the ID of the Account whose edit dialog was asked
+	// for while the Tenant picker was open; zero when none was. It opens
+	// once the picker closes, rather than over it.
+	editAfterPick int64
 }
 
 // notice is a message for the status bar.
@@ -310,6 +314,12 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case zonesDiscoveredMsg:
 		return m, m.zonesDiscovered(msg)
 	case editAccountMsg:
+		if m.tenantPick != nil {
+			m.editAfterPick = msg.account.ID
+
+			return m, nil
+		}
+
 		m.openEditAccount(msg)
 	case accountEditedMsg:
 		return m, m.accountEdited(msg)
