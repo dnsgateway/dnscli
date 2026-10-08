@@ -209,27 +209,39 @@ func TestAZoneRelistedWithAnotherProviderIDForgetsItsRecordsAndRefresh(t *testin
 	}
 }
 
-func TestSaveZoneStatusStoresTheStatusAloneAndReturnsTheZone(t *testing.T) {
+// on is a setting turned on, for a ZoneUpdate.
+var on = true
+
+func TestSaveZoneStatusStoresTheSettingsTheUpdateSetsAndReturnsTheZone(t *testing.T) {
 	ctx := context.Background()
 	s := open(t, filepath.Join(t.TempDir(), "dnscli.db"))
 
 	refreshed := time.Date(2026, 10, 7, 8, 0, 0, 0, time.UTC)
 	z := putZone(t, s, dns.Zone{Name: "example.com", ProviderID: "z1", Serial: 2026100701, RefreshedAt: refreshed})
 
-	at := time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC)
-	status := dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Pending, HSTS: dnsprovider.On}
+	z.Status, z.StatusAt = dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Off, HSTS: dnsprovider.On}, refreshed
 
-	saved, err := s.SaveZoneStatus(ctx, z, status, at)
+	z, err := s.SaveRefresh(ctx, z, nil, 0, refreshed)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The Provider could not read HSTS again after turning DNSSEC on.
+	at := time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC)
+
+	saved, err := s.SaveZoneStatus(ctx, z, dnsprovider.ZoneUpdate{DNSSEC: &on},
+		dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Pending, HSTS: dnsprovider.Unknown}, at)
 	if err != nil {
 		t.Fatalf("save zone status: %v", err)
 	}
 
-	if saved.ID != z.ID || saved.Status != status || !saved.StatusAt.Equal(at) || saved.Serial != 2026100701 || !saved.RefreshedAt.Equal(refreshed) {
-		t.Fatalf("saved = %+v, want the Zone with the new status read at %v", saved, at)
+	want := dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Pending, HSTS: dnsprovider.On}
+	if saved.ID != z.ID || saved.Status != want || !saved.StatusAt.Equal(at) || saved.Serial != 2026100701 || !saved.RefreshedAt.Equal(refreshed) {
+		t.Fatalf("saved = %+v, want the Zone with DNSSEC pending, HSTS kept, written at %v", saved, at)
 	}
 
-	if got := onlyZone(t, s); got.Status != status || !got.StatusAt.Equal(at) || got.Serial != 2026100701 || !got.RefreshedAt.Equal(refreshed) {
-		t.Fatalf("cached = %+v, want the new status, the serial and Refresh kept", got)
+	if got := onlyZone(t, s); got.Status != want || !got.StatusAt.Equal(at) || got.Serial != 2026100701 || !got.RefreshedAt.Equal(refreshed) {
+		t.Fatalf("cached = %+v, want DNSSEC pending, HSTS kept, the serial and Refresh kept", got)
 	}
 }
 
@@ -244,7 +256,7 @@ func TestSaveZoneStatusOfAZoneNoLongerCachedIsErrZoneNotCached(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := s.SaveZoneStatus(ctx, z, dnsprovider.ZoneStatus{DNSSEC: dnsprovider.On}, time.Now()); !errors.Is(err, store.ErrZoneNotCached) {
+	if _, err := s.SaveZoneStatus(ctx, z, dnsprovider.ZoneUpdate{DNSSEC: &on}, dnsprovider.ZoneStatus{DNSSEC: dnsprovider.On}, time.Now()); !errors.Is(err, store.ErrZoneNotCached) {
 		t.Fatalf("save zone status error = %v, want ErrZoneNotCached", err)
 	}
 

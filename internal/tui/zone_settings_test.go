@@ -3,6 +3,7 @@ package tui_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/dnsgateway/dnsprovider"
 	"github.com/dnsgateway/dnsprovider/providertest"
@@ -15,7 +16,9 @@ import (
 func withZoneStatus(t *testing.T, s *store.Store, name string, status dnsprovider.ZoneStatus) dns.Zone {
 	t.Helper()
 
-	z, err := s.SaveZoneStatus(context.Background(), zoneNamed(t, s, name), status, testNow.Add(-1))
+	both := true
+
+	z, err := s.SaveZoneStatus(context.Background(), zoneNamed(t, s, name), dnsprovider.ZoneUpdate{DNSSEC: &both, HSTS: &both}, status, testNow.Add(-time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +49,7 @@ func updateZoneCalls(f *fakeProvider) []providertest.Call {
 	return out
 }
 
-func TestTurningDNSSECOnAsksToConfirmThenCachesTheStatusTheProviderReturns(t *testing.T) {
+func TestTurningDNSSECOnAsksToConfirmThenCachesThePendingStatusTheProviderReturns(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
 	status := dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Off, HSTS: dnsprovider.On}
 	withZoneStatus(t, s, "work.example", status)
@@ -80,10 +83,11 @@ func TestTurningDNSSECOnAsksToConfirmThenCachesTheStatusTheProviderReturns(t *te
 		t.Fatalf("UpdateZone calls = %+v, want one turning DNSSEC on for zw1 alone", calls)
 	}
 
-	h.assertShows("DNSSEC of work.example is on.")
+	// Cloudflare signs a Zone over time: DNSSEC is pending.
+	h.assertShows("DNSSEC of work.example is pending.")
 	h.assertHides("Zone settings of work.example")
 
-	want := dnsprovider.ZoneStatus{DNSSEC: dnsprovider.On, HSTS: dnsprovider.On}
+	want := dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Pending, HSTS: dnsprovider.On}
 	if got := zoneNamed(t, s, "work.example"); got.Status != want || !got.StatusAt.Equal(testNow) {
 		t.Fatalf("cached Zone = %+v, want status %+v read now", got, want)
 	}
@@ -220,4 +224,24 @@ func TestZoneSettingsOfAnUpgradedAccountReachingSeveralTenantsAskForOneThenOpen(
 	// Picked, the Tenant is saved, and the dialog opens.
 	h.press("enter")
 	h.assertShows("Zone settings of old.example", "Turn DNSSEC on")
+}
+
+func TestChangingOneZoneSettingKeepsTheOtherAsCachedWhenTheProviderCannotReadIt(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	withZoneStatus(t, s, "work.example", dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Off, HSTS: dnsprovider.On})
+
+	// The Provider cannot read HSTS again after turning DNSSEC on.
+	f := settingsFake(dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Off, HSTS: dnsprovider.Unknown}, true)
+	h := newAccountHarness(t, s, f)
+
+	h.press("S")
+	h.unsealWith(passphrase)
+	h.press("enter", "enter")
+
+	h.assertShows("DNSSEC of work.example is pending.")
+
+	want := dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Pending, HSTS: dnsprovider.On}
+	if got := zoneNamed(t, s, "work.example"); got.Status != want {
+		t.Fatalf("cached status = %+v, want %+v", got.Status, want)
+	}
 }

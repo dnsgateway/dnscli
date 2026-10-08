@@ -238,7 +238,7 @@ func (m *Model) changeZoneSetting(d *zoneSettings) tea.Cmd {
 			return zoneSettingsSavedMsg{change: c, zone: z, err: err}
 		}
 
-		saved, err := s.SaveZoneStatus(ctx, z, st, now())
+		saved, err := s.SaveZoneStatus(ctx, z, c.update(), st, now())
 
 		return zoneSettingsSavedMsg{change: c, zone: saved, saveErr: err}
 	}

@@ -322,22 +322,29 @@ func (s *Store) SaveRefresh(ctx context.Context, z dns.Zone, records []dns.Recor
 	return z, nil
 }
 
-// SaveZoneStatus stores a Zone's Zone Status, read at at, such as the one
-// its Provider answered a change of its settings with, and returns the
-// Zone as cached. The rest of the cache is left alone. Like SaveRefresh,
-// it returns ErrZoneNotCached unless the cache still has that very Zone:
-// the same ID, Account, zone name and Provider zone ID.
-func (s *Store) SaveZoneStatus(ctx context.Context, z dns.Zone, status dnsprovider.ZoneStatus, at time.Time) (dns.Zone, error) {
+// SaveZoneStatus stores the settings u sets of a Zone's Zone Status, as
+// status has them, such as the ones its Provider answered a change of
+// them with, and returns the Zone as cached. The settings u leaves nil
+// keep their cached value, which a Provider that could not read them
+// again would have answered Unknown. The Zone Status is then as of at,
+// the time it was written. The rest of the cache is left alone. Like
+// SaveRefresh, it returns ErrZoneNotCached unless the cache still has
+// that very Zone: the same ID, Account, zone name and Provider zone ID.
+func (s *Store) SaveZoneStatus(ctx context.Context, z dns.Zone, u dnsprovider.ZoneUpdate, status dnsprovider.ZoneStatus, at time.Time) (dns.Zone, error) {
 	var (
 		refreshed, statusAt int64
 		ns, state           string
 	)
 
 	err := s.db.QueryRowContext(ctx, `
-		UPDATE zones SET dnssec = ?1, hsts = ?2, status_at = ?3
-		WHERE id = ?4 AND account_id = ?5 AND name = ?6 AND provider_zone_id = ?7
+		UPDATE zones SET
+			dnssec    = IIF(?1, ?2, dnssec),
+			hsts      = IIF(?3, ?4, hsts),
+			status_at = MAX(status_at, ?5)
+		WHERE id = ?6 AND account_id = ?7 AND name = ?8 AND provider_zone_id = ?9
 		RETURNING soa_serial, refreshed_at, dnssec, hsts, status_at, nameservers, hosting_state`,
-		status.DNSSEC, status.HSTS, unixOrZero(at), z.ID, z.AccountID, z.Name, z.ProviderID,
+		u.DNSSEC != nil, status.DNSSEC, u.HSTS != nil, status.HSTS, unixOrZero(at),
+		z.ID, z.AccountID, z.Name, z.ProviderID,
 	).Scan(&z.Serial, &refreshed, &z.Status.DNSSEC, &z.Status.HSTS, &statusAt, &ns, &state)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrZoneNotCached
