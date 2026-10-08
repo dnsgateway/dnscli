@@ -69,7 +69,7 @@ var migrations = []string{
 	`,
 	// 5: the Hosting State each Zone was last listed in.
 	`
-	ALTER TABLE zones ADD COLUMN hosting_state INTEGER NOT NULL DEFAULT 0; -- dnsprovider.HostingState: 0 unknown until the next listing
+	ALTER TABLE zones ADD COLUMN hosting_state TEXT NOT NULL DEFAULT ''; -- 'active', 'pending' or 'moved'; '' = unknown until the next listing
 	`,
 }
 

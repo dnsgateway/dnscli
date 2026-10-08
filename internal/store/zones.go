@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dnsgateway/dnsprovider"
+
 	"github.com/sergelogvinov/dnscli/internal/dns"
 )
 
@@ -88,7 +90,7 @@ func putZone(ctx context.Context, db execQueryRower, z dns.Zone) (stored dns.Zon
 			hsts             = IIF(excluded.provider_zone_id = provider_zone_id, hsts, 0),
 			status_at        = IIF(excluded.provider_zone_id = provider_zone_id, status_at, 0)
 		RETURNING id, soa_serial, refreshed_at, dnssec, hsts, status_at, nameservers`,
-		z.AccountID, z.Name, z.ProviderID, z.Serial, unixOrZero(z.RefreshedAt), joinNames(z.Nameservers), z.State,
+		z.AccountID, z.Name, z.ProviderID, z.Serial, unixOrZero(z.RefreshedAt), joinNames(z.Nameservers), hostingWord(z.State),
 	).Scan(&z.ID, &z.Serial, &refreshed, &z.Status.DNSSEC, &z.Status.HSTS, &statusAt, &ns)
 	if err != nil {
 		return dns.Zone{}, false, fmt.Errorf("put zone %s: %w", z.Name, err)
@@ -224,17 +226,18 @@ func (s *Store) Zones(ctx context.Context) ([]dns.Zone, error) {
 		var (
 			z                   dns.Zone
 			refreshed, statusAt int64
-			ns                  string
+			ns, state           string
 		)
 
 		if err := rows.Scan(&z.ID, &z.AccountID, &z.Name, &z.ProviderID, &z.Serial, &refreshed,
-			&z.Status.DNSSEC, &z.Status.HSTS, &statusAt, &ns, &z.State); err != nil {
+			&z.Status.DNSSEC, &z.Status.HSTS, &statusAt, &ns, &state); err != nil {
 			return nil, fmt.Errorf("list zones: %w", err)
 		}
 
 		z.RefreshedAt = timeOrZero(refreshed)
 		z.StatusAt = timeOrZero(statusAt)
 		z.Nameservers = splitNames(ns)
+		z.State = hostingStateOf(state)
 
 		out = append(out, z)
 	}
@@ -453,6 +456,33 @@ func (s *Store) Records(ctx context.Context, zoneID int64) ([]dns.Record, error)
 	}
 
 	return out, rows.Err()
+}
+
+// hostingWords are the words the cache stores Hosting States as. They are
+// dnscli's own, not the module's numbering, so a database keeps its
+// meaning across module versions. Unknown is stored as the empty string.
+var hostingWords = map[dnsprovider.HostingState]string{
+	dnsprovider.HostingActive:  "active",
+	dnsprovider.HostingPending: "pending",
+	dnsprovider.HostingMoved:   "moved",
+}
+
+// hostingWord is how the cache stores a Hosting State.
+func hostingWord(s dnsprovider.HostingState) string {
+	return hostingWords[s]
+}
+
+// hostingStateOf reads a stored Hosting State. A word this build does not
+// know, such as one a later build wrote, reads as Unknown, as if the Zone
+// had not been listed yet.
+func hostingStateOf(word string) dnsprovider.HostingState {
+	for s, w := range hostingWords {
+		if w == word {
+			return s
+		}
+	}
+
+	return dnsprovider.HostingUnknown
 }
 
 func unixOrZero(t time.Time) int64 {

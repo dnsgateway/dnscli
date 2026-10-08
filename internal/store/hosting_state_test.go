@@ -67,3 +67,35 @@ func TestZonesCachedBeforeHostingStateStartAsUnknown(t *testing.T) {
 		t.Fatalf("zone = %+v, want example.com with Hosting State unknown", got)
 	}
 }
+
+// The cache stores each Hosting State as dnscli's own word, so a database
+// keeps its meaning whatever the module numbers them; a value this build
+// does not know reads as Unknown.
+func TestTheStoredHostingStateIsAStableWordAndAnUnknownOneReadsAsUnknown(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "dnscli.db")
+	s := open(t, path)
+	putZone(t, s, dns.Zone{Name: "example.com", ProviderID: "z1"})
+
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	for stored, want := range map[any]dnsprovider.HostingState{
+		"active":  dnsprovider.HostingActive,
+		"pending": dnsprovider.HostingPending,
+		"moved":   dnsprovider.HostingMoved,
+		"":        dnsprovider.HostingUnknown,
+		"retired": dnsprovider.HostingUnknown,
+		2:         dnsprovider.HostingUnknown,
+	} {
+		if _, err := db.Exec(`UPDATE zones SET hosting_state = ?`, stored); err != nil {
+			t.Fatal(err)
+		}
+
+		if got := onlyZone(t, s); got.State != want {
+			t.Errorf("hosting_state %#v reads as %v, want %v", stored, got.State, want)
+		}
+	}
+}
