@@ -21,7 +21,7 @@ type Opener struct {
 	reg  dnsprovider.Registry
 	opts []dnsprovider.Option
 
-	tenants     memo[string]
+	tenants     memo[[]dnsprovider.Tenant]
 	nameservers memo[[]string]
 }
 
@@ -32,60 +32,106 @@ func NewOpener(reg dnsprovider.Registry, opts ...dnsprovider.Option) *Opener {
 }
 
 // Open builds the Provider of type typ for an Account from its field
-// map, as Credentials reads it. It does not change fields.
-//
-// A Provider that lists Tenants and takes one in a field marked Tenant is
-// scoped to the Tenant stored in that field. Without one, it is scoped to
-// the only Tenant the credentials reach; credentials that reach none or
-// several, or may not list them, leave it unscoped, acting on every Zone
-// they reach. The outcome is kept for the credentials, so the Tenants are
-// listed once.
+// map, as Credentials reads it, scoped as Scope finds. It does not change
+// fields.
 func (o *Opener) Open(ctx context.Context, typ string, fields map[string]string) (dnsprovider.Provider, error) {
+	scoped, p, err := o.scope(ctx, typ, fields)
+	if err != nil || p != nil {
+		return p, err
+	}
+
 	f, err := o.factory(typ)
 	if err != nil {
 		return nil, err
+	}
+
+	return f.New(scoped, o.opts...)
+}
+
+// TenantChoiceError is credentials that reach several Tenants, none of
+// which is stored with them: one must be chosen before the Provider is
+// opened.
+type TenantChoiceError struct {
+	Tenants []dnsprovider.Tenant
+}
+
+func (e *TenantChoiceError) Error() string {
+	return fmt.Sprintf("the credentials reach %d Tenants: choose the one the Account acts within", len(e.Tenants))
+}
+
+// Scope is the field map an Account's Provider is opened with: fields,
+// with the Tenant set for a Provider that lists Tenants and takes one in
+// a field marked Tenant. A Tenant already stored in that field is kept,
+// and the Tenants are not listed. Without one, it is the only Tenant the
+// credentials reach; credentials that reach none, or may not list them,
+// are left unscoped, acting on every Zone they reach, and ones that reach
+// several are a *TenantChoiceError. The Tenants are listed once per
+// credentials. It does not change fields.
+func (o *Opener) Scope(ctx context.Context, typ string, fields map[string]string) (map[string]string, error) {
+	scoped, _, err := o.scope(ctx, typ, fields)
+
+	return scoped, err
+}
+
+// scope is Scope, which also returns the Provider it built to list the
+// Tenants when that one is unscoped as the fields are: it is opened
+// already. Otherwise the Provider is nil.
+func (o *Opener) scope(ctx context.Context, typ string, fields map[string]string) (map[string]string, dnsprovider.Provider, error) {
+	f, err := o.factory(typ)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	fields = maps.Clone(fields)
 
 	i := slices.IndexFunc(f.Fields, func(fd dnsprovider.Field) bool { return fd.Tenant })
 	if i < 0 || fields[f.Fields[i].Name] != "" {
-		return f.New(fields, o.opts...)
+		return fields, nil, nil
 	}
 
-	tenantField, key := f.Fields[i].Name, credentialsKey(typ, fields)
+	var built dnsprovider.Provider
 
-	if id, ok := o.tenants.kept(key); ok {
-		if id != "" {
-			fields[tenantField] = id
+	tenants, ok := o.tenants.get(ctx, credentialsKey(typ, fields), func() ([]dnsprovider.Tenant, bool) {
+		if built, err = f.New(fields, o.opts...); err != nil {
+			return nil, false
 		}
 
-		return f.New(fields, o.opts...)
-	}
+		lister, ok := built.(dnsprovider.TenantLister)
+		if !ok {
+			return nil, true
+		}
 
-	p, err := f.New(fields, o.opts...)
-	if err != nil {
-		return nil, err
-	}
+		var list []dnsprovider.Tenant
 
-	lister, ok := p.(dnsprovider.TenantLister)
-	if !ok {
-		return p, nil
-	}
+		// Credentials that may not list Tenants have none to choose
+		// from; any other failure says nothing of them.
+		if list, err = lister.Tenants(ctx); errors.Is(err, dnsprovider.ErrUnauthorized) {
+			return nil, true
+		}
 
-	id, _ := o.tenants.get(ctx, key, func() (string, bool) {
-		id := onlyTenant(ctx, lister)
-
-		// A cancelled list says nothing of the credentials.
-		return id, ctx.Err() == nil
+		return list, err == nil
 	})
-	if id == "" {
-		return p, nil
+	if !ok {
+		if err == nil {
+			err = errors.New("the Tenants the credentials reach could not be listed")
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				err = ctxErr
+			}
+		}
+
+		return nil, nil, err
 	}
 
-	fields[tenantField] = id
+	switch len(tenants) {
+	case 0:
+		return fields, built, nil
+	case 1:
+		fields[f.Fields[i].Name] = tenants[0].ID
 
-	return f.New(fields, o.opts...)
+		return fields, nil, nil
+	}
+
+	return nil, nil, &TenantChoiceError{Tenants: slices.Clone(tenants)}
 }
 
 // factory is the registered Factory of Provider type typ.
@@ -159,17 +205,6 @@ func credentialsKey(typ string, fields map[string]string) string {
 	sum := sha256.Sum256(append([]byte(typ+"\x00"), EncodeCredentials(fields)...))
 
 	return string(sum[:])
-}
-
-// onlyTenant is the one Tenant credentials reach; empty when they reach
-// none or several, or may not list them.
-func onlyTenant(ctx context.Context, l dnsprovider.TenantLister) string {
-	list, err := l.Tenants(ctx)
-	if err != nil || len(list) != 1 {
-		return ""
-	}
-
-	return list[0].ID
 }
 
 // memo keeps one value per key, computed once for all callers asking at

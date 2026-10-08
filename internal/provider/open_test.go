@@ -231,17 +231,35 @@ func TestATokenReachingOneTenantIsScopedToIt(t *testing.T) {
 	}
 }
 
-func TestATokenReachingNoneOrSeveralTenantsRunsUnscoped(t *testing.T) {
-	for name, tenants := range map[string][]dnsprovider.Tenant{
-		"none":    {},
-		"several": {{ID: "a1", Name: "Acme Ltd"}, {ID: "b2", Name: "Side project"}},
-	} {
-		r := newTenanted(tenants...)
+func TestATokenReachingNoTenantsRunsUnscoped(t *testing.T) {
+	r := newTenanted()
 
-		open(t, provider.NewOpener(r.registry()), "tok")
+	open(t, provider.NewOpener(r.registry()), "tok")
 
-		if b := r.builds(); !slices.Equal(b, []string{""}) {
-			t.Errorf("%s: built with Tenants %q, want one unscoped build", name, b)
+	if b := r.builds(); !slices.Equal(b, []string{""}) {
+		t.Errorf("built with Tenants %q, want one unscoped build", b)
+	}
+}
+
+func TestATokenReachingSeveralTenantsIsOpenedOnlyOnceOneIsChosen(t *testing.T) {
+	tenants := []dnsprovider.Tenant{{ID: "a1", Name: "Acme Ltd"}, {ID: "b2", Name: "Side project"}}
+	r := newTenanted(tenants...)
+
+	_, err := provider.NewOpener(r.registry()).Open(context.Background(), "tenanted", creds("tok"))
+
+	var choice *provider.TenantChoiceError
+	if !errors.As(err, &choice) {
+		t.Fatalf("Open = %v, want a TenantChoiceError", err)
+	}
+
+	if !slices.Equal(choice.Tenants, tenants) {
+		t.Errorf("Tenants to choose from = %+v, want %+v", choice.Tenants, tenants)
+	}
+
+	// Only the Tenants were asked for.
+	for _, c := range r.fake.Calls() {
+		if c.Op != providertest.OpNew && c.Op != providertest.OpTenants {
+			t.Errorf("called %s before a Tenant was chosen", c.Op)
 		}
 	}
 }
@@ -258,10 +276,10 @@ func TestATokenThatMayNotListTenantsRunsUnscoped(t *testing.T) {
 }
 
 func TestTheTenantOutcomeIsKeptPerTokenAndBuildsOnce(t *testing.T) {
-	for name, fail := range map[string]bool{"scoped": false, "unscoped after a failure": true} {
+	for name, fail := range map[string]bool{"scoped": false, "unscoped as the token may not list them": true} {
 		r := newTenanted(dnsprovider.Tenant{ID: tenantID})
 		if fail {
-			r.fake.Fail(providertest.OpTenants, errors.New("network down"))
+			r.fake.Fail(providertest.OpTenants, dnsprovider.ErrUnauthorized)
 		}
 
 		o := provider.NewOpener(r.registry())
@@ -286,6 +304,25 @@ func TestTheTenantOutcomeIsKeptPerTokenAndBuildsOnce(t *testing.T) {
 		if n := count(r.fake, providertest.OpTenants); n != 2 {
 			t.Errorf("%s: Tenants listed %d times after another token, want twice", name, n)
 		}
+	}
+}
+
+func TestAFailedTenantListFailsTheOpenAndIsAskedAgain(t *testing.T) {
+	r := newTenanted(dnsprovider.Tenant{ID: "a1"}, dnsprovider.Tenant{ID: "b2"})
+	r.fake.Fail(providertest.OpTenants, dnsprovider.ErrRateLimited)
+
+	o := provider.NewOpener(r.registry())
+
+	// Running unscoped could reach every Tenant's Zones: the Open fails.
+	if _, err := o.Open(context.Background(), "tenanted", creds("tok")); !errors.Is(err, dnsprovider.ErrRateLimited) {
+		t.Fatalf("Open = %v, want ErrRateLimited", err)
+	}
+
+	r.fake.Fail(providertest.OpTenants, nil)
+
+	var choice *provider.TenantChoiceError
+	if _, err := o.Open(context.Background(), "tenanted", creds("tok")); !errors.As(err, &choice) {
+		t.Errorf("Open after the failure = %v, want the Tenants listed again", err)
 	}
 }
 
