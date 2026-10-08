@@ -32,25 +32,34 @@ func NewOpener(reg dnsprovider.Registry, opts ...dnsprovider.Option) *Opener {
 }
 
 // Open builds the Provider of type typ for an Account from its field
-// map, as Credentials reads it, scoped as Scope finds. It does not change
-// fields.
+// map, as Credentials reads it, scoped as OpenScoped finds. It does not
+// change fields.
 func (o *Opener) Open(ctx context.Context, typ string, fields map[string]string) (dnsprovider.Provider, error) {
-	_, p, err := o.open(ctx, typ, fields)
+	p, _, err := o.OpenScoped(ctx, typ, fields)
 
 	return p, err
 }
 
-// open is Open, which also returns the field map the Provider was built
-// from.
-func (o *Opener) open(ctx context.Context, typ string, fields map[string]string) (map[string]string, dnsprovider.Provider, error) {
+// OpenScoped builds the Provider of type typ for an Account from its
+// field map, as Credentials reads it, and returns the field map it was
+// built from: fields, with the Tenant set for a Provider that lists
+// Tenants and takes one in a field marked Tenant. A Tenant already stored
+// in that field is kept, and the Tenants are not listed. Without one, it
+// is the only Tenant the credentials reach; credentials that reach none,
+// or may not list them, are left unscoped, acting on every Zone they
+// reach, and ones that reach several are a *TenantChoiceError, without
+// building a Provider for any. The Tenants are listed once per
+// credentials, and the Provider that listed them is the one returned
+// when it is unscoped. It does not change fields.
+func (o *Opener) OpenScoped(ctx context.Context, typ string, fields map[string]string) (dnsprovider.Provider, map[string]string, error) {
 	scoped, p, err := o.scope(ctx, typ, fields)
 	if err != nil || p != nil {
-		return scoped, p, err
+		return p, scoped, err
 	}
 
 	p, err = o.build(typ, scoped)
 
-	return scoped, p, err
+	return p, scoped, err
 }
 
 // build builds the Provider of type typ from fields as they are. Fields
@@ -78,23 +87,9 @@ func (e *TenantChoiceError) Error() string {
 	return fmt.Sprintf("the credentials reach %d Tenants: choose the one the Account acts within", len(e.Tenants))
 }
 
-// Scope is the field map an Account's Provider is opened with: fields,
-// with the Tenant set for a Provider that lists Tenants and takes one in
-// a field marked Tenant. A Tenant already stored in that field is kept,
-// and the Tenants are not listed. Without one, it is the only Tenant the
-// credentials reach; credentials that reach none, or may not list them,
-// are left unscoped, acting on every Zone they reach, and ones that reach
-// several are a *TenantChoiceError. The Tenants are listed once per
-// credentials. It does not change fields.
-func (o *Opener) Scope(ctx context.Context, typ string, fields map[string]string) (map[string]string, error) {
-	scoped, _, err := o.scope(ctx, typ, fields)
-
-	return scoped, err
-}
-
-// scope is Scope, which also returns the Provider it built to list the
-// Tenants when that one is unscoped as the fields are: it is opened
-// already. Otherwise the Provider is nil.
+// scope is the field map OpenScoped builds the Provider from, and the
+// Provider it built to list the Tenants when that one is unscoped as the
+// fields are: it is opened already. Otherwise the Provider is nil.
 func (o *Opener) scope(ctx context.Context, typ string, fields map[string]string) (map[string]string, dnsprovider.Provider, error) {
 	f, err := o.factory(typ)
 	if err != nil {
@@ -190,7 +185,7 @@ func (e *InvalidCredentialsError) Error() string { return e.Err.Error() }
 func (e *InvalidCredentialsError) Unwrap() error { return e.Err }
 
 // Verify builds the Provider of type typ from fields as Open does,
-// scoped to the Tenant Scope finds, and asks it for its Account, which
+// scoped to the Tenant OpenScoped finds, and asks it for its Account, which
 // proves the credentials work: a Tenant-owned token is only verified
 // within its Tenant. It is the check made before an Account is saved, and
 // returns the credentials to save, with that Tenant set, and the Tenant
@@ -200,7 +195,7 @@ func (e *InvalidCredentialsError) Unwrap() error { return e.Err }
 // nameservers the Account expects are kept for the credentials returned,
 // as Nameservers would keep them.
 func (o *Opener) Verify(ctx context.Context, typ string, fields map[string]string) (map[string]string, dnsprovider.Tenant, error) {
-	scoped, p, err := o.open(ctx, typ, fields)
+	p, scoped, err := o.OpenScoped(ctx, typ, fields)
 	if err != nil {
 		return nil, dnsprovider.Tenant{}, err
 	}

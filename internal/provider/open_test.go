@@ -395,6 +395,32 @@ func TestOpensWaitingOnAFailedTenantListGetItsError(t *testing.T) {
 	}
 }
 
+func TestOpenScopedReturnsTheFieldsTheProviderIsBuiltFromAndBuildsOnce(t *testing.T) {
+	for name, tc := range map[string]struct {
+		tenants []dnsprovider.Tenant
+		builds  []string
+		scope   string
+	}{
+		"no Tenants": {builds: []string{""}},
+		"one Tenant": {tenants: []dnsprovider.Tenant{{ID: tenantID}}, builds: []string{"", tenantID}, scope: tenantID},
+	} {
+		r := newTenanted(tc.tenants...)
+
+		p, scoped, err := provider.NewOpener(r.registry()).OpenScoped(context.Background(), "tenanted", creds("tok"))
+		if err != nil || p == nil {
+			t.Fatalf("%s: OpenScoped = %v, %v", name, p, err)
+		}
+
+		if want := map[string]string{"token": "tok", "scope": tc.scope}; tc.scope == "" && !maps.Equal(scoped, creds("tok")) || tc.scope != "" && !maps.Equal(scoped, want) {
+			t.Errorf("%s: scoped fields = %v", name, scoped)
+		}
+
+		if b := r.builds(); !slices.Equal(b, tc.builds) {
+			t.Errorf("%s: built with Tenants %q, want %q", name, b, tc.builds)
+		}
+	}
+}
+
 func TestOpenersKeepNothingInCommon(t *testing.T) {
 	r := newTenanted(dnsprovider.Tenant{ID: tenantID})
 

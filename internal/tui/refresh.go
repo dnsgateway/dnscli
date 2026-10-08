@@ -330,7 +330,7 @@ func accountProvider(ctx context.Context, s *store.Store, key *vault.Key, provid
 		return nil, nil, errors.New("this Account has no credentials")
 	}
 
-	scoped, err := providers.Scope(ctx, a.Provider, fields)
+	p, scoped, err := providers.OpenScoped(ctx, a.Provider, fields)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -340,9 +340,7 @@ func accountProvider(ctx context.Context, s *store.Store, key *vault.Key, provid
 		_, _ = replaceCredentials(ctx, s, key, a, sealed, scoped)
 	}
 
-	p, err := providers.Open(ctx, a.Provider, scoped)
-
-	return p, scoped, err
+	return p, scoped, nil
 }
 
 // replaceCredentials seals fields as an Account's credentials in place of
