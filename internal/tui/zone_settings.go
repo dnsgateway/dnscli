@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -12,27 +13,69 @@ import (
 	"github.com/sergelogvinov/dnscli/internal/provider"
 )
 
+// zoneSetting is one Zone setting the Zone settings dialog changes.
+type zoneSetting struct {
+	// name is the setting's name, as the status bar badges it.
+	name string
+	// of is the setting in a Zone Status.
+	of func(dnsprovider.ZoneStatus) dnsprovider.Setting
+	// update is the ZoneUpdate that turns this setting alone on or off.
+	update func(on bool) dnsprovider.ZoneUpdate
+	// warning is what the confirmation says turning it on or off does to
+	// zone, beyond the setting itself; empty when nothing.
+	warning func(zone string, on bool) string
+}
+
+// The Zone settings the dialog changes, in the order it lists them.
+var (
+	dnssecSetting = &zoneSetting{
+		name:   "DNSSEC",
+		of:     func(st dnsprovider.ZoneStatus) dnsprovider.Setting { return st.DNSSEC },
+		update: func(on bool) dnsprovider.ZoneUpdate { return dnsprovider.ZoneUpdate{DNSSEC: &on} },
+		// dnscli does not read the DS record from the parent zone: the
+		// warning is said whenever DNSSEC is turned off.
+		warning: func(zone string, on bool) string {
+			if on {
+				return ""
+			}
+
+			return "Remove the DS record for " + zone + " at the registrar first: while it is there, " +
+				"validating resolvers fail to resolve " + zone + " once it is unsigned."
+		},
+	}
+	hstsSetting = &zoneSetting{
+		name:   "HSTS",
+		of:     func(st dnsprovider.ZoneStatus) dnsprovider.Setting { return st.HSTS },
+		update: func(on bool) dnsprovider.ZoneUpdate { return dnsprovider.ZoneUpdate{HSTS: &on} },
+		// The module turns HSTS on for six months when the Zone holds no
+		// max-age, and keeps the one it holds.
+		warning: func(zone string, on bool) string {
+			if !on {
+				return ""
+			}
+
+			return "Browsers that visit " + zone + " will then use only HTTPS for it, for its HSTS max-age, " +
+				"six months when it has none, even after HSTS is turned off."
+		},
+	}
+	zoneSettingsListed = []*zoneSetting{dnssecSetting, hstsSetting}
+)
+
 // zoneSettingChange is one change the Zone settings dialog offers: a
 // setting turned on or off.
 type zoneSettingChange struct {
-	// name is the setting's name, "DNSSEC" or "HSTS".
-	name string
-	on   bool
+	setting *zoneSetting
+	on      bool
 }
 
 // text is the change as the dialog lists it: "Turn DNSSEC on".
 func (c zoneSettingChange) text() string {
-	return "Turn " + c.name + " " + onOrOff(c.on)
+	return "Turn " + c.setting.name + " " + onOrOff(c.on)
 }
 
 // update is the change as a ZoneUpdate, which sets this setting alone.
 func (c zoneSettingChange) update() dnsprovider.ZoneUpdate {
-	on := c.on
-	if c.name == "DNSSEC" {
-		return dnsprovider.ZoneUpdate{DNSSEC: &on}
-	}
-
-	return dnsprovider.ZoneUpdate{HSTS: &on}
+	return c.setting.update(c.on)
 }
 
 // onOrOff is "on" or "off".
@@ -96,6 +139,12 @@ func (m *Model) openZoneSettings() tea.Cmd {
 	return m.withSecrets(func() tea.Cmd { return m.openZoneSettingsOf(z.ID) })
 }
 
+// cannotChangeZoneSettings is the notice for an Account whose Provider
+// cannot change Zone settings.
+func cannotChangeZoneSettings(a dns.Account) string {
+	return a.Label() + " cannot change Zone settings: its Provider has none dnscli can change."
+}
+
 // openZoneSettingsOf opens the Provider of a Zone's Account, as it is
 // now, for the Zone settings dialog.
 func (m *Model) openZoneSettingsOf(zoneID int64) tea.Cmd {
@@ -138,10 +187,10 @@ func (m *Model) zoneSettingsOpened(msg zoneSettingsOpenedMsg) {
 
 		return
 	case !dnsprovider.CanUpdateZone(msg.p):
-		m.notice = notice{text: msg.account.Label() + " cannot change Zone settings: its Provider has none dnscli can change.", err: true}
+		m.notice = notice{text: cannotChangeZoneSettings(msg.account), err: true}
 
 		return
-	case m.dialogOpen() || m.tenantPick != nil || m.zoneSettings != nil:
+	case m.dialogOpen() || m.tenantPick != nil:
 		return
 	}
 
@@ -164,16 +213,13 @@ func (m *Model) zoneSettingsOpened(msg zoneSettingsOpenedMsg) {
 func settingChanges(st dnsprovider.ZoneStatus) []zoneSettingChange {
 	var out []zoneSettingChange
 
-	for _, s := range []struct {
-		name    string
-		setting dnsprovider.Setting
-	}{{"DNSSEC", st.DNSSEC}, {"HSTS", st.HSTS}} {
-		if s.setting != dnsprovider.On {
-			out = append(out, zoneSettingChange{name: s.name, on: true})
+	for _, s := range zoneSettingsListed {
+		if s.of(st) != dnsprovider.On {
+			out = append(out, zoneSettingChange{setting: s, on: true})
 		}
 
-		if s.setting != dnsprovider.Off {
-			out = append(out, zoneSettingChange{name: s.name, on: false})
+		if s.of(st) != dnsprovider.Off {
+			out = append(out, zoneSettingChange{setting: s, on: false})
 		}
 	}
 
@@ -253,7 +299,7 @@ func (m *Model) zoneSettingsSaved(msg zoneSettingsSavedMsg) {
 	if msg.err != nil {
 		if d != nil && d.zone.ID == msg.zone.ID {
 			d.busy, d.confirming = false, false
-			d.err = "Could not turn " + msg.change.name + " " + onOrOff(msg.change.on) + ": " + msg.err.Error()
+			d.err = "Could not turn " + msg.change.setting.name + " " + onOrOff(msg.change.on) + ": " + msg.err.Error()
 		}
 
 		return
@@ -271,14 +317,8 @@ func (m *Model) zoneSettingsSaved(msg zoneSettingsSavedMsg) {
 
 	m.updateZone(msg.zone)
 
-	var st dnsprovider.Setting
-	if msg.change.name == "DNSSEC" {
-		st = msg.zone.Status.DNSSEC
-	} else {
-		st = msg.zone.Status.HSTS
-	}
-
-	m.notice = notice{text: msg.change.name + " of " + msg.zone.Name + " is " + settingWord(st) + "."}
+	st := msg.change.setting.of(msg.zone.Status)
+	m.notice = notice{text: msg.change.setting.name + " of " + msg.zone.Name + " is " + settingWord(st) + "."}
 }
 
 // settingWord says what a setting is: "on", "off", "pending" or "unknown".
@@ -294,11 +334,21 @@ func (m *Model) zoneSettingsView() string {
 	d := m.zoneSettings
 	z := d.zone
 
-	notes := []string{"DNSSEC " + settingWord(z.Status.DNSSEC) + " · HSTS " + settingWord(z.Status.HSTS), ""}
+	badges := make([]string, 0, len(zoneSettingsListed))
+	for _, s := range zoneSettingsListed {
+		badges = append(badges, settingBadge(s.name, s.of(z.Status)))
+	}
+
+	notes := []string{strings.Join(badges, statusStyle.Render(" · ")), ""}
 
 	if d.confirming {
 		c := d.changes[d.cursor]
 		notes = append(notes, wrapNote(lipgloss.NewStyle(), c.text()+" for "+z.Name+" at "+d.account.Label()+"?", noteWidth)...)
+
+		if w := c.setting.warning(z.Name, c.on); w != "" {
+			notes = append(notes, "")
+			notes = append(notes, wrapNote(errorStyle, w, noteWidth)...)
+		}
 	} else {
 		for i, c := range d.changes {
 			line := "  " + c.text()

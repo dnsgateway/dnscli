@@ -181,7 +181,7 @@ func TestAPendingOrUnknownSettingCanBeTurnedEitherWay(t *testing.T) {
 	h.press("S")
 	h.unsealWith(passphrase)
 
-	h.assertShows("DNSSEC pending · HSTS unknown", "Turn DNSSEC on", "Turn DNSSEC off", "Turn HSTS on", "Turn HSTS off")
+	h.assertShows("DNSSEC pending · HSTS ?", "Turn DNSSEC on", "Turn DNSSEC off", "Turn HSTS on", "Turn HSTS off")
 }
 
 func TestZoneSettingsActOnTheDomainsPanesZoneOnly(t *testing.T) {
@@ -244,4 +244,32 @@ func TestChangingOneZoneSettingKeepsTheOtherAsCachedWhenTheProviderCannotReadIt(
 	if got := zoneNamed(t, s, "work.example"); got.Status != want {
 		t.Fatalf("cached status = %+v, want %+v", got.Status, want)
 	}
+}
+
+func TestTurningDNSSECOffWarnsToRemoveTheDSRecordAtTheRegistrarFirst(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	status := dnsprovider.ZoneStatus{DNSSEC: dnsprovider.On, HSTS: dnsprovider.On}
+	withZoneStatus(t, s, "work.example", status)
+
+	h := newAccountHarness(t, s, settingsFake(status, true))
+
+	h.press("S")
+	h.unsealWith(passphrase)
+	h.press("enter")
+
+	h.assertShows("Turn DNSSEC off for work.example", "DS record", "registrar")
+}
+
+func TestTurningHSTSOnWarnsThatBrowsersWillPinHTTPS(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	status := dnsprovider.ZoneStatus{DNSSEC: dnsprovider.On, HSTS: dnsprovider.Off}
+	withZoneStatus(t, s, "work.example", status)
+
+	h := newAccountHarness(t, s, settingsFake(status, true))
+
+	h.press("S")
+	h.unsealWith(passphrase)
+	h.press("j", "enter")
+
+	h.assertShows("Turn HSTS on for work.example", "HTTPS", "six months")
 }
