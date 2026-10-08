@@ -354,3 +354,23 @@ func TestAZoneOnboardedButNotCachedClosesTheDialogNamingIt(t *testing.T) {
 	h.assertShows("new.example was Onboarded at cloudflare.work, but could not be cached")
 	h.assertHides("Onboard a zone at", "onboarding…")
 }
+
+func TestOnboardingIsRefusedForAnAccountTheFakeBuildsWithinNoTenant(t *testing.T) {
+	// The module fake, scripted with Tenants, takes its own Tenant field,
+	// as Cloudflare does, and Onboards nothing without one.
+	s, _ := enrollFirstAccount(t)
+	f := onboardFake()
+	f.SetTenants() // the token reaches none it may list: unscoped
+
+	h := newAccountHarness(t, s, f)
+
+	h.press("i")
+	h.unsealWith(passphrase)
+
+	h.assertShows("cloudflare.work acts within no single Provider account")
+	h.assertHides("Onboard a zone at")
+
+	if calls := createZoneCalls(f); len(calls) != 0 {
+		t.Fatalf("CreateZone calls = %q, want none", calls)
+	}
+}
