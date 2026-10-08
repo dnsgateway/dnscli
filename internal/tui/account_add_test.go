@@ -305,7 +305,7 @@ func TestDiscoveryForAnAccountWithoutAnAPITokenSaysSo(t *testing.T) {
 	execSQL(t, path, `UPDATE accounts SET secret = NULL`)
 	h.send(saved)
 
-	h.assertShows("Zone discovery for cloudflare.home failed: this Account has no API token")
+	h.assertShows("Zone discovery for cloudflare.home failed: this Account has no credentials")
 	h.assertHides("decrypt", "malformed")
 
 	// Only the typed token was verified before saving.

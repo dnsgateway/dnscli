@@ -321,7 +321,7 @@ func accountProvider(ctx context.Context, s *store.Store, key *vault.Key, provid
 	}
 
 	if fields == nil {
-		return nil, nil, errors.New("this Account has no API token")
+		return nil, nil, errors.New("this Account has no credentials")
 	}
 
 	p, err := providers.Open(ctx, a.Provider, fields)

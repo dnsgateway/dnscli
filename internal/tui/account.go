@@ -343,7 +343,7 @@ func (m *Model) updateAccount(old, a dns.Account, typed map[string]string) tea.C
 			return accountEditedMsg{account: a, err: err}
 		}
 
-		// An Account without an API token is only renamed.
+		// An Account without credentials is only renamed.
 		if fields == nil && len(typed) == 0 {
 			return accountEditedMsg{account: a, err: store.UpdateAccountWithSecret(ctx, a, nil)}
 		}
