@@ -501,3 +501,25 @@ func TestVerifiedCredentialsKeepTheirAccountsNameservers(t *testing.T) {
 		t.Errorf("Account asked %d times, want once, to verify", n)
 	}
 }
+
+func TestVerifyTellsFieldsItCannotBuildFromFromARefusal(t *testing.T) {
+	r := newTenanted(dnsprovider.Tenant{ID: tenantID})
+
+	// The fake cannot be built without a token.
+	err := provider.NewOpener(r.registry()).Verify(context.Background(), "tenanted", creds(""))
+
+	var invalid *provider.InvalidCredentialsError
+	if !errors.As(err, &invalid) {
+		t.Fatalf("Verify = %v, want an InvalidCredentialsError", err)
+	}
+
+	if n := count(r.fake, providertest.OpAccount); n != 0 {
+		t.Errorf("Account asked %d times, want none", n)
+	}
+
+	r.fake.Fail(providertest.OpAccount, dnsprovider.ErrUnauthorized)
+
+	if err := provider.NewOpener(r.registry()).Verify(context.Background(), "tenanted", creds("bad")); errors.As(err, &invalid) {
+		t.Errorf("Verify of refused credentials = %v, an InvalidCredentialsError", err)
+	}
+}

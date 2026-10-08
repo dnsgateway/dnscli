@@ -98,16 +98,26 @@ func (o *Opener) factory(typ string) (dnsprovider.Factory, error) {
 	return f, nil
 }
 
+// InvalidCredentialsError is a field map Verify could not build its
+// Provider from, such as one missing a field or holding a malformed one:
+// the Provider was not asked.
+type InvalidCredentialsError struct{ Err error }
+
+func (e *InvalidCredentialsError) Error() string { return e.Err.Error() }
+
+func (e *InvalidCredentialsError) Unwrap() error { return e.Err }
+
 // Verify builds the Provider of type typ from fields as Open does,
 // scoped to the Tenant it finds, and asks it for its Account, which
 // proves the credentials work: a Tenant-owned token is only verified
-// within its Tenant. It is the check made before an Account is saved.
-// The Tenant and the nameservers the Account expects are kept for the
-// credentials, as Open and Nameservers would keep them.
+// within its Tenant. Fields the Provider cannot be built from are an
+// InvalidCredentialsError. It is the check made before an Account is
+// saved. The Tenant and the nameservers the Account expects are kept for
+// the credentials, as Open and Nameservers would keep them.
 func (o *Opener) Verify(ctx context.Context, typ string, fields map[string]string) error {
 	p, err := o.Open(ctx, typ, fields)
 	if err != nil {
-		return err
+		return &InvalidCredentialsError{Err: err}
 	}
 
 	info, err := p.Account(ctx)
