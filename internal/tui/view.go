@@ -9,6 +9,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/dnsgateway/dnsprovider"
+
 	"github.com/sergelogvinov/dnscli/internal/dns"
 )
 
@@ -137,10 +139,13 @@ func (m *Model) domainLines(w, h int) []string {
 	start, end := window(len(m.visible), m.cursor[paneDomains], h)
 
 	for i := start; i < end; i++ {
-		// Stale Zones are dimmed. The markers show the Live Zone, then the
-		// Refresh, else the Serial Check hint.
+		// Stale Zones are dimmed. A pending or moved Zone says so after its
+		// label, which is cut short rather than the mark. The markers show
+		// the Live Zone, then the Refresh, else the Serial Check hint.
 		z := m.visible[i]
-		lines = append(lines, m.row(paneDomains, i, " "+m.zoneLabel(z), w-3, m.zoneStyle(z.ID))+" "+m.liveMarker(z)+m.zoneMarker(z))
+		mark := hostingMark(z.State)
+		label := ansi.Truncate(" "+m.zoneLabel(z), max(w-3-lipgloss.Width(mark), 0), "…")
+		lines = append(lines, m.row(paneDomains, i, label+mark, w-3, m.zoneStyle(z.ID))+" "+m.liveMarker(z)+m.zoneMarker(z))
 	}
 
 	if len(m.visible) == 0 && len(m.zones) > 0 {
@@ -203,6 +208,20 @@ func (m *Model) zoneLabel(z dns.Zone) string {
 	}
 
 	return z.Name
+}
+
+// hostingMark follows the label of a Zone its Provider is not serving: one
+// Onboarded and waiting for Delegation, or one whose Delegation left. An
+// Active Zone, or one whose Hosting State is not known yet, has none.
+func hostingMark(s dnsprovider.HostingState) string {
+	switch s {
+	case dnsprovider.HostingPending:
+		return " · pending"
+	case dnsprovider.HostingMoved:
+		return " · moved"
+	default:
+		return ""
+	}
 }
 
 func (m *Model) accountLines(w, h int) []string {
