@@ -1,0 +1,81 @@
+package provider
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/dnsgateway/dnsprovider"
+	"github.com/dnsgateway/dnsprovider/providers/godaddy"
+	"github.com/dnsgateway/dnsprovider/providers/namecheap"
+)
+
+// Credentials reads an Account's unsealed credentials into the field map
+// its Provider of type typ is built from. They are sealed as a JSON field
+// map; anything else is the old single API token, read into the Provider's
+// fields until the Account is saved again (see EncodeCredentials).
+func (o *Opener) Credentials(typ string, plain []byte) (map[string]string, error) {
+	f, ok := o.reg[typ]
+	if !ok {
+		return nil, fmt.Errorf("Provider type %q is not available in this build", typ)
+	}
+
+	var fields map[string]string
+	if json.Unmarshal(plain, &fields) == nil && fields != nil {
+		return fields, nil
+	}
+
+	return oldTokenFields(typ, f.Fields, string(plain))
+}
+
+// EncodeCredentials is the plaintext an Account's field map is sealed as:
+// a JSON object, which Credentials reads back.
+func EncodeCredentials(fields map[string]string) []byte {
+	// A map of strings always encodes.
+	b, _ := json.Marshal(fields)
+
+	return b
+}
+
+// Shapes of the old single-token credentials that hold several fields.
+var (
+	errGoDaddyShape   = errors.New("godaddy: the API token is the key and secret as KEY:SECRET")
+	errNamecheapShape = errors.New("namecheap: the API token is the API user, API key and whitelisted IPv4 client IP as APIUSER:APIKEY:CLIENTIP")
+)
+
+// oldTokenFields reads an old single API token into the field map its
+// Provider is built from. GoDaddy's token is KEY:SECRET, Namecheap's
+// APIUSER:APIKEY:CLIENTIP; any other Provider's is its only secret field.
+func oldTokenFields(typ string, fs []dnsprovider.Field, token string) (map[string]string, error) {
+	switch typ {
+	case "godaddy":
+		key, secret, ok := strings.Cut(token, ":")
+		if !ok || key == "" || secret == "" {
+			return nil, errGoDaddyShape
+		}
+
+		return map[string]string{godaddy.FieldKey: key, godaddy.FieldSecret: secret}, nil
+	case "namecheap":
+		parts := strings.Split(token, ":")
+		if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
+			return nil, errNamecheapShape
+		}
+
+		return map[string]string{namecheap.FieldUser: parts[0], namecheap.FieldKey: parts[1], namecheap.FieldClientIP: parts[2]}, nil
+	}
+
+	var secret []string
+
+	for _, f := range fs {
+		if f.Secret {
+			secret = append(secret, f.Name)
+		}
+	}
+
+	if len(secret) != 1 {
+		return nil, fmt.Errorf("%s: dnscli cannot read one API token into its fields", typ)
+	}
+
+	return map[string]string{secret[0]: token}, nil
+}

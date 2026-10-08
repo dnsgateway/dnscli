@@ -6,12 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strings"
 	"sync"
 
 	"github.com/dnsgateway/dnsprovider"
-	"github.com/dnsgateway/dnsprovider/providers/godaddy"
-	"github.com/dnsgateway/dnsprovider/providers/namecheap"
 )
 
 // Opener builds the Providers of Accounts from a Registry, and keeps, for
@@ -46,7 +43,7 @@ func (o *Opener) Open(ctx context.Context, typ, token string) (dnsprovider.Provi
 		return nil, fmt.Errorf("Provider type %q is not available in this build", typ)
 	}
 
-	fields, err := Fields(typ, f.Fields, token)
+	fields, err := oldTokenFields(typ, f.Fields, token)
 	if err != nil {
 		return nil, err
 	}
@@ -204,46 +201,4 @@ func (c *memo[T]) get(ctx context.Context, key string, fn func() (T, bool)) (T, 
 	close(e.done)
 
 	return e.v, e.ok
-}
-
-// Shapes of the old single-token credentials that hold several fields.
-var (
-	errGoDaddyShape   = errors.New("godaddy: the API token is the key and secret as KEY:SECRET")
-	errNamecheapShape = errors.New("namecheap: the API token is the API user, API key and whitelisted IPv4 client IP as APIUSER:APIKEY:CLIENTIP")
-)
-
-// Fields reads an Account's stored API token into the field map its
-// Provider is built from. GoDaddy's token is KEY:SECRET, Namecheap's
-// APIUSER:APIKEY:CLIENTIP; any other Provider's is its only secret field.
-func Fields(typ string, fs []dnsprovider.Field, token string) (map[string]string, error) {
-	switch typ {
-	case "godaddy":
-		key, secret, ok := strings.Cut(token, ":")
-		if !ok || key == "" || secret == "" {
-			return nil, errGoDaddyShape
-		}
-
-		return map[string]string{godaddy.FieldKey: key, godaddy.FieldSecret: secret}, nil
-	case "namecheap":
-		parts := strings.Split(token, ":")
-		if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
-			return nil, errNamecheapShape
-		}
-
-		return map[string]string{namecheap.FieldUser: parts[0], namecheap.FieldKey: parts[1], namecheap.FieldClientIP: parts[2]}, nil
-	}
-
-	var secret []string
-
-	for _, f := range fs {
-		if f.Secret {
-			secret = append(secret, f.Name)
-		}
-	}
-
-	if len(secret) != 1 {
-		return nil, fmt.Errorf("%s: dnscli cannot read one API token into its fields", typ)
-	}
-
-	return map[string]string{secret[0]: token}, nil
 }
