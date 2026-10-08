@@ -187,3 +187,33 @@ func TestRelistingNeedsTheAccountsPane(t *testing.T) {
 		t.Fatalf("provider calls = %+v", calls)
 	}
 }
+
+func TestRelistingStoresEachZonesHostingState(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+
+	if got := zoneNamed(t, s, "work.example").State; got != dnsprovider.HostingActive {
+		t.Fatalf("work.example after discovery = %v, want active", got)
+	}
+
+	f := newFake().
+		AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1"}).
+		AddZone(dns.Zone{Name: "work.test", ProviderID: "zw2"}).
+		AddZone(dns.Zone{Name: "work.new", ProviderID: "zw3"})
+	f.SetHostingState("zw1", dnsprovider.HostingMoved)
+	f.SetHostingState("zw3", dnsprovider.HostingPending)
+
+	h := newAccountHarness(t, s, f)
+	h.press("shift+tab", "L")
+	h.unsealWith(passphrase)
+	h.assertShows("Re-listed cloudflare.work")
+
+	for name, want := range map[string]dnsprovider.HostingState{
+		"work.example": dnsprovider.HostingMoved,
+		"work.test":    dnsprovider.HostingActive,
+		"work.new":     dnsprovider.HostingPending,
+	} {
+		if got := zoneNamed(t, s, name).State; got != want {
+			t.Errorf("%s after re-listing = %v, want %v", name, got, want)
+		}
+	}
+}

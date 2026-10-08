@@ -45,15 +45,15 @@ func TestRecordConversionSharesNoExtras(t *testing.T) {
 }
 
 func TestZoneConvertsBothWays(t *testing.T) {
-	cached := dns.Zone{ID: 7, AccountID: 3, Name: "example.com", ProviderID: "z1", Serial: 42, Nameservers: []string{"ada.ns.example", "bob.ns.example"}}
+	cached := dns.Zone{ID: 7, AccountID: 3, Name: "example.com", ProviderID: "z1", Serial: 42, State: dnsprovider.HostingPending, Nameservers: []string{"ada.ns.example", "bob.ns.example"}}
 
 	module := provider.ModuleZone(cached)
-	if want := (dnsprovider.Zone{ID: "z1", Name: "example.com", Nameservers: []string{"ada.ns.example", "bob.ns.example"}}); !reflect.DeepEqual(module, want) {
+	if want := (dnsprovider.Zone{ID: "z1", Name: "example.com", State: dnsprovider.HostingPending, Nameservers: []string{"ada.ns.example", "bob.ns.example"}}); !reflect.DeepEqual(module, want) {
 		t.Errorf("ModuleZone(%+v) = %+v, want %+v", cached, module, want)
 	}
 
 	listed := dnsprovider.Zone{ID: "z2", Name: "example.net", State: dnsprovider.HostingActive, Nameservers: []string{"ada.ns.example"}}
-	if got, want := provider.CacheZone(listed), (dns.Zone{Name: "example.net", ProviderID: "z2", Nameservers: []string{"ada.ns.example"}}); !reflect.DeepEqual(got, want) {
+	if got, want := provider.CacheZone(listed), (dns.Zone{Name: "example.net", ProviderID: "z2", State: dnsprovider.HostingActive, Nameservers: []string{"ada.ns.example"}}); !reflect.DeepEqual(got, want) {
 		t.Errorf("CacheZone(%+v) = %+v, want %+v", listed, got, want)
 	}
 }

@@ -10,15 +10,15 @@ import (
 )
 
 // ModuleZone is a cached Zone as the module takes it: its Provider ID,
-// name and nameservers. Its Hosting State is unknown to the cache.
+// name, cached Hosting State and nameservers.
 func ModuleZone(z dns.Zone) dnsprovider.Zone {
-	return dnsprovider.Zone{ID: z.ProviderID, Name: z.Name, Nameservers: slices.Clone(z.Nameservers)}
+	return dnsprovider.Zone{ID: z.ProviderID, Name: z.Name, State: z.State, Nameservers: slices.Clone(z.Nameservers)}
 }
 
-// CacheZone is a Zone the module listed, for the cache to sync: no
-// database IDs, serial, Refresh time or Zone Status yet.
+// CacheZone is a Zone the module listed, with its Hosting State, for the
+// cache to sync: no database IDs, serial, Refresh time or Zone Status yet.
 func CacheZone(z dnsprovider.Zone) dns.Zone {
-	return dns.Zone{Name: z.Name, ProviderID: z.ID, Nameservers: slices.Clone(z.Nameservers)}
+	return dns.Zone{Name: z.Name, ProviderID: z.ID, State: z.State, Nameservers: slices.Clone(z.Nameservers)}
 }
 
 // CacheZones converts the Zones the module listed.
