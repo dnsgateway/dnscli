@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -205,5 +206,49 @@ func TestAZoneRelistedWithAnotherProviderIDForgetsItsRecordsAndRefresh(t *testin
 
 	if len(sync.Added) != 0 || len(sync.Dropped) != 0 || len(sync.Replaced) != 1 || sync.Replaced[0].ID != z.ID || sync.Replaced[0].ProviderID != "z2" {
 		t.Fatalf("sync = %+v, want only example.com replaced by z2", sync)
+	}
+}
+
+func TestSaveZoneStatusStoresTheStatusAloneAndReturnsTheZone(t *testing.T) {
+	ctx := context.Background()
+	s := open(t, filepath.Join(t.TempDir(), "dnscli.db"))
+
+	refreshed := time.Date(2026, 10, 7, 8, 0, 0, 0, time.UTC)
+	z := putZone(t, s, dns.Zone{Name: "example.com", ProviderID: "z1", Serial: 2026100701, RefreshedAt: refreshed})
+
+	at := time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC)
+	status := dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Pending, HSTS: dnsprovider.On}
+
+	saved, err := s.SaveZoneStatus(ctx, z, status, at)
+	if err != nil {
+		t.Fatalf("save zone status: %v", err)
+	}
+
+	if saved.ID != z.ID || saved.Status != status || !saved.StatusAt.Equal(at) || saved.Serial != 2026100701 || !saved.RefreshedAt.Equal(refreshed) {
+		t.Fatalf("saved = %+v, want the Zone with the new status read at %v", saved, at)
+	}
+
+	if got := onlyZone(t, s); got.Status != status || !got.StatusAt.Equal(at) || got.Serial != 2026100701 || !got.RefreshedAt.Equal(refreshed) {
+		t.Fatalf("cached = %+v, want the new status, the serial and Refresh kept", got)
+	}
+}
+
+func TestSaveZoneStatusOfAZoneNoLongerCachedIsErrZoneNotCached(t *testing.T) {
+	ctx := context.Background()
+	s := open(t, filepath.Join(t.TempDir(), "dnscli.db"))
+
+	z := putZone(t, s, dns.Zone{Name: "example.com", ProviderID: "z1"})
+
+	// Another zone took the name at the Provider meanwhile.
+	if _, err := s.PutZone(ctx, dns.Zone{AccountID: z.AccountID, Name: "example.com", ProviderID: "z2"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := s.SaveZoneStatus(ctx, z, dnsprovider.ZoneStatus{DNSSEC: dnsprovider.On}, time.Now()); !errors.Is(err, store.ErrZoneNotCached) {
+		t.Fatalf("save zone status error = %v, want ErrZoneNotCached", err)
+	}
+
+	if got := onlyZone(t, s); got.Status != (dnsprovider.ZoneStatus{}) {
+		t.Fatalf("cached status = %+v, want none", got.Status)
 	}
 }
