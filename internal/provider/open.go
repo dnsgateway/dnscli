@@ -41,9 +41,9 @@ func NewOpener(reg dnsprovider.Registry, opts ...dnsprovider.Option) *Opener {
 // they reach. The outcome is kept for the credentials, so the Tenants are
 // listed once.
 func (o *Opener) Open(ctx context.Context, typ string, fields map[string]string) (dnsprovider.Provider, error) {
-	f, ok := o.reg[typ]
-	if !ok || f.New == nil {
-		return nil, fmt.Errorf("Provider type %q is not available in this build", typ)
+	f, err := o.factory(typ)
+	if err != nil {
+		return nil, err
 	}
 
 	fields = maps.Clone(fields)
@@ -86,6 +86,16 @@ func (o *Opener) Open(ctx context.Context, typ string, fields map[string]string)
 	fields[tenantField] = id
 
 	return f.New(fields, o.opts...)
+}
+
+// factory is the registered Factory of Provider type typ.
+func (o *Opener) factory(typ string) (dnsprovider.Factory, error) {
+	f, ok := o.reg[typ]
+	if !ok || f.New == nil {
+		return dnsprovider.Factory{}, fmt.Errorf("Provider type %q is not available in this build", typ)
+	}
+
+	return f, nil
 }
 
 // Verify builds the Provider of type typ from fields as Open does,

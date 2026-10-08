@@ -16,9 +16,9 @@ import (
 // map; anything else is the old single API token, read into the Provider's
 // fields until the Account is saved again (see EncodeCredentials).
 func (o *Opener) Credentials(typ string, plain []byte) (map[string]string, error) {
-	f, ok := o.reg[typ]
-	if !ok {
-		return nil, fmt.Errorf("Provider type %q is not available in this build", typ)
+	f, err := o.factory(typ)
+	if err != nil {
+		return nil, err
 	}
 
 	var fields map[string]string
