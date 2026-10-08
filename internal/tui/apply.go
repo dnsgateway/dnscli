@@ -339,6 +339,26 @@ func apply(ctx context.Context, s *store.Store, key *vault.Key, providers *provi
 	return msg
 }
 
+// tenantUse shows the Zone's pending Changeset again, for the user to
+// confirm its Apply within the Tenant picked: it is not sent unconfirmed,
+// as the user confirmed it before knowing which Tenant it is sent to. A
+// Changeset applied or dropped meanwhile, a Zone no longer open, or
+// another dialog open, show nothing.
+func (msg changesAppliedMsg) tenantUse(m *Model) (int64, func() tea.Cmd, error) {
+	z, ok := m.zoneByID[msg.zoneID]
+	if !ok {
+		return 0, nil, nil
+	}
+
+	return z.AccountID, func() tea.Cmd {
+		if m.open != nil && m.open.ID == z.ID && m.pendingOf(z.ID) != nil && !m.dialogOpen() && m.tenantPick == nil {
+			m.preview = &changesetPreview{zoneID: z.ID}
+		}
+
+		return nil
+	}, msg.err
+}
+
 // storedRecord is the Record as the Provider stored it for a confirmed
 // addition or modification. A Provider that returned no Record stored the
 // one sent, under its old ID for a modification.
@@ -382,6 +402,12 @@ func (m *Model) changesApplied(msg changesAppliedMsg) tea.Cmd {
 
 		if p != nil && p.zoneID == msg.zoneID {
 			p.err = text
+
+			// Nothing was sent: the picker asks for the Tenant in its
+			// place, and the Changeset stays pending.
+			if errors.As(msg.err, new(*provider.TenantChoiceError)) && m.tenantPick == nil {
+				m.preview = nil
+			}
 		}
 
 		return nil

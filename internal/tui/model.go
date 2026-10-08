@@ -238,6 +238,16 @@ func (m *Model) readRecords(zoneID int64, opened bool) tea.Cmd {
 
 // Update handles a message.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	model, cmd := m.update(msg)
+
+	// A use of an Account's Provider that needs a Tenant asks for it,
+	// over whatever the use reported.
+	m.askTenant(msg)
+
+	return model, cmd
+}
+
+func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height

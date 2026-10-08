@@ -485,3 +485,122 @@ func TestCredentialsTheProviderRefusesAreStillRefused(t *testing.T) {
 
 	h.assertShows("The Provider did not accept the credentials:")
 }
+
+// replaceCredentials seals plain as a's credentials, as another dnscli
+// would save them.
+func replaceCredentials(t *testing.T, s *store.Store, a dns.Account, plain string) {
+	t.Helper()
+
+	sealed, err := dataKey(t, s).Seal([]byte(plain), "dnscli account secret "+a.Label())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.UpdateAccountWithSecret(context.Background(), a, sealed); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAnApplyThatNeedsATenantAsksForOneAndIsConfirmedAgain(t *testing.T) {
+	f := refreshZones()
+	f.SetTenants(dnsprovider.Tenant{ID: acmeTenant, Name: "Acme Ltd"})
+
+	h, s, _ := newRefreshHarnessWith(t, f, tui.Deps{Providers: f.tenantRegistry(&tenantBuilds{})})
+	h.press("enter", "tab")
+	h.assertShows("validated this session")
+	h.buildChangeset()
+
+	// Meanwhile, another dnscli saved a token reaching several Tenants.
+	f.SetTenants(twoTenants...)
+	replaceCredentials(t, s, accountLabeled(t, s, "cloudflare.work"), `{"token":"tok2"}`)
+
+	writes := func() int {
+		return f.count(providertest.OpApply) + f.count(providertest.OpCreateRecord) +
+			f.count(providertest.OpUpdateRecord) + f.count(providertest.OpDeleteRecord)
+	}
+
+	h.press("p", "enter")
+	h.assertShows("Tenant of cloudflare.work", "Acme Ltd", "Side project")
+
+	if n := writes(); n != 0 {
+		t.Fatalf("%d writes before a Tenant was picked, want none", n)
+	}
+
+	// Picked, the Tenant is saved, and the changes are shown again to be
+	// applied: they are not sent unconfirmed.
+	h.press("down", "enter")
+	h.assertShows("cloudflare.work acts within Side project", "Changes to work.example")
+
+	if n := writes(); n != 0 {
+		t.Fatalf("%d writes before the Apply was confirmed again, want none", n)
+	}
+
+	h.press("enter")
+	h.assertShows("Applied 3 changes to work.example.")
+
+	if got := storedFields(t, s, accountLabeled(t, s, "cloudflare.work"))["account"]; got != "b2" {
+		t.Errorf("stored Tenant = %q, want b2", got)
+	}
+}
+
+func TestEveryRefreshThatAskedForTheTenantRunsAgainOnceItIsPicked(t *testing.T) {
+	f := refreshZones()
+	f.SetTenants(twoTenants...)
+
+	h, s := newUpgradedHarness(t, f)
+	old := accountLabeled(t, s, "cloudflare.old")
+	mustZone(t, s, dns.Zone{AccountID: old.ID, Name: "old.example", ProviderID: "zw1"})
+	mustZone(t, s, dns.Zone{AccountID: old.ID, Name: "old.test", ProviderID: "zw2"})
+	h.run(h.model.Init())
+
+	// Unseal, and leave the picker the re-listing opens.
+	h.press("L")
+	h.unsealWith(passphrase)
+	h.press("esc")
+
+	// Open old.example, holding its Refresh back, then old.test.
+	h.press("enter", "tab")
+	m, refreshA := h.model.Update(h.pressHolding("enter")())
+	h.model = m
+	h.press("j", "enter")
+
+	h.assertShows("Tenant of cloudflare.old")
+	h.run(refreshA)
+	onlyTenantsListed(t, f)
+
+	h.press("enter")
+	h.assertShows("cloudflare.old acts within Acme Ltd.")
+
+	if n := f.count(providertest.OpRecords); n != 2 {
+		t.Errorf("Records read %d times after the Tenant was picked, want once for each Zone", n)
+	}
+}
+
+func TestTheTenantPickerActsOnTheAccountAsItIsWhenPicked(t *testing.T) {
+	f := refreshZones()
+	f.SetTenants(twoTenants...)
+
+	h, s := newUpgradedHarness(t, f)
+	h.press("L")
+	h.unsealWith(passphrase)
+	h.press("esc")
+
+	// A re-listing asks for the Tenant once the Account was renamed.
+	relisted := h.pressHolding("L")()
+
+	h.press("e")
+	h.assertShows("Edit Account cloudflare.old")
+	h.typeText("2")
+	h.press("down", "down", "enter")
+	h.assertShows("Saved cloudflare.old2.")
+
+	h.send(relisted)
+	h.assertShows("Tenant of cloudflare.old2")
+	h.press("enter")
+	h.assertShows("Re-listed cloudflare.old2")
+	h.assertHides("Could not")
+
+	if got := storedFields(t, s, accountLabeled(t, s, "cloudflare.old2"))["account"]; got != acmeTenant {
+		t.Errorf("stored Tenant = %q, want %s", got, acmeTenant)
+	}
+}

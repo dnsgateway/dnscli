@@ -126,6 +126,12 @@ func (m *Model) editAccount() tea.Cmd {
 		return nil
 	}
 
+	return m.editAccountOf(a)
+}
+
+// editAccountOf opens the edit-Account dialog for a, once its stored
+// credentials are read.
+func (m *Model) editAccountOf(a dns.Account) tea.Cmd {
 	return m.withSecrets(func() tea.Cmd {
 		key, store, ctx, providers := m.key, m.deps.Store, m.ctx, m.providers
 
@@ -957,16 +963,6 @@ func (m *Model) zonesDiscovered(msg zonesDiscoveredMsg) tea.Cmd {
 		return nil
 	}
 
-	// Credentials reaching several Tenants ask for one, over the failure
-	// reported below, and the discovery runs again once it is saved.
-	defer m.askTenant(msg.account, msg.err, func() tea.Cmd {
-		if msg.relist {
-			return m.relistAccount(msg.account)
-		}
-
-		return m.discoverZones(msg.account, false)
-	})
-
 	if msg.relist {
 		return m.zonesRelisted(msg)
 	}
@@ -990,6 +986,25 @@ func (m *Model) zonesDiscovered(msg zonesDiscoveredMsg) tea.Cmd {
 	}
 
 	return m.loadCache
+}
+
+// tenantUse runs the discovery or re-listing again for the Account as it
+// is by then.
+func (msg zonesDiscoveredMsg) tenantUse(m *Model) (int64, func() tea.Cmd, error) {
+	id, relist := msg.account.ID, msg.relist
+
+	return id, func() tea.Cmd {
+		a, ok := m.account(id)
+
+		switch {
+		case !ok:
+			return nil
+		case relist:
+			return m.relistAccount(a)
+		default:
+			return m.discoverZones(a, false)
+		}
+	}, msg.err
 }
 
 func (m *Model) addAccountView() string {

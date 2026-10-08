@@ -400,12 +400,6 @@ func (m *Model) zoneRefreshed(msg zoneRefreshedMsg) tea.Cmd {
 	if msg.err != nil {
 		*r = zoneRefresh{err: msg.err, retryAt: m.retryAt(msg.err)}
 
-		if z, ok := m.zoneByID[msg.zoneID]; ok {
-			if a, ok := m.account(z.AccountID); ok {
-				m.askTenant(a, msg.err, func() tea.Cmd { return m.refreshZone(m.zoneByID[z.ID]) })
-			}
-		}
-
 		return m.startRefreshes()
 	}
 
@@ -419,6 +413,22 @@ func (m *Model) zoneRefreshed(msg zoneRefreshedMsg) tea.Cmd {
 	}
 
 	return tea.Batch(cmds...)
+}
+
+// tenantUse Refreshes the Zone again, as it is by then.
+func (msg zoneRefreshedMsg) tenantUse(m *Model) (int64, func() tea.Cmd, error) {
+	z, ok := m.zoneByID[msg.zoneID]
+	if !ok {
+		return 0, nil, nil
+	}
+
+	return z.AccountID, func() tea.Cmd {
+		if z, ok := m.zoneByID[z.ID]; ok {
+			return m.refreshZone(z)
+		}
+
+		return nil
+	}, msg.err
 }
 
 // retryAt is when the Provider asked to be called again, after err;
