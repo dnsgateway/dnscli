@@ -95,3 +95,106 @@ func TestTurningDNSSECOnAsksToConfirmThenCachesTheStatusTheProviderReturns(t *te
 		}
 	}
 }
+
+func TestZoneSettingsAreNotOfferedForAProviderThatCannotChangeThem(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	status := dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Off, HSTS: dnsprovider.Off}
+	withZoneStatus(t, s, "work.example", status)
+
+	f := settingsFake(status, false)
+	h := newAccountHarness(t, s, f)
+
+	h.press("S")
+	h.unsealWith(passphrase)
+
+	h.assertShows("cloudflare.work cannot change Zone settings")
+	h.assertHides("Zone settings of work.example", "Turn DNSSEC on")
+
+	if calls := updateZoneCalls(f); len(calls) != 0 {
+		t.Fatalf("UpdateZone calls = %+v, want none", calls)
+	}
+}
+
+func TestEscGoesBackFromConfirmingAZoneSettingThenClosesTheDialogChangingNothing(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	status := dnsprovider.ZoneStatus{DNSSEC: dnsprovider.On, HSTS: dnsprovider.Off}
+	withZoneStatus(t, s, "work.example", status)
+
+	f := settingsFake(status, true)
+	h := newAccountHarness(t, s, f)
+
+	h.press("S")
+	h.unsealWith(passphrase)
+	h.assertShows("Turn DNSSEC off", "Turn HSTS on")
+
+	h.press("j", "enter")
+	h.assertShows("Turn HSTS on for work.example at cloudflare.work?")
+
+	h.press("esc")
+	h.assertShows("Zone settings of work.example", "Turn DNSSEC off", "Turn HSTS on")
+	h.assertHides("at cloudflare.work?")
+
+	h.press("esc")
+	h.assertHides("Zone settings of work.example")
+
+	if calls := updateZoneCalls(f); len(calls) != 0 {
+		t.Fatalf("UpdateZone calls = %+v, want none", calls)
+	}
+
+	if got := zoneNamed(t, s, "work.example"); got.Status != status {
+		t.Fatalf("cached status = %+v, want it unchanged", got.Status)
+	}
+}
+
+func TestAZoneSettingTheProviderRefusesKeepsTheDialogOpenWithTheErrorAndTheCache(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	status := dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Off, HSTS: dnsprovider.Off}
+	withZoneStatus(t, s, "work.example", status)
+
+	f := settingsFake(status, true)
+	f.Fail(providertest.OpUpdateZone, &dnsprovider.APIError{Provider: "cloudflare", StatusCode: 403, Messages: []string{"Authentication error"}})
+
+	h := newAccountHarness(t, s, f)
+
+	h.press("S")
+	h.unsealWith(passphrase)
+	h.press("enter", "enter")
+
+	h.assertShows("Zone settings of work.example", "Could not turn DNSSEC on", "Turn DNSSEC on")
+
+	if got := zoneNamed(t, s, "work.example"); got.Status != status {
+		t.Fatalf("cached status = %+v, want it unchanged", got.Status)
+	}
+}
+
+func TestAPendingOrUnknownSettingCanBeTurnedEitherWay(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	status := dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Pending, HSTS: dnsprovider.Unknown}
+	withZoneStatus(t, s, "work.example", status)
+
+	h := newAccountHarness(t, s, settingsFake(status, true))
+
+	h.press("S")
+	h.unsealWith(passphrase)
+
+	h.assertShows("DNSSEC pending · HSTS unknown", "Turn DNSSEC on", "Turn DNSSEC off", "Turn HSTS on", "Turn HSTS off")
+}
+
+func TestZoneSettingsActOnTheDomainsPanesZoneOnly(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	f := settingsFake(dnsprovider.ZoneStatus{}, true)
+	h := newAccountHarness(t, s, f)
+
+	h.press("shift+tab", "S")
+
+	h.assertShows("Highlight a Zone in the Domains pane first.")
+	h.assertHides("Unseal", "Zone settings of")
+}
+
+func TestHelpOffersZoneSettingsInTheDomainsPane(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	h := newAccountHarness(t, s, workZones())
+
+	h.press("?")
+	h.assertShows("turn the Zone's DNSSEC or HSTS on or off")
+}
