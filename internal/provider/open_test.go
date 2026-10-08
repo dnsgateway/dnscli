@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -58,8 +59,9 @@ func TestOldSingleTokensBuildWorkingProviders(t *testing.T) {
 			base := srv.start(t) + tc.path
 
 			// Cloudflare lists the Tenants the token reaches while it is
-			// opened; the others are first called with Account.
-			p, err := provider.Open(context.Background(), providers.Registry(), tc.typ, tc.token, dnsprovider.WithBaseURL(base))
+			// opened, and runs unscoped when it may not; the others are
+			// first called with Account.
+			p, err := provider.NewOpener(providers.Registry(), dnsprovider.WithBaseURL(base)).Open(context.Background(), tc.typ, tc.token)
 			if err == nil {
 				_, err = p.Account(context.Background())
 			}
@@ -87,7 +89,7 @@ func TestMalformedOldTokensAreRefusedWithTheirShape(t *testing.T) {
 		{"namecheap", "user:key:not-an-ip", "IPv4"},
 		{"cloudflare", "", "token"},
 	} {
-		_, err := provider.Open(context.Background(), providers.Registry(), tc.typ, tc.token)
+		_, err := provider.NewOpener(providers.Registry()).Open(context.Background(), tc.typ, tc.token)
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("Open(%s, %q) error = %v, want one naming %s", tc.typ, tc.token, err, tc.want)
 		}
@@ -95,100 +97,176 @@ func TestMalformedOldTokensAreRefusedWithTheirShape(t *testing.T) {
 }
 
 func TestOpenRefusesAnUnknownProviderType(t *testing.T) {
-	if _, err := provider.Open(context.Background(), providers.Registry(), "route53", "tok"); err == nil {
+	if _, err := provider.NewOpener(providers.Registry()).Open(context.Background(), "route53", "tok"); err == nil {
 		t.Error("Open(route53) succeeded, want an error")
 	}
 }
 
-// tenantRegistry is a Registry whose "tenanted" Provider takes a Tenant
-// field, as Cloudflare does, and builds the fake; built records the
-// Tenant of each build.
-func tenantRegistry(f *providertest.Provider, built *[]string) dnsprovider.Registry {
-	inner := f.Factory()
+// tenantID is a Tenant the fake lists.
+const tenantID = "0123456789abcdef0123456789abcdef"
+
+// tenanted is a Registry whose "tenanted" Provider takes a Tenant in a
+// field marked as one, as Cloudflare does, and builds the fake; built
+// records the Tenant of each build, empty for none.
+type tenanted struct {
+	fake *providertest.Provider
+
+	mu    sync.Mutex
+	built []string
+}
+
+func newTenanted(tenants ...dnsprovider.Tenant) *tenanted {
+	f := providertest.New()
+	f.SetTenants(tenants...)
+
+	return &tenanted{fake: f}
+}
+
+func (r *tenanted) registry() dnsprovider.Registry {
+	inner := r.fake.Factory()
 
 	return dnsprovider.Registry{"tenanted": {
-		Fields: append(inner.Fields, dnsprovider.Field{Name: "tenant_id", Label: "Account ID"}),
+		// Named other than Cloudflare's, so only the mark tells it.
+		Fields: append(inner.Fields, dnsprovider.Field{Name: "scope", Label: "Account", Tenant: true}),
 		New: func(m map[string]string, opts ...dnsprovider.Option) (dnsprovider.Provider, error) {
-			*built = append(*built, m["tenant_id"])
+			r.mu.Lock()
+			r.built = append(r.built, m["scope"])
+			r.mu.Unlock()
 
 			return inner.New(map[string]string{"token": m["token"]}, opts...)
 		},
 	}}
 }
 
-func TestATokenReachingOneTenantUsesIt(t *testing.T) {
-	f := providertest.New()
-	f.SetTenants(dnsprovider.Tenant{ID: "0123456789abcdef0123456789abcdef", Name: "Acme Ltd"})
+func (r *tenanted) builds() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
-	var built []string
-
-	if _, err := provider.Open(context.Background(), tenantRegistry(f, &built), "tenanted", "one-tenant-token"); err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-
-	if n := len(built); n == 0 || built[n-1] != "0123456789abcdef0123456789abcdef" {
-		t.Errorf("built with Tenants %q, want the only one last", built)
-	}
+	return slices.Clone(r.built)
 }
 
-func TestATokenReachingSeveralTenantsFailsClearly(t *testing.T) {
-	f := providertest.New()
-	f.SetTenants(dnsprovider.Tenant{ID: "a1", Name: "Acme Ltd"}, dnsprovider.Tenant{ID: "b2", Name: "Side project"})
-
-	var built []string
-
-	_, err := provider.Open(context.Background(), tenantRegistry(f, &built), "tenanted", "two-tenant-token")
-	if err == nil || !strings.Contains(err.Error(), "Acme Ltd") || !strings.Contains(err.Error(), "Side project") {
-		t.Errorf("Open error = %v, want one naming both Tenants", err)
-	}
-}
-
-func TestATokenReachingNoTenantFails(t *testing.T) {
-	f := providertest.New()
-	f.SetTenants()
-
-	var built []string
-
-	if _, err := provider.Open(context.Background(), tenantRegistry(f, &built), "tenanted", "no-tenant-token"); err == nil {
-		t.Error("Open succeeded, want an error")
-	}
-}
-
-func TestATenantListFailureKeepsItsKind(t *testing.T) {
-	f := providertest.New()
-	f.SetTenants(dnsprovider.Tenant{ID: "a1"})
-	f.Fail(providertest.OpTenants, dnsprovider.ErrUnauthorized)
-
-	var built []string
-
-	if _, err := provider.Open(context.Background(), tenantRegistry(f, &built), "tenanted", "bad-token"); !errors.Is(err, dnsprovider.ErrUnauthorized) {
-		t.Errorf("Open error = %v, want ErrUnauthorized", err)
-	}
-}
-
-func TestTheTenantIsListedOncePerToken(t *testing.T) {
-	f := providertest.New()
-	f.SetTenants(dnsprovider.Tenant{ID: "a1"})
-
-	var built []string
-
-	reg := tenantRegistry(f, &built)
-	for range 3 {
-		if _, err := provider.Open(context.Background(), reg, "tenanted", "listed-once-token"); err != nil {
-			t.Fatalf("Open: %v", err)
-		}
-	}
-
-	listed := 0
+// count is how many calls of op the fake recorded.
+func count(f *providertest.Provider, op providertest.Op) int {
+	n := 0
 
 	for _, c := range f.Calls() {
-		if c.Op == providertest.OpTenants {
-			listed++
+		if c.Op == op {
+			n++
 		}
 	}
 
-	if listed != 1 {
-		t.Errorf("Tenants listed %d times, want once", listed)
+	return n
+}
+
+func open(t *testing.T, o *provider.Opener, token string) {
+	t.Helper()
+
+	if _, err := o.Open(context.Background(), "tenanted", token); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+}
+
+func TestATokenReachingOneTenantIsScopedToIt(t *testing.T) {
+	r := newTenanted(dnsprovider.Tenant{ID: tenantID, Name: "Acme Ltd"})
+
+	open(t, provider.NewOpener(r.registry()), "tok")
+
+	if b := r.builds(); len(b) == 0 || b[len(b)-1] != tenantID {
+		t.Errorf("built with Tenants %q, want the only one last", b)
+	}
+}
+
+func TestATokenReachingNoneOrSeveralTenantsRunsUnscoped(t *testing.T) {
+	for name, tenants := range map[string][]dnsprovider.Tenant{
+		"none":    {},
+		"several": {{ID: "a1", Name: "Acme Ltd"}, {ID: "b2", Name: "Side project"}},
+	} {
+		r := newTenanted(tenants...)
+
+		open(t, provider.NewOpener(r.registry()), "tok")
+
+		if b := r.builds(); !slices.Equal(b, []string{""}) {
+			t.Errorf("%s: built with Tenants %q, want one unscoped build", name, b)
+		}
+	}
+}
+
+func TestATokenThatMayNotListTenantsRunsUnscoped(t *testing.T) {
+	r := newTenanted(dnsprovider.Tenant{ID: tenantID})
+	r.fake.Fail(providertest.OpTenants, dnsprovider.ErrUnauthorized)
+
+	open(t, provider.NewOpener(r.registry()), "tok")
+
+	if b := r.builds(); !slices.Equal(b, []string{""}) {
+		t.Errorf("built with Tenants %q, want one unscoped build", b)
+	}
+}
+
+func TestTheTenantOutcomeIsKeptPerTokenAndBuildsOnce(t *testing.T) {
+	for name, fail := range map[string]bool{"scoped": false, "unscoped after a failure": true} {
+		r := newTenanted(dnsprovider.Tenant{ID: tenantID})
+		if fail {
+			r.fake.Fail(providertest.OpTenants, errors.New("network down"))
+		}
+
+		o := provider.NewOpener(r.registry())
+
+		open(t, o, "tok")
+		first := len(r.builds())
+
+		for range 3 {
+			open(t, o, "tok")
+		}
+
+		if n := count(r.fake, providertest.OpTenants); n != 1 {
+			t.Errorf("%s: Tenants listed %d times, want once", name, n)
+		}
+
+		if n := len(r.builds()) - first; n != 3 {
+			t.Errorf("%s: %d builds for 3 Opens with the outcome kept, want 3", name, n)
+		}
+
+		open(t, o, "other")
+
+		if n := count(r.fake, providertest.OpTenants); n != 2 {
+			t.Errorf("%s: Tenants listed %d times after another token, want twice", name, n)
+		}
+	}
+}
+
+func TestConcurrentOpensListTheTenantsOnce(t *testing.T) {
+	r := newTenanted(dnsprovider.Tenant{ID: tenantID})
+	o := provider.NewOpener(r.registry())
+
+	var wg sync.WaitGroup
+
+	for range 8 {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			if _, err := o.Open(context.Background(), "tenanted", "tok"); err != nil {
+				t.Errorf("Open: %v", err)
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	if n := count(r.fake, providertest.OpTenants); n != 1 {
+		t.Errorf("Tenants listed %d times, want once", n)
+	}
+}
+
+func TestOpenersKeepNothingInCommon(t *testing.T) {
+	r := newTenanted(dnsprovider.Tenant{ID: tenantID})
+
+	open(t, provider.NewOpener(r.registry()), "tok")
+	open(t, provider.NewOpener(r.registry()), "tok")
+
+	if n := count(r.fake, providertest.OpTenants); n != 2 {
+		t.Errorf("Tenants listed %d times by two Openers, want twice", n)
 	}
 }
 
@@ -196,12 +274,60 @@ func TestAProviderWithoutTenantsIsBuiltAsIs(t *testing.T) {
 	f := providertest.New()
 
 	reg := dnsprovider.Registry{"fake": f.Factory()}
-	if _, err := provider.Open(context.Background(), reg, "fake", "tok"); err != nil {
+	if _, err := provider.NewOpener(reg).Open(context.Background(), "fake", "tok"); err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 
 	calls := f.Calls()
 	if len(calls) != 1 || calls[0].Op != providertest.OpNew || calls[0].Fields["token"] != "tok" {
 		t.Errorf("calls = %+v, want one build with the token", calls)
+	}
+}
+
+func TestTheAccountNameserversAreAskedOncePerToken(t *testing.T) {
+	f := providertest.New()
+	f.SetAccount(dnsprovider.AccountInfo{Nameservers: []string{"ns1.example.net", "ns2.example.net"}})
+
+	o := provider.NewOpener(dnsprovider.Registry{"fake": f.Factory()})
+	ctx := context.Background()
+
+	p, err := o.Open(ctx, "fake", "tok")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	for range 3 {
+		ns, err := o.Nameservers(ctx, p, "fake", "tok")
+		if err != nil || !slices.Equal(ns, []string{"ns1.example.net", "ns2.example.net"}) {
+			t.Fatalf("Nameservers = %q, %v; want the Account's", ns, err)
+		}
+	}
+
+	if n := count(f, providertest.OpAccount); n != 1 {
+		t.Errorf("Account asked %d times, want once", n)
+	}
+}
+
+func TestAFailedNameserverReadIsAskedAgain(t *testing.T) {
+	f := providertest.New()
+	f.SetAccount(dnsprovider.AccountInfo{Nameservers: []string{"ns1.example.net"}})
+	f.Fail(providertest.OpAccount, dnsprovider.ErrRateLimited)
+
+	o := provider.NewOpener(dnsprovider.Registry{"fake": f.Factory()})
+	ctx := context.Background()
+
+	p, err := o.Open(ctx, "fake", "tok")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	if _, err := o.Nameservers(ctx, p, "fake", "tok"); !errors.Is(err, dnsprovider.ErrRateLimited) {
+		t.Fatalf("Nameservers: err = %v, want ErrRateLimited", err)
+	}
+
+	f.Fail(providertest.OpAccount, nil)
+
+	if ns, err := o.Nameservers(ctx, p, "fake", "tok"); err != nil || !slices.Equal(ns, []string{"ns1.example.net"}) {
+		t.Errorf("Nameservers after the failure = %q, %v; want the Account's", ns, err)
 	}
 }

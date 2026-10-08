@@ -10,25 +10,38 @@ import (
 	"sync"
 
 	"github.com/dnsgateway/dnsprovider"
-	"github.com/dnsgateway/dnsprovider/providers/cloudflare"
 	"github.com/dnsgateway/dnsprovider/providers/godaddy"
 	"github.com/dnsgateway/dnsprovider/providers/namecheap"
 )
 
-// fieldTenantID is the field of a Provider whose Account acts within one
-// Tenant it picks, such as Cloudflare.
-const fieldTenantID = cloudflare.FieldTenantID
+// Opener builds the Providers of Accounts from a Registry, and keeps, for
+// each API token, what it had to ask the Provider: the Tenant the token is
+// scoped to and the nameservers its Account expects. Each is asked once
+// per token for the Opener's life, however many Opens run at once.
+type Opener struct {
+	reg  dnsprovider.Registry
+	opts []dnsprovider.Option
+
+	tenants     memo[string]
+	nameservers memo[[]string]
+}
+
+// NewOpener returns an Opener of the Providers in reg, each built with
+// opts.
+func NewOpener(reg dnsprovider.Registry, opts ...dnsprovider.Option) *Opener {
+	return &Opener{reg: reg, opts: opts}
+}
 
 // Open builds the Provider of type typ for an Account from its stored API
-// token, through the Registry. The token is read into the Provider's
-// fields, as Fields reads it.
+// token, read into the Provider's fields as Fields reads it.
 //
-// A Provider that takes a Tenant and can list them gets the only Tenant
-// the token reaches; a token that reaches several or none fails, since
-// dnscli stores no Tenant yet. The Tenant found is kept for the token for
-// the life of the process, so it is listed once.
-func Open(ctx context.Context, reg dnsprovider.Registry, typ, token string, opts ...dnsprovider.Option) (dnsprovider.Provider, error) {
-	f, ok := reg[typ]
+// A Provider that lists Tenants and takes one in a field marked Tenant is
+// scoped to the only Tenant the token reaches. A token that reaches none
+// or several, or may not list them, leaves it unscoped, acting on every
+// Zone the token reaches, since dnscli stores no Tenant yet. The outcome
+// is kept for the token, so the Tenants are listed once.
+func (o *Opener) Open(ctx context.Context, typ, token string) (dnsprovider.Provider, error) {
+	f, ok := o.reg[typ]
 	if !ok || f.New == nil {
 		return nil, fmt.Errorf("Provider type %q is not available in this build", typ)
 	}
@@ -38,18 +51,22 @@ func Open(ctx context.Context, reg dnsprovider.Registry, typ, token string, opts
 		return nil, err
 	}
 
-	if !slices.ContainsFunc(f.Fields, func(fd dnsprovider.Field) bool { return fd.Name == fieldTenantID }) {
-		return f.New(fields, opts...)
+	i := slices.IndexFunc(f.Fields, func(fd dnsprovider.Field) bool { return fd.Tenant })
+	if i < 0 {
+		return f.New(fields, o.opts...)
 	}
 
-	key := tenantKey(typ, token)
-	if id, ok := tenants.Load(key); ok {
-		fields[fieldTenantID] = id.(string)
+	tenantField, key := f.Fields[i].Name, tokenKey(typ, token)
 
-		return f.New(fields, opts...)
+	if id, ok := o.tenants.kept(key); ok {
+		if id != "" {
+			fields[tenantField] = id
+		}
+
+		return f.New(fields, o.opts...)
 	}
 
-	p, err := f.New(fields, opts...)
+	p, err := f.New(fields, o.opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -59,51 +76,134 @@ func Open(ctx context.Context, reg dnsprovider.Registry, typ, token string, opts
 		return p, nil
 	}
 
-	id, err := onlyTenant(ctx, typ, lister)
-	if err != nil {
-		return nil, err
+	id, _ := o.tenants.get(ctx, key, func() (string, bool) {
+		id := onlyTenant(ctx, lister)
+
+		// A cancelled list says nothing of the token.
+		return id, ctx.Err() == nil
+	})
+	if id == "" {
+		return p, nil
 	}
 
-	tenants.Store(key, id)
-	fields[fieldTenantID] = id
+	fields[tenantField] = id
 
-	return f.New(fields, opts...)
+	return f.New(fields, o.opts...)
 }
 
-// tenants are the Tenants found for each token, by tenantKey.
-var tenants sync.Map
+// Nameservers are the nameservers the Account of p, opened with typ and
+// token, expects Delegation to name, from its Account call. They are
+// asked once per token: a failure is not kept, and is asked again.
+func (o *Opener) Nameservers(ctx context.Context, p dnsprovider.Provider, typ, token string) ([]string, error) {
+	var err error
 
-// tenantKey keys a token's Tenant without holding the token itself.
-func tenantKey(typ, token string) string {
+	ns, ok := o.nameservers.get(ctx, tokenKey(typ, token), func() ([]string, bool) {
+		var info dnsprovider.AccountInfo
+
+		info, err = p.Account(ctx)
+
+		return info.Nameservers, err == nil
+	})
+	if !ok && err == nil {
+		err = errors.New("the Account's nameservers could not be read")
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			err = ctxErr
+		}
+	}
+
+	return slices.Clone(ns), err
+}
+
+// tokenKey keys what is kept for a token without holding the token itself.
+func tokenKey(typ, token string) string {
 	sum := sha256.Sum256([]byte(typ + "\x00" + token))
 
 	return string(sum[:])
 }
 
-// onlyTenant is the one Tenant a token reaches.
-func onlyTenant(ctx context.Context, typ string, l dnsprovider.TenantLister) (string, error) {
+// onlyTenant is the one Tenant a token reaches; empty when it reaches
+// none or several, or may not list them.
+func onlyTenant(ctx context.Context, l dnsprovider.TenantLister) string {
 	list, err := l.Tenants(ctx)
-	if err != nil {
-		return "", fmt.Errorf("list the %s accounts the API token reaches: %w", typ, err)
+	if err != nil || len(list) != 1 {
+		return ""
 	}
 
-	switch len(list) {
-	case 0:
-		return "", fmt.Errorf("the API token reaches no %s account", typ)
-	case 1:
-		return list[0].ID, nil
-	}
+	return list[0].ID
+}
 
-	names := make([]string, len(list))
-	for i, t := range list {
-		names[i] = t.Name
-		if names[i] == "" {
-			names[i] = t.ID
+// memo keeps one value per key, computed once for all callers asking at
+// the same time.
+type memo[T any] struct {
+	mu sync.Mutex
+	m  map[string]*memoEntry[T]
+}
+
+type memoEntry[T any] struct {
+	done chan struct{}
+	v    T
+	ok   bool
+}
+
+// kept is the value kept for key, if any.
+func (c *memo[T]) kept(key string) (T, bool) {
+	c.mu.Lock()
+	e, found := c.m[key]
+	c.mu.Unlock()
+
+	if found {
+		select {
+		case <-e.done:
+			if e.ok {
+				return e.v, true
+			}
+		default:
 		}
 	}
 
-	return "", fmt.Errorf("the API token reaches %d %s accounts (%s); dnscli cannot pick one yet: use a token that reaches one",
-		len(list), typ, strings.Join(names, ", "))
+	var zero T
+
+	return zero, false
+}
+
+// get is the value kept for key, else fn's, which is kept when fn reports
+// ok. Callers asking while fn runs wait for its value; a caller whose ctx
+// ends first gets none.
+func (c *memo[T]) get(ctx context.Context, key string, fn func() (T, bool)) (T, bool) {
+	c.mu.Lock()
+
+	if e, found := c.m[key]; found {
+		c.mu.Unlock()
+
+		select {
+		case <-e.done:
+			return e.v, e.ok
+		case <-ctx.Done():
+			var zero T
+
+			return zero, false
+		}
+	}
+
+	e := &memoEntry[T]{done: make(chan struct{})}
+	if c.m == nil {
+		c.m = map[string]*memoEntry[T]{}
+	}
+
+	c.m[key] = e
+	c.mu.Unlock()
+
+	e.v, e.ok = fn()
+
+	if !e.ok {
+		c.mu.Lock()
+		delete(c.m, key)
+		c.mu.Unlock()
+	}
+
+	close(e.done)
+
+	return e.v, e.ok
 }
 
 // Shapes of the old single-token credentials that hold several fields.
@@ -114,8 +214,7 @@ var (
 
 // Fields reads an Account's stored API token into the field map its
 // Provider is built from. GoDaddy's token is KEY:SECRET, Namecheap's
-// APIUSER:APIKEY:CLIENTIP; any other Provider's is its "token" field, or
-// its only field.
+// APIUSER:APIKEY:CLIENTIP; any other Provider's is its only secret field.
 func Fields(typ string, fs []dnsprovider.Field, token string) (map[string]string, error) {
 	switch typ {
 	case "godaddy":
@@ -134,13 +233,17 @@ func Fields(typ string, fs []dnsprovider.Field, token string) (map[string]string
 		return map[string]string{namecheap.FieldUser: parts[0], namecheap.FieldKey: parts[1], namecheap.FieldClientIP: parts[2]}, nil
 	}
 
-	if slices.ContainsFunc(fs, func(f dnsprovider.Field) bool { return f.Name == cloudflare.FieldToken }) {
-		return map[string]string{cloudflare.FieldToken: token}, nil
+	var secret []string
+
+	for _, f := range fs {
+		if f.Secret {
+			secret = append(secret, f.Name)
+		}
 	}
 
-	if len(fs) == 1 {
-		return map[string]string{fs[0].Name: token}, nil
+	if len(secret) != 1 {
+		return nil, fmt.Errorf("%s: dnscli cannot read one API token into its fields", typ)
 	}
 
-	return nil, fmt.Errorf("%s: dnscli cannot read one API token into its fields", typ)
+	return map[string]string{secret[0]: token}, nil
 }
