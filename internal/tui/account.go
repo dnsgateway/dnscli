@@ -653,15 +653,48 @@ func saveIfLive(ctx context.Context, save func() error) error {
 }
 
 // verifyCredentials asks the Provider whether it accepts the credentials.
-// Fields its Provider cannot be built from are refused without asking it.
+// Fields its Provider cannot be built from are refused without asking it,
+// and a Provider that could not be reached, as when listing the Tenants
+// failed, has not refused them.
 func verifyCredentials(ctx context.Context, providers *provider.Opener, typ string, fields map[string]string) (map[string]string, dnsprovider.Tenant, error) {
 	scoped, tenant, err := providers.Verify(ctx, typ, fields)
 	if err == nil || ctx.Err() != nil || errors.As(err, new(*provider.InvalidCredentialsError)) {
 		return scoped, tenant, err
 	}
 
+	if unreachable(err) {
+		return nil, tenant, unreachableError{err}
+	}
+
 	return nil, tenant, notAccepted(err)
 }
+
+// unreachable reports whether err says nothing of the credentials, as the
+// Provider could not answer: a network failure, a rate limit or a server
+// error. Anything else the Provider answered is a refusal.
+func unreachable(err error) bool {
+	var apiErr *dnsprovider.APIError
+
+	switch {
+	case errors.Is(err, dnsprovider.ErrRateLimited):
+		return true
+	case errors.As(err, &apiErr):
+		return apiErr.StatusCode >= 500
+	default:
+		return !errors.Is(err, dnsprovider.ErrUnauthorized) && !errors.Is(err, dnsprovider.ErrNotFound) &&
+			!errors.Is(err, dnsprovider.ErrConflict)
+	}
+}
+
+// unreachableError reports credentials that could not be verified as the
+// Provider could not be reached.
+type unreachableError struct{ err error }
+
+func (e unreachableError) Error() string {
+	return "Could not reach the Provider: " + e.err.Error()
+}
+
+func (e unreachableError) Unwrap() error { return e.err }
 
 // notAcceptedError reports credentials the Provider refused when they
 // were verified.
@@ -728,7 +761,7 @@ func (m *Model) accountSaveFailed(prefix string, a dns.Account, attempt int, err
 	case errors.Is(err, errNoAccountName):
 		f.err = "Enter a name for the Account."
 		f.field = addFieldName
-	case errors.As(err, new(notAcceptedError)):
+	case errors.As(err, new(notAcceptedError)), errors.As(err, new(unreachableError)):
 		f.err = err.Error()
 	case errors.As(err, &invalid):
 		f.err = "The credentials are not valid: " + invalid.Err.Error()

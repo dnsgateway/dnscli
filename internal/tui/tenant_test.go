@@ -2,6 +2,7 @@ package tui_test
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"slices"
 	"testing"
@@ -398,4 +399,40 @@ func TestEditingTheTokenOfAnAccountWithATenantFindsItsTenantAgain(t *testing.T) 
 			}
 		})
 	}
+}
+
+func TestATenantListThatCannotReachTheProviderIsNotARefusal(t *testing.T) {
+	for name, err := range map[string]error{
+		"unavailable":  &dnsprovider.APIError{Provider: "cloudflare", StatusCode: 503},
+		"rate limited": &dnsprovider.APIError{Provider: "cloudflare", StatusCode: 429},
+		"network":      errors.New("dial tcp: connection refused"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := refreshZones()
+			f.SetTenants(twoTenants...)
+			f.Fail(providertest.OpTenants, err)
+
+			h, s := newTenantHarness(t, f)
+			h.fillAddAccount("work", "tok")
+			h.enrollPassphrase()
+
+			h.assertShows("Could not reach the Provider:")
+			h.assertHides("did not accept")
+
+			if accounts, err := s.Accounts(context.Background()); err != nil || len(accounts) != 0 {
+				t.Errorf("Accounts = %+v, %v; want none saved", accounts, err)
+			}
+		})
+	}
+}
+
+func TestCredentialsTheProviderRefusesAreStillRefused(t *testing.T) {
+	f := refreshZones()
+	f.Fail(providertest.OpAccount, &dnsprovider.APIError{Provider: "cloudflare", StatusCode: 403})
+
+	h, _ := newTenantHarness(t, f)
+	h.fillAddAccount("work", "tok")
+	h.enrollPassphrase()
+
+	h.assertShows("The Provider did not accept the credentials:")
 }
