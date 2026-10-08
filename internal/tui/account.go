@@ -240,8 +240,8 @@ func (m *Model) submitAddAccount() tea.Cmd {
 		return nil
 	}
 
-	for i, v := range f.values {
-		if v == "" {
+	for i := range f.values {
+		if f.value(i) == "" {
 			f.err = "Enter the " + f.creds[i].Label + "."
 			f.field = addFieldCreds + i
 
@@ -254,13 +254,19 @@ func (m *Model) submitAddAccount() tea.Cmd {
 	return m.withSecrets(func() tea.Cmd { return m.saveAccount(a, fields) })
 }
 
+// value is what is typed into the i-th credential field, without
+// surrounding whitespace; a blank field is empty.
+func (f *addAccountForm) value(i int) string {
+	return strings.TrimSpace(f.values[i])
+}
+
 // typed is the field map of the credential fields typed into the dialog;
 // empty ones are left out.
 func (f *addAccountForm) typed() map[string]string {
 	fields := map[string]string{}
 
-	for i, v := range f.values {
-		if v != "" {
+	for i := range f.values {
+		if v := f.value(i); v != "" {
 			fields[f.creds[i].Name] = v
 		}
 	}

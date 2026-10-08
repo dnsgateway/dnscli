@@ -325,3 +325,22 @@ func TestEditingOneFieldKeepsTheOthers(t *testing.T) {
 		t.Errorf("Account asked %d times, want once, to verify", n)
 	}
 }
+
+func TestCredentialFieldsAreTrimmedAndBlankOnesAreMissing(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	h := newFieldsHarness(t, s, newFake(), &fieldBuilds{})
+
+	h.fillAccountFields(2, "home", " apiuser ", "   ", "192.0.2.10")
+	h.assertShows("Enter the API key.")
+
+	// The blank field is focused.
+	h.typeText("apikey ")
+	h.press("down", "down", "enter")
+	h.unsealWith(passphrase)
+	h.assertShows("Discovered no Zones for namecheap.home")
+
+	want := map[string]string{"user": "apiuser", "key": "apikey", "client_ip": "192.0.2.10"}
+	if got := storedFields(t, s, accountLabeled(t, s, "namecheap.home")); !maps.Equal(got, want) {
+		t.Errorf("sealed fields = %v, want %v", got, want)
+	}
+}
