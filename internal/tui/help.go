@@ -5,6 +5,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/dnsgateway/dnsprovider"
 )
 
 var helpKeyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Bold(true)
@@ -63,22 +65,50 @@ func (m *Model) helpView() string {
 }
 
 // paneBindings are the focused pane's Actions for the help overlay.
-// Without Accounts, insert adds one from any pane.
+// Without Accounts, insert adds one from any pane. The Domains pane's Zone
+// writes are offered only in an Unsealed session, for an Account whose
+// Provider type can make them (see zoneWriteOffered).
 func (m *Model) paneBindings() []paneBinding {
-	bs := paneHelp[m.focus]
-	if len(m.accounts) > 0 {
-		return bs
+	var out []paneBinding
+
+	if len(m.accounts) == 0 {
+		out = append(out, paneBinding{ActionInsert, "add an Account"})
 	}
 
-	out := []paneBinding{{ActionInsert, "add an Account"}}
-
-	for _, b := range bs {
-		if b.Action != ActionInsert {
+	for _, b := range paneHelp[m.focus] {
+		switch {
+		case len(m.accounts) == 0 && b.Action == ActionInsert:
+		case m.focus == paneDomains && !m.zoneWriteOffered(b.Action):
+		default:
 			out = append(out, b)
 		}
 	}
 
 	return out
+}
+
+// zoneWriteOffered reports whether the Domains pane offers Action a: any
+// Action but its Zone writes, Onboarding (insert) and the Zone settings,
+// which it offers only in an Unsealed session, Onboarding for the Account
+// it would Onboard in, the Zone settings for the highlighted Zone's, when
+// that Account's Provider type can. The keys still refuse otherwise.
+func (m *Model) zoneWriteOffered(a Action) bool {
+	switch a {
+	case ActionInsert:
+		acc, ok := m.onboardAccount()
+
+		return m.key != nil && ok && m.accountCan(acc, dnsprovider.CapZoneCreator)
+	case ActionZoneSettings:
+		if m.key == nil || len(m.visible) == 0 {
+			return false
+		}
+
+		acc, ok := m.account(m.visible[m.cursor[paneDomains]].AccountID)
+
+		return ok && m.accountCan(acc, dnsprovider.CapZoneUpdater)
+	}
+
+	return true
 }
 
 // overlay draws fg centred on top of bg.

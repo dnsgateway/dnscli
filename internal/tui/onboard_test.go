@@ -297,12 +297,37 @@ func TestAMovedZonesNameIsOnboardedAgainInItsPlace(t *testing.T) {
 	}
 }
 
-func TestHelpOffersOnboardingInTheDomainsPane(t *testing.T) {
+func TestHelpOffersOnboardingOnlyForACapableAccountInAnUnsealedSession(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
-	h := newAccountHarness(t, s, workZones())
+	h := newAccountHarness(t, s, onboardFake())
 
+	// Sealed, it is not offered.
 	h.press("?")
+	h.assertShows("show the Zone's Records")
+	h.assertHides("Onboard a zone name")
+
+	// Unsealed, for the only Account, which can.
+	h.press("esc", "i")
+	h.unsealWith(passphrase)
+	h.press("esc", "?")
 	h.assertShows("Onboard a zone name")
+}
+
+func TestHelpDoesNotOfferOnboardingForAnAccountThatCannot(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	f := onboardFake()
+	f.SetZoneCreator(false)
+	f.SetZoneUpdater(true)
+
+	h := newAccountHarness(t, s, f)
+
+	// Unseal through the Zone settings, which it can change.
+	h.press("S")
+	h.unsealWith(passphrase)
+	h.press("esc", "?")
+
+	h.assertShows("show the Zone's Records")
+	h.assertHides("Onboard a zone name")
 }
 
 func TestAZoneOnboardedButNotCachedClosesTheDialogNamingIt(t *testing.T) {

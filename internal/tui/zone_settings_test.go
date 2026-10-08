@@ -210,12 +210,38 @@ func TestZoneSettingsActOnTheDomainsPanesZoneOnly(t *testing.T) {
 	h.assertHides("Unseal", "Zone settings of")
 }
 
-func TestHelpOffersZoneSettingsInTheDomainsPane(t *testing.T) {
+func TestHelpOffersZoneSettingsOnlyForACapableAccountInAnUnsealedSession(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
-	h := newAccountHarness(t, s, workZones())
+	status := dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Off, HSTS: dnsprovider.Off}
+	withZoneStatus(t, s, "work.example", status)
 
+	h := newAccountHarness(t, s, settingsFake(status, true))
+
+	// Sealed, they are not offered.
 	h.press("?")
+	h.assertShows("show the Zone's Records")
+	h.assertHides("turn the Zone's DNSSEC or HSTS on or off")
+
+	// Unsealed, for the highlighted Zone's Account, which can.
+	h.press("esc", "S")
+	h.unsealWith(passphrase)
+	h.press("esc", "?")
 	h.assertShows("turn the Zone's DNSSEC or HSTS on or off")
+}
+
+func TestHelpDoesNotOfferZoneSettingsForAnAccountThatCannot(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	f := onboardFake()
+
+	h := newAccountHarness(t, s, f)
+
+	// Unseal through Onboarding, which it can.
+	h.press("i")
+	h.unsealWith(passphrase)
+	h.press("esc", "?")
+
+	h.assertShows("show the Zone's Records")
+	h.assertHides("turn the Zone's DNSSEC or HSTS on or off")
 }
 
 func TestZoneSettingsOfAnUpgradedAccountReachingSeveralTenantsAskForOneThenOpen(t *testing.T) {
