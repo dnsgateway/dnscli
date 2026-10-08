@@ -172,3 +172,38 @@ func TestAVersion2DatabaseMigratesWithNoZoneStatusOrNameservers(t *testing.T) {
 		t.Fatalf("zone = %+v, want no Zone Status and no nameservers", got)
 	}
 }
+
+func TestAZoneRelistedWithAnotherProviderIDForgetsItsRecordsAndRefresh(t *testing.T) {
+	ctx := context.Background()
+	s := open(t, filepath.Join(t.TempDir(), "dnscli.db"))
+
+	ns := []string{"ada.ns.cloudflare.com", "bob.ns.cloudflare.com"}
+	z := putZone(t, s, dns.Zone{Name: "example.com", ProviderID: "z1", Nameservers: ns, State: dnsprovider.HostingActive})
+
+	at := time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC)
+	records := []dns.Record{{ProviderID: "r1", Type: "A", Name: "www.example.com", Value: "192.0.2.1", TTL: 300}}
+
+	if _, err := s.SaveRefresh(ctx, z, records, 2026100701, at); err != nil {
+		t.Fatalf("save refresh: %v", err)
+	}
+
+	// The zone was deleted and created again at the Provider; the listing
+	// says nothing of its nameservers.
+	sync, err := s.SyncAccountZones(ctx, z.AccountID, []dns.Zone{{Name: "example.com", ProviderID: "z2", State: dnsprovider.HostingPending}})
+	if err != nil {
+		t.Fatalf("sync zones: %v", err)
+	}
+
+	got := onlyZone(t, s)
+	if got.ID != z.ID || got.ProviderID != "z2" || !got.RefreshedAt.IsZero() || got.Nameservers != nil || got.State != dnsprovider.HostingPending {
+		t.Fatalf("zone = %+v, want z2, pending, never Refreshed, no nameservers", got)
+	}
+
+	if cached, err := s.Records(ctx, z.ID); err != nil || len(cached) != 0 {
+		t.Fatalf("records = %+v, %v; want none", cached, err)
+	}
+
+	if len(sync.Added) != 0 || len(sync.Dropped) != 0 || len(sync.Replaced) != 1 || sync.Replaced[0].ID != z.ID || sync.Replaced[0].ProviderID != "z2" {
+		t.Fatalf("sync = %+v, want only example.com replaced by z2", sync)
+	}
+}
