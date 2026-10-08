@@ -328,13 +328,7 @@ func (f *addAccountForm) tenantField() string {
 		return ""
 	}
 
-	for _, fd := range f.reg[f.types[f.provider]].Fields {
-		if fd.Tenant {
-			return fd.Name
-		}
-	}
-
-	return ""
+	return tenantFieldOf(f.reg[f.types[f.provider]])
 }
 
 // chooseAccountProvider changes the Provider of the Account being added,
@@ -875,6 +869,16 @@ func (m *Model) zonesDiscovered(msg zonesDiscoveredMsg) tea.Cmd {
 
 		return nil
 	}
+
+	// Credentials reaching several Tenants ask for one, over the failure
+	// reported below, and the discovery runs again once it is saved.
+	defer m.askTenant(msg.account, msg.err, func() tea.Cmd {
+		if msg.relist {
+			return m.relistAccount(msg.account)
+		}
+
+		return m.discoverZones(msg.account, false)
+	})
 
 	if msg.relist {
 		return m.zonesRelisted(msg)

@@ -402,6 +402,12 @@ func (m *Model) zoneRefreshed(msg zoneRefreshedMsg) tea.Cmd {
 	if msg.err != nil {
 		*r = zoneRefresh{err: msg.err, retryAt: m.retryAt(msg.err)}
 
+		if z, ok := m.zoneByID[msg.zoneID]; ok {
+			if a, ok := m.account(z.AccountID); ok {
+				m.askTenant(a, msg.err, func() tea.Cmd { return m.refreshZone(m.zoneByID[z.ID]) })
+			}
+		}
+
 		return m.startRefreshes()
 	}
 

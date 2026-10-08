@@ -110,6 +110,8 @@ func (m *Model) View() string {
 		view = overlay(view, m.previewView(), m.width, m.height)
 	case m.delegationOf != "":
 		view = overlay(view, m.delegationView(), m.width, m.height)
+	case m.tenantPick != nil:
+		view = overlay(view, m.tenantPick.picker.view(m.height), m.width, m.height)
 	}
 
 	// Terminals too small to draw the panes in get a clipped view.

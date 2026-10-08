@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/sergelogvinov/dnscli/internal/dns"
 )
 
 // relistZones re-lists the highlighted Account's Zones from its Provider,
@@ -15,6 +17,11 @@ func (m *Model) relistZones() tea.Cmd {
 		return nil
 	}
 
+	return m.relistAccount(a)
+}
+
+// relistAccount re-lists an Account's Zones from its Provider.
+func (m *Model) relistAccount(a dns.Account) tea.Cmd {
 	return m.withSecrets(func() tea.Cmd {
 		if m.relisting[a.ID] {
 			m.notice = notice{text: "Already re-listing " + a.Label() + "…"}

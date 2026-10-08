@@ -130,6 +130,9 @@ type Model struct {
 
 	// relisting holds the IDs of the Accounts whose Zones are being re-listed.
 	relisting map[int64]bool
+	// tenantPick asks which Tenant an Account acts within; nil when
+	// closed.
+	tenantPick *tenantPick
 }
 
 // notice is a message for the status bar.
@@ -310,6 +313,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case changesAppliedMsg:
 		return m, m.changesApplied(msg)
+	case tenantPinnedMsg:
+		return m, m.tenantPinned(msg)
 	case recordsLoadedMsg:
 		if m.open == nil || m.open.ID != msg.zoneID {
 			return m, nil // the user has moved on to another Zone
@@ -334,6 +339,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.addForm != nil {
 			return m, m.addAccountKey(msg)
+		}
+
+		if m.tenantPick != nil {
+			return m, m.tenantPickKey(msg)
 		}
 
 		if m.keychain != nil {

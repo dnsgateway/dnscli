@@ -9,6 +9,7 @@ import (
 	"github.com/dnsgateway/dnsprovider"
 	"github.com/dnsgateway/dnsprovider/providertest"
 
+	"github.com/sergelogvinov/dnscli/internal/dns"
 	"github.com/sergelogvinov/dnscli/internal/store"
 	"github.com/sergelogvinov/dnscli/internal/tui"
 )
@@ -243,5 +244,92 @@ func TestAnUpgradedAccountIsPinnedToTheOnlyTenantItReachesOnFirstUse(t *testing.
 
 	if got, want := storedFields(t, s, accountLabeled(t, s, "cloudflare.old")), map[string]string{"token": "tok", "account": acmeTenant}; !maps.Equal(got, want) {
 		t.Errorf("stored credentials = %v, want %v", got, want)
+	}
+}
+
+// onlyTenantsListed fails t when the fake was asked for anything but its
+// Tenants, besides being built.
+func onlyTenantsListed(t *testing.T, f *fakeProvider) {
+	t.Helper()
+
+	for _, c := range f.Calls() {
+		if c.Op != providertest.OpNew && c.Op != providertest.OpTenants {
+			t.Errorf("called %s before a Tenant was picked", c.Op)
+		}
+	}
+}
+
+func TestAnUpgradedAccountReachingSeveralTenantsAsksForOneOnFirstUse(t *testing.T) {
+	f := refreshZones()
+	f.SetTenants(twoTenants...)
+
+	h, s := newUpgradedHarness(t, f)
+	h.press("L")
+	h.unsealWith(passphrase)
+
+	h.assertShows("Tenant of cloudflare.old", "Acme Ltd", "Side project")
+	onlyTenantsListed(t, f)
+
+	// Picked, the Tenant is saved, and the re-listing runs again.
+	h.press("down", "enter")
+	h.assertShows("Re-listed cloudflare.old")
+	h.assertHides("Tenant of")
+
+	if got, want := storedFields(t, s, accountLabeled(t, s, "cloudflare.old")), map[string]string{"token": "tok", "account": "b2"}; !maps.Equal(got, want) {
+		t.Errorf("stored credentials = %v, want %v", got, want)
+	}
+}
+
+func TestARefreshOfAnUpgradedAccountReachingSeveralTenantsAsksForOne(t *testing.T) {
+	f := refreshZones()
+	f.SetTenants(twoTenants...)
+
+	h, s := newUpgradedHarness(t, f)
+	old := accountLabeled(t, s, "cloudflare.old")
+	mustZone(t, s, dns.Zone{AccountID: old.ID, Name: "old.example", ProviderID: "zw2"})
+	h.run(h.model.Init())
+
+	// Show cloudflare.old's Zones, and open old.example, which Refreshes it.
+	h.press("enter", "tab", "enter")
+	h.unsealWith(passphrase)
+
+	h.assertShows("Tenant of cloudflare.old")
+	onlyTenantsListed(t, f)
+
+	// Picked, the Tenant is saved, and the Refresh runs again.
+	h.press("enter")
+	h.assertShows("cloudflare.old acts within Acme Ltd.")
+
+	if n := f.count(providertest.OpRecords); n != 1 {
+		t.Errorf("Records read %d times, want once, after the Tenant was picked", n)
+	}
+
+	if got := storedFields(t, s, old)["account"]; got != acmeTenant {
+		t.Errorf("stored Tenant = %q, want %s", got, acmeTenant)
+	}
+}
+
+func TestAClosedTenantPickerIsOpenedAgainOnTheNextUse(t *testing.T) {
+	f := refreshZones()
+	f.SetTenants(twoTenants...)
+
+	h, s := newUpgradedHarness(t, f)
+	h.press("L")
+	h.unsealWith(passphrase)
+	h.press("esc")
+
+	h.assertHides("Tenant of")
+	h.assertShows("cloudflare.old acts within no Tenant yet")
+
+	if plain := storedPlaintext(t, s, accountLabeled(t, s, "cloudflare.old")); plain != "tok" {
+		t.Errorf("credentials sealed as %q, want them untouched", plain)
+	}
+
+	h.press("L")
+	h.assertShows("Tenant of cloudflare.old")
+	onlyTenantsListed(t, f)
+
+	if n := f.count(providertest.OpTenants); n != 1 {
+		t.Errorf("Tenants listed %d times, want once this session", n)
 	}
 }
