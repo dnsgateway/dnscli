@@ -324,7 +324,7 @@ func tenantAccountName(t dnsprovider.Tenant) string {
 // tenantField is the name of the field the Provider of the Account in
 // the dialog takes its Tenant in; empty when it takes none.
 func (f *addAccountForm) tenantField() string {
-	if f.provider >= len(f.types) {
+	if f == nil || f.provider >= len(f.types) {
 		return ""
 	}
 
@@ -514,7 +514,7 @@ type accountEditedMsg struct {
 func (m *Model) updateAccount(old, a dns.Account, typed map[string]string, changed bool) tea.Cmd {
 	key, store, providers := m.key, m.deps.Store, m.providers
 	ctx, cancel, attempt := m.startSaving()
-	required := m.addForm.requiredFields()
+	required, secrets, tenantField := m.addForm.requiredFields(), m.addForm.secretFields(), m.addForm.tenantField()
 
 	return func() tea.Msg {
 		defer cancel()
@@ -550,6 +550,12 @@ func (m *Model) updateAccount(old, a dns.Account, typed map[string]string, chang
 			// Stored fields that cannot be read are replaced in full.
 			if fields == nil {
 				fields = map[string]string{}
+			}
+
+			// Another secret may reach other Tenants: the stored one is
+			// found again, unless one was just picked for it.
+			if slices.ContainsFunc(secrets, func(name string) bool { return typed[name] != "" && typed[name] != fields[name] }) {
+				delete(fields, tenantField)
 			}
 
 			maps.Copy(fields, typed)
@@ -590,6 +596,24 @@ func (f *addAccountForm) requiredFields() []string {
 	names := make([]string, len(f.creds))
 	for i, fd := range f.creds {
 		names[i] = fd.Name
+	}
+
+	return names
+}
+
+// secretFields are the names of the secret credential fields the dialog
+// asks for.
+func (f *addAccountForm) secretFields() []string {
+	if f == nil {
+		return nil
+	}
+
+	var names []string
+
+	for _, fd := range f.creds {
+		if fd.Secret {
+			names = append(names, fd.Name)
+		}
 	}
 
 	return names

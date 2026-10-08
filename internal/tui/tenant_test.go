@@ -222,8 +222,16 @@ func TestTheNameHintSaysAnEmptyNameIsTheTenants(t *testing.T) {
 func newUpgradedHarness(t *testing.T, f *fakeProvider) (*harness, *store.Store) {
 	t.Helper()
 
+	return newHarnessHolding(t, f, "tok")
+}
+
+// newHarnessHolding is newUpgradedHarness with cloudflare.old's
+// credentials sealed as plain.
+func newHarnessHolding(t *testing.T, f *fakeProvider, plain string) (*harness, *store.Store) {
+	t.Helper()
+
 	s, _ := enrollFirstAccount(t)
-	addOldAccount(t, s, "cloudflare", "old", "tok")
+	addOldAccount(t, s, "cloudflare", "old", plain)
 
 	h := newHarnessWith(t, s, tui.Deps{Providers: f.tenantRegistry(&tenantBuilds{}), UnsealMethod: fastPassphrase()})
 	h.press("shift+tab")
@@ -354,5 +362,40 @@ func TestEditingInATokenReachingSeveralTenantsAsksWhichAndKeepsTheName(t *testin
 
 	if got, want := storedFields(t, s, accountLabeled(t, s, "cloudflare.old")), map[string]string{"token": "tok2", "account": acmeTenant}; !maps.Equal(got, want) {
 		t.Errorf("stored credentials = %v, want %v", got, want)
+	}
+}
+
+func TestEditingTheTokenOfAnAccountWithATenantFindsItsTenantAgain(t *testing.T) {
+	for name, tc := range map[string]struct {
+		tenants []dnsprovider.Tenant
+		pick    []string // the keys that pick a Tenant; none when not asked
+	}{
+		"one":     {tenants: twoTenants[1:]},
+		"several": {tenants: twoTenants, pick: []string{"down", "enter"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := refreshZones()
+			f.SetTenants(tc.tenants...)
+
+			// cloudflare.old acts within Acme Ltd; its new token does not.
+			h, s := newHarnessHolding(t, f, `{"token":"tok","account":"`+acmeTenant+`"}`)
+			h.press("e")
+			h.unsealWith(passphrase)
+			h.assertShows("Edit Account cloudflare.old")
+			h.press("down")
+			h.typeText("tok2")
+			h.press("down", "enter")
+
+			if tc.pick != nil {
+				h.assertShows("Acme Ltd", "Side project")
+				h.press(tc.pick...)
+			}
+
+			h.assertShows("Saved cloudflare.old.")
+
+			if got, want := storedFields(t, s, accountLabeled(t, s, "cloudflare.old")), map[string]string{"token": "tok2", "account": "b2"}; !maps.Equal(got, want) {
+				t.Errorf("stored credentials = %v, want %v", got, want)
+			}
+		})
 	}
 }
