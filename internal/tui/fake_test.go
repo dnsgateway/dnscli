@@ -120,7 +120,8 @@ func wrapped(f *fakeProvider, wrap func(dnsprovider.Provider) dnsprovider.Provid
 	inner := f.Factory()
 
 	return dnsprovider.Registry{"cloudflare": {
-		Fields: inner.Fields,
+		Fields:       inner.Fields,
+		Capabilities: inner.Capabilities,
 		New: func(m map[string]string, opts ...dnsprovider.Option) (dnsprovider.Provider, error) {
 			p, err := inner.New(m, opts...)
 			if err != nil {
@@ -143,15 +144,23 @@ type tenantBuilds struct {
 // tenantRegistry is the Registry tb records the builds of.
 func (f *fakeProvider) tenantRegistry(tb *tenantBuilds) dnsprovider.Registry {
 	inner := f.Factory()
+	innerTenant := provider.TenantField(inner)
+	fields := slices.DeleteFunc(slices.Clone(inner.Fields), func(fd dnsprovider.Field) bool { return fd.Tenant })
 
 	return dnsprovider.Registry{"cloudflare": {
-		Fields: append(slices.Clone(inner.Fields), dnsprovider.Field{Name: "account", Label: "Account", Tenant: true}),
+		Fields:       append(fields, dnsprovider.Field{Name: "account", Label: "Account", Tenant: true}),
+		Capabilities: inner.Capabilities,
 		New: func(m map[string]string, opts ...dnsprovider.Option) (dnsprovider.Provider, error) {
 			tb.mu.Lock()
 			tb.tenants = append(tb.tenants, m["account"])
 			tb.mu.Unlock()
 
-			p, err := inner.New(map[string]string{"token": m["token"]}, opts...)
+			im := map[string]string{"token": m["token"]}
+			if innerTenant != "" && m["account"] != "" {
+				im[innerTenant] = m["account"]
+			}
+
+			p, err := inner.New(im, opts...)
 			if err != nil || m["account"] != "" || !strings.HasPrefix(m["token"], ownedTokenPrefix) {
 				return p, err
 			}

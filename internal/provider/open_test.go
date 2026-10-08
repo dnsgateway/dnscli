@@ -144,16 +144,22 @@ func newTenanted(tenants ...dnsprovider.Tenant) *tenanted {
 
 func (r *tenanted) registry() dnsprovider.Registry {
 	inner := r.fake.Factory()
+	fields := slices.DeleteFunc(slices.Clone(inner.Fields), func(fd dnsprovider.Field) bool { return fd.Tenant })
 
 	return dnsprovider.Registry{"tenanted": {
 		// Named other than Cloudflare's, so only the mark tells it.
-		Fields: append(inner.Fields, dnsprovider.Field{Name: "scope", Label: "Account", Tenant: true}),
+		Fields: append(fields, dnsprovider.Field{Name: "scope", Label: "Account", Tenant: true}),
 		New: func(m map[string]string, opts ...dnsprovider.Option) (dnsprovider.Provider, error) {
 			r.mu.Lock()
 			r.built = append(r.built, m["scope"])
 			r.mu.Unlock()
 
-			p, err := inner.New(map[string]string{"token": m["token"]}, opts...)
+			im := map[string]string{"token": m["token"]}
+			if m["scope"] != "" {
+				im[providertest.FieldTenant] = m["scope"]
+			}
+
+			p, err := inner.New(im, opts...)
 			if err != nil {
 				return nil, err
 			}
