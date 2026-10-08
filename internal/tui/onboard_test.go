@@ -2,6 +2,7 @@ package tui_test
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -141,7 +142,7 @@ func TestAZoneNameTheProviderHoldsAlreadyKeepsTheDialogOpenWithTheErrorAndTheCac
 	h.press("enter", "enter")
 
 	h.assertShows("Onboard a zone at cloudflare.work", "Could not Onboard taken.example", "already exists",
-		"the Provider holds it", "in this account or another")
+		"holds no Zone", "another")
 	h.assertHides("is Onboarded")
 
 	if got := zonesCached(t, s); got != before {
@@ -408,5 +409,156 @@ func TestAZoneOnboardedWithoutAnIDIsNotCachedAndTheUserIsToldToReList(t *testing
 
 	if got := zonesCached(t, s); got != before {
 		t.Fatalf("cached Zones = %d, want %d: a Zone without its Provider ID is not cached", got, before)
+	}
+}
+
+func TestAConflictOverAZoneNameTheAccountHoldsShowsThatZoneAsOnboarded(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	f := onboardFake()
+	// Onboarded already, as by a create whose answer was lost: the Account
+	// holds it, pending, but the cache does not.
+	f.Provider.AddZone(dnsprovider.Zone{ID: "zh", Name: "held.example", State: dnsprovider.HostingPending,
+		Nameservers: []string{"cy.ns.cloudflare.com", "dee.ns.cloudflare.com"}})
+
+	h := newAccountHarness(t, s, f)
+
+	h.press("i")
+	h.unsealWith(passphrase)
+	h.typeText("held.example")
+	h.press("enter", "enter")
+
+	h.assertShows("held.example is Onboarded at cloudflare.work", "pending", "cy.ns.cloudflare.com", "dee.ns.cloudflare.com")
+	h.assertHides("Could not Onboard")
+
+	if z := zoneNamed(t, s, "held.example"); z.ProviderID != "zh" || z.State != dnsprovider.HostingPending {
+		t.Fatalf("cached Zone = %+v, want the Account's pending zh", z)
+	}
+}
+
+// lostAnswer Onboards through the fake, unless fail is set, then fails as
+// a connection lost before the answer: the create may have been taken.
+type lostAnswer struct {
+	dnsprovider.Provider
+	take bool
+	// ctx is the context the last create was given.
+	ctx *context.Context
+}
+
+var errConnectionReset = errors.New("read tcp: connection reset by peer")
+
+func (l lostAnswer) CreateZone(ctx context.Context, name string) (dnsprovider.Zone, error) {
+	if l.ctx != nil {
+		*l.ctx = ctx
+	}
+
+	if l.take {
+		if _, err := l.Provider.(dnsprovider.ZoneCreator).CreateZone(ctx, name); err != nil {
+			return dnsprovider.Zone{}, err
+		}
+	}
+
+	if err := ctx.Err(); err != nil {
+		return dnsprovider.Zone{}, err
+	}
+
+	return dnsprovider.Zone{}, errConnectionReset
+}
+
+func newLostAnswerHarness(t *testing.T, s *store.Store, f *fakeProvider, l lostAnswer) *harness {
+	t.Helper()
+
+	return newHarnessWith(t, s, tui.Deps{
+		Providers: wrapped(f, func(p dnsprovider.Provider) dnsprovider.Provider {
+			l.Provider = p
+
+			return l
+		}),
+		UnsealMethod: fastPassphrase(),
+	})
+}
+
+func TestACreateWhoseAnswerWasLostIsReadBackAndShownOnboarded(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	f := onboardFake()
+	h := newLostAnswerHarness(t, s, f, lostAnswer{take: true})
+
+	h.press("i")
+	h.unsealWith(passphrase)
+	h.typeText("new.example")
+	h.press("enter", "enter")
+
+	h.assertShows("new.example is Onboarded at cloudflare.work", "ada.ns.cloudflare.com")
+
+	if calls := createZoneCalls(f); len(calls) != 1 {
+		t.Fatalf("CreateZone calls = %q, want one: a create is never sent again", calls)
+	}
+
+	if z := zoneNamed(t, s, "new.example"); z.ProviderID == "" || z.State != dnsprovider.HostingPending {
+		t.Fatalf("cached Zone = %+v, want it pending with its ID", z)
+	}
+}
+
+func TestACreateWhoseAnswerWasLostAndThatTheAccountDoesNotHoldFails(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	f := onboardFake()
+	h := newLostAnswerHarness(t, s, f, lostAnswer{})
+	before := zonesCached(t, s)
+
+	h.press("i")
+	h.unsealWith(passphrase)
+	h.typeText("new.example")
+	h.press("enter", "enter")
+
+	h.assertShows("Could not Onboard new.example", "connection", "holds no Zone", "nothing was Onboarded")
+	h.assertHides("is Onboarded")
+
+	if got := zonesCached(t, s); got != before {
+		t.Fatalf("cached Zones = %d, want %d as before", got, before)
+	}
+}
+
+func TestACreateRunsWithADeadline(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+
+	var ctx context.Context
+
+	h := newLostAnswerHarness(t, s, onboardFake(), lostAnswer{take: true, ctx: &ctx})
+
+	h.press("i")
+	h.unsealWith(passphrase)
+	h.typeText("new.example")
+	h.press("enter", "enter")
+
+	if ctx == nil {
+		t.Fatal("CreateZone was not called")
+	}
+
+	if _, ok := ctx.Deadline(); !ok {
+		t.Error("CreateZone ran without a deadline")
+	}
+}
+
+func TestEscCancelsACreateInFlightWhichIsReadBack(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	f := onboardFake()
+	h := newLostAnswerHarness(t, s, f, lostAnswer{})
+	before := zonesCached(t, s)
+
+	h.press("i")
+	h.unsealWith(passphrase)
+	h.typeText("new.example")
+	h.press("enter")
+
+	create := h.pressHolding("enter")
+	h.assertShows("onboarding…", "cancels")
+
+	h.press("esc")
+	h.run(create)
+
+	h.assertShows("Onboard a zone at cloudflare.work", "Cancelled", "no Zone of that name", "nothing was Onboarded")
+	h.assertHides("is Onboarded", "onboarding…")
+
+	if got := zonesCached(t, s); got != before {
+		t.Fatalf("cached Zones = %d, want %d as before", got, before)
 	}
 }

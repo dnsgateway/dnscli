@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -29,6 +31,8 @@ type onboardDialog struct {
 	// or Esc goes back to it.
 	confirming bool
 	busy       bool // the zone name is being Onboarded
+	// cancel stops the create in flight; nil when none is.
+	cancel context.CancelFunc
 	// done is the Zone Onboarded, as cached; nil until then.
 	done *dns.Zone
 	// unsaid is set when done is the zone name alone, uncached: the
@@ -64,6 +68,11 @@ type zoneOnboardedMsg struct {
 	unsaid bool
 	// err is why the Provider failed the Onboarding.
 	err error
+	// cancelled is set when the user cancelled it.
+	cancelled bool
+	// readBack is why reading back a create whose answer was lost, or
+	// that was refused as held already, failed.
+	readBack error
 	// saveErr is why the new Zone could not be cached, after the
 	// Provider Onboarded it.
 	saveErr error
@@ -195,7 +204,9 @@ func noTenantToOnboard(a dns.Account) string {
 
 // onboardKey handles a key while the Onboard dialog is open: the user
 // types the zone name, Enter checks it and asks to confirm, and Enter
-// again Onboards it; Esc goes back from confirming, else closes.
+// again Onboards it; Esc goes back from confirming, else closes, and
+// cancels a create in flight, which is then read back as one whose
+// answer was lost.
 func (m *Model) onboardKey(msg tea.KeyMsg) tea.Cmd {
 	d := m.onboard
 	a := m.keys.action(msg.String())
@@ -205,6 +216,10 @@ func (m *Model) onboardKey(msg tea.KeyMsg) tea.Cmd {
 	}
 
 	if d.busy {
+		if a == ActionClose && d.cancel != nil {
+			d.cancel()
+		}
+
 		return nil
 	}
 
@@ -305,17 +320,37 @@ func checkZoneName(name string) error {
 	return nil
 }
 
+// onboardTimeout bounds a create, and, apart, its read-back: the create
+// is sent once, never retried.
+const onboardTimeout = time.Minute
+
 // createZone Onboards the zone name confirmed, and caches the Zone the
 // Provider returns, in place of a cached one of that name it replaces. A
-// Zone the Provider returns without its ID is not cached: see
-// zoneOnboardedMsg.unsaid.
+// create whose answer was lost, or that the Provider refuses as held
+// already, is read back (see readBack). A Zone the Provider returns
+// without its ID is not cached: see zoneOnboardedMsg.unsaid.
 func (m *Model) createZone(d *onboardDialog) tea.Cmd {
-	ctx, s, p, a, name := m.ctx, m.deps.Store, d.p, d.account, d.name
+	parent, s, p, a, name := m.ctx, m.deps.Store, d.p, d.account, d.name
+
+	ctx, cancel := context.WithTimeout(parent, onboardTimeout)
+	d.cancel = cancel
 
 	return func() tea.Msg {
+		defer cancel()
+
 		mz, err := p.CreateZone(ctx, name)
 		if err != nil {
-			return zoneOnboardedMsg{account: a, name: name, err: err}
+			if !answerLost(err) {
+				return zoneOnboardedMsg{account: a, name: name, err: err}
+			}
+
+			held, rerr := readBack(parent, p, name)
+			if rerr != nil || held.ID == "" {
+				return zoneOnboardedMsg{account: a, name: name, err: err, cancelled: errors.Is(err, context.Canceled),
+					readBack: rerr}
+			}
+
+			mz = held
 		}
 
 		z := provider.CacheZone(mz)
@@ -325,13 +360,48 @@ func (m *Model) createZone(d *onboardDialog) tea.Cmd {
 			return zoneOnboardedMsg{account: a, name: name, zone: z, unsaid: true}
 		}
 
-		saved, replaced, err := s.PutZone(ctx, z)
+		saved, replaced, err := s.PutZone(parent, z)
 		if err != nil {
 			return zoneOnboardedMsg{account: a, name: name, zone: z, saveErr: err}
 		}
 
 		return zoneOnboardedMsg{account: a, name: name, zone: saved, cached: true, replaced: replaced}
 	}
+}
+
+// answerLost reports whether a failed create may have been taken, or the
+// Provider says the name is held already, so the Account may hold it:
+// a conflict, or a failure without the Provider's answer, such as a lost
+// connection, a timeout or a cancel. A Provider without a Tenant asked
+// nothing.
+func answerLost(err error) bool {
+	if errors.Is(err, dnsprovider.ErrConflict) {
+		return true
+	}
+
+	return !errors.As(err, new(*dnsprovider.APIError)) && !errors.Is(err, dnsprovider.ErrNoTenant)
+}
+
+// readBack reads the Zone of a name within the Provider's Tenant after a
+// create whose answer was lost or that was refused as held already: the
+// Zone the Account holds, Pending or Active, which it Onboarded, else
+// none (no ID). err is why the read failed.
+func readBack(parent context.Context, p dnsprovider.ZoneCreator, name string) (dnsprovider.Zone, error) {
+	ctx, cancel := context.WithTimeout(parent, onboardTimeout)
+	defer cancel()
+
+	z, err := p.(dnsprovider.Provider).Zone(ctx, name)
+
+	switch {
+	case errors.Is(err, dnsprovider.ErrNotFound):
+		return dnsprovider.Zone{}, nil
+	case err != nil:
+		return dnsprovider.Zone{}, err
+	case z.State != dnsprovider.HostingPending && z.State != dnsprovider.HostingActive:
+		return dnsprovider.Zone{}, nil
+	}
+
+	return z, nil
 }
 
 // zoneOnboarded reports an Onboarding. One the Provider failed leaves the
@@ -347,12 +417,8 @@ func (m *Model) zoneOnboarded(msg zoneOnboardedMsg) tea.Cmd {
 	switch {
 	case msg.err != nil:
 		if d != nil {
-			d.busy, d.confirming = false, false
-			d.err = "Could not Onboard " + msg.name + ": " + msg.err.Error()
-			if errors.Is(msg.err, dnsprovider.ErrConflict) {
-				d.err = "Could not Onboard " + msg.name + ": the Provider holds it already, in this account or another " +
-					"(re-list the Account's Zones to see it if here). " + msg.err.Error()
-			}
+			d.busy, d.confirming, d.cancel = false, false, nil
+			d.err = m.onboardError(msg)
 		}
 
 		return nil
@@ -375,7 +441,7 @@ func (m *Model) zoneOnboarded(msg zoneOnboardedMsg) tea.Cmd {
 
 	if d != nil {
 		z := msg.zone
-		d.busy, d.done, d.unsaid = false, &z, msg.unsaid
+		d.busy, d.done, d.unsaid, d.cancel = false, &z, msg.unsaid, nil
 	}
 
 	m.notice = notice{text: msg.zone.Name + " is Onboarded at " + msg.account.Label() + ", pending until Delegation names its nameservers."}
@@ -386,6 +452,32 @@ func (m *Model) zoneOnboarded(msg zoneOnboardedMsg) tea.Cmd {
 	}
 
 	return m.loadCache
+}
+
+// onboardError says why an Onboarding failed. One whose answer was lost,
+// or refused as held already, says what the read-back found: that the
+// Account holds no Zone of the name, or, when the read failed, that it
+// may hold it all the same.
+func (m *Model) onboardError(msg zoneOnboardedMsg) string {
+	text := "Could not Onboard " + msg.name + ": " + strings.TrimSuffix(msg.err.Error(), ".") + "."
+	if msg.cancelled {
+		text = "Cancelled Onboarding " + msg.name + "."
+	}
+
+	if !answerLost(msg.err) {
+		return text
+	}
+
+	if msg.readBack != nil {
+		return text + " It may have been Onboarded all the same, as reading it back failed: " + msg.readBack.Error() + ". " + m.reList()
+	}
+
+	text += " " + msg.account.Label() + " holds no Zone of that name"
+	if errors.Is(msg.err, dnsprovider.ErrConflict) {
+		return text + ": another account holds it."
+	}
+
+	return text + ", so nothing was Onboarded."
 }
 
 // reList tells the user to re-list the Account's Zones.
@@ -442,7 +534,7 @@ func (m *Model) onboardView() string {
 
 	switch {
 	case d.busy:
-		hint = "onboarding…"
+		hint = "onboarding… " + m.keys.keysFor(ActionClose) + " cancels"
 	case d.confirming:
 		hint = m.keys.keysFor(ActionSelect) + " confirm · " + m.keys.keysFor(ActionClose) + " back"
 	default:
