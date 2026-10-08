@@ -35,17 +35,36 @@ func NewOpener(reg dnsprovider.Registry, opts ...dnsprovider.Option) *Opener {
 // map, as Credentials reads it, scoped as Scope finds. It does not change
 // fields.
 func (o *Opener) Open(ctx context.Context, typ string, fields map[string]string) (dnsprovider.Provider, error) {
+	_, p, err := o.open(ctx, typ, fields)
+
+	return p, err
+}
+
+// open is Open, which also returns the field map the Provider was built
+// from.
+func (o *Opener) open(ctx context.Context, typ string, fields map[string]string) (map[string]string, dnsprovider.Provider, error) {
 	scoped, p, err := o.scope(ctx, typ, fields)
 	if err != nil || p != nil {
-		return p, err
+		return scoped, p, err
 	}
 
+	p, err = o.build(typ, scoped)
+
+	return scoped, p, err
+}
+
+// build builds the Provider of type typ from fields as they are. Fields
+// it cannot be built from are an InvalidCredentialsError.
+func (o *Opener) build(typ string, fields map[string]string) (dnsprovider.Provider, error) {
 	f, err := o.factory(typ)
-	if err != nil {
-		return nil, err
+	if err == nil {
+		var p dnsprovider.Provider
+		if p, err = f.New(fields, o.opts...); err == nil {
+			return p, nil
+		}
 	}
 
-	return f.New(scoped, o.opts...)
+	return nil, &InvalidCredentialsError{Err: err}
 }
 
 // TenantChoiceError is credentials that reach several Tenants, none of
@@ -79,7 +98,7 @@ func (o *Opener) Scope(ctx context.Context, typ string, fields map[string]string
 func (o *Opener) scope(ctx context.Context, typ string, fields map[string]string) (map[string]string, dnsprovider.Provider, error) {
 	f, err := o.factory(typ)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, &InvalidCredentialsError{Err: err}
 	}
 
 	fields = maps.Clone(fields)
@@ -92,7 +111,7 @@ func (o *Opener) scope(ctx context.Context, typ string, fields map[string]string
 	var built dnsprovider.Provider
 
 	tenants, ok := o.tenants.get(ctx, credentialsKey(typ, fields), func() ([]dnsprovider.Tenant, bool) {
-		if built, err = f.New(fields, o.opts...); err != nil {
+		if built, err = o.build(typ, fields); err != nil {
 			return nil, false
 		}
 
@@ -134,6 +153,30 @@ func (o *Opener) scope(ctx context.Context, typ string, fields map[string]string
 	return nil, nil, &TenantChoiceError{Tenants: slices.Clone(tenants)}
 }
 
+// namedTenant is the Tenant verified credentials act within, as their
+// Account named it: tenant, else the one set in scoped, named as the
+// credentials, given as fields, listed it.
+func (o *Opener) namedTenant(typ string, fields, scoped map[string]string, tenant dnsprovider.Tenant) dnsprovider.Tenant {
+	f, _ := o.factory(typ)
+
+	i := slices.IndexFunc(f.Fields, func(fd dnsprovider.Field) bool { return fd.Tenant })
+	if i < 0 {
+		return tenant
+	}
+
+	if tenant.ID == "" {
+		tenant.ID = scoped[f.Fields[i].Name]
+	}
+
+	if listed, ok := o.tenants.kept(credentialsKey(typ, fields)); ok && tenant.Name == "" {
+		if j := slices.IndexFunc(listed, func(t dnsprovider.Tenant) bool { return t.ID == tenant.ID }); j >= 0 {
+			tenant.Name = listed[j].Name
+		}
+	}
+
+	return tenant
+}
+
 // factory is the registered Factory of Provider type typ.
 func (o *Opener) factory(typ string) (dnsprovider.Factory, error) {
 	f, ok := o.reg[typ]
@@ -144,9 +187,9 @@ func (o *Opener) factory(typ string) (dnsprovider.Factory, error) {
 	return f, nil
 }
 
-// InvalidCredentialsError is a field map Verify could not build its
-// Provider from, such as one missing a field or holding a malformed one:
-// the Provider was not asked.
+// InvalidCredentialsError is a field map no Provider could be built
+// from, such as one missing a field or holding a malformed one, or of a
+// Provider type not in this build: the Provider was not asked.
 type InvalidCredentialsError struct{ Err error }
 
 func (e *InvalidCredentialsError) Error() string { return e.Err.Error() }
@@ -154,26 +197,29 @@ func (e *InvalidCredentialsError) Error() string { return e.Err.Error() }
 func (e *InvalidCredentialsError) Unwrap() error { return e.Err }
 
 // Verify builds the Provider of type typ from fields as Open does,
-// scoped to the Tenant it finds, and asks it for its Account, which
+// scoped to the Tenant Scope finds, and asks it for its Account, which
 // proves the credentials work: a Tenant-owned token is only verified
-// within its Tenant. Fields the Provider cannot be built from are an
-// InvalidCredentialsError. It is the check made before an Account is
-// saved. The Tenant and the nameservers the Account expects are kept for
-// the credentials, as Open and Nameservers would keep them.
-func (o *Opener) Verify(ctx context.Context, typ string, fields map[string]string) error {
-	p, err := o.Open(ctx, typ, fields)
+// within its Tenant. It is the check made before an Account is saved, and
+// returns the credentials to save, with that Tenant set, and the Tenant
+// they act within; empty when unscoped. Fields the Provider cannot be
+// built from are an InvalidCredentialsError, and credentials reaching
+// several Tenants a *TenantChoiceError, without asking the Provider. The
+// nameservers the Account expects are kept for the credentials returned,
+// as Nameservers would keep them.
+func (o *Opener) Verify(ctx context.Context, typ string, fields map[string]string) (map[string]string, dnsprovider.Tenant, error) {
+	scoped, p, err := o.open(ctx, typ, fields)
 	if err != nil {
-		return &InvalidCredentialsError{Err: err}
+		return nil, dnsprovider.Tenant{}, err
 	}
 
 	info, err := p.Account(ctx)
 	if err != nil {
-		return err
+		return nil, dnsprovider.Tenant{}, err
 	}
 
-	o.nameservers.get(ctx, credentialsKey(typ, fields), func() ([]string, bool) { return info.Nameservers, true })
+	o.nameservers.get(ctx, credentialsKey(typ, scoped), func() ([]string, bool) { return info.Nameservers, true })
 
-	return nil
+	return scoped, o.namedTenant(typ, fields, scoped, info.Tenant), nil
 }
 
 // Nameservers are the nameservers the Account of p, opened with typ and

@@ -1,12 +1,14 @@
 package tui_test
 
 import (
+	"maps"
 	"slices"
 	"testing"
 
 	"github.com/dnsgateway/dnsprovider"
 	"github.com/dnsgateway/dnsprovider/providertest"
 
+	"github.com/sergelogvinov/dnscli/internal/store"
 	"github.com/sergelogvinov/dnscli/internal/tui"
 )
 
@@ -47,10 +49,10 @@ func TestAnAccountWhoseTokenReachesOneTenantActsWithinIt(t *testing.T) {
 	}
 }
 
-func TestAnAccountWhoseTokenReachesSeveralTenantsOrMayNotListThemRunsUnscoped(t *testing.T) {
+func TestAnAccountWhoseTokenReachesNoTenantsOrMayNotListThemRunsUnscoped(t *testing.T) {
 	for name, script := range map[string]func(f *fakeProvider){
-		"several": func(f *fakeProvider) {
-			f.SetTenants(dnsprovider.Tenant{ID: acmeTenant, Name: "Acme Ltd"}, dnsprovider.Tenant{ID: "b2", Name: "Side project"})
+		"none": func(f *fakeProvider) {
+			f.SetTenants()
 		},
 		"may not list": func(f *fakeProvider) {
 			f.SetTenants(dnsprovider.Tenant{ID: acmeTenant})
@@ -92,4 +94,39 @@ func TestAnAccountOwnedTokenIsVerifiedWithinItsTenant(t *testing.T) {
 
 	h.assertShows("work.example")
 	h.assertHides("did not accept")
+}
+
+// newTenantHarness starts the model with the fake registered as
+// "cloudflare", taking a Tenant in its "account" field, and no Accounts.
+func newTenantHarness(t *testing.T, f *fakeProvider) (*harness, *store.Store) {
+	t.Helper()
+
+	s, _ := openStore(t)
+
+	return newHarnessWith(t, s, tui.Deps{Providers: f.tenantRegistry(&tenantBuilds{}), UnsealMethod: fastPassphrase()}), s
+}
+
+// enrollPassphrase answers the prompt to choose the first passphrase.
+func (h *harness) enrollPassphrase() {
+	h.t.Helper()
+
+	h.typeText(passphrase)
+	h.press("tab")
+	h.typeText(passphrase)
+	h.press("enter")
+}
+
+func TestAddingAnAccountWhoseTokenReachesOneTenantStoresItAndAsksNothingMore(t *testing.T) {
+	f := refreshZones()
+	f.SetTenants(dnsprovider.Tenant{ID: acmeTenant, Name: "Acme Ltd"})
+
+	h, s := newTenantHarness(t, f)
+	h.fillAddAccount("work", "tok")
+	h.enrollPassphrase()
+
+	h.assertShows("work.example")
+
+	if got, want := storedFields(t, s, accountLabeled(t, s, "cloudflare.work")), map[string]string{"token": "tok", "account": acmeTenant}; !maps.Equal(got, want) {
+		t.Errorf("stored credentials = %v, want %v", got, want)
+	}
 }

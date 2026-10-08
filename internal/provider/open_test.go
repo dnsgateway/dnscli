@@ -3,6 +3,7 @@ package provider_test
 import (
 	"context"
 	"errors"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -461,14 +462,14 @@ func TestVerifyRefusesCredentialsTheProviderRefuses(t *testing.T) {
 	r := newTenanted(dnsprovider.Tenant{ID: tenantID})
 	r.fake.Fail(providertest.OpAccount, dnsprovider.ErrUnauthorized)
 
-	err := provider.NewOpener(r.registry()).Verify(context.Background(), "tenanted", creds("bad"))
+	_, _, err := provider.NewOpener(r.registry()).Verify(context.Background(), "tenanted", creds("bad"))
 	if !errors.Is(err, dnsprovider.ErrUnauthorized) {
 		t.Fatalf("Verify = %v, want ErrUnauthorized", err)
 	}
 
 	r.fake.Fail(providertest.OpAccount, nil)
 
-	if err := provider.NewOpener(r.registry()).Verify(context.Background(), "tenanted", creds("good")); err != nil {
+	if _, _, err := provider.NewOpener(r.registry()).Verify(context.Background(), "tenanted", creds("good")); err != nil {
 		t.Errorf("Verify of a good token = %v", err)
 	}
 }
@@ -477,7 +478,7 @@ func TestVerifyScopesATenantOwnedTokenToTheOnlyTenantItReaches(t *testing.T) {
 	r := newTenanted(dnsprovider.Tenant{ID: tenantID, Name: "Acme Ltd"})
 	o := provider.NewOpener(r.registry())
 
-	if err := o.Verify(context.Background(), "tenanted", creds(ownedPrefix+"tok")); err != nil {
+	if _, _, err := o.Verify(context.Background(), "tenanted", creds(ownedPrefix+"tok")); err != nil {
 		t.Fatalf("Verify of a Tenant-owned token = %v, want it verified within its Tenant", err)
 	}
 
@@ -485,7 +486,7 @@ func TestVerifyScopesATenantOwnedTokenToTheOnlyTenantItReaches(t *testing.T) {
 		t.Errorf("built with Tenants %q, want the only one last", b)
 	}
 
-	// Opening the saved credentials keeps the Tenant Verify found.
+	// Opening the credentials again keeps the Tenant Verify found.
 	open(t, o, ownedPrefix+"tok")
 
 	if n := count(r.fake, providertest.OpTenants); n != 1 {
@@ -500,17 +501,23 @@ func TestVerifyKeepsTheNameserversOfTheProviderOpenBuilds(t *testing.T) {
 	o := provider.NewOpener(r.registry())
 	ctx := context.Background()
 
-	if err := o.Verify(ctx, "tenanted", creds("tok")); err != nil {
+	scoped, _, err := o.Verify(ctx, "tenanted", creds("tok"))
+	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
 
-	p, err := o.Open(ctx, "tenanted", creds("tok"))
+	// The credentials are saved as Verify returns them.
+	p, err := o.Open(ctx, "tenanted", scoped)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 
-	if ns, err := o.Nameservers(ctx, p, "tenanted", creds("tok")); err != nil || !slices.Equal(ns, []string{"ns." + tenantID}) {
+	if ns, err := o.Nameservers(ctx, p, "tenanted", scoped); err != nil || !slices.Equal(ns, []string{"ns." + tenantID}) {
 		t.Errorf("Nameservers = %q, %v; want the scoped Account's", ns, err)
+	}
+
+	if n := count(r.fake, providertest.OpAccount); n != 1 {
+		t.Errorf("Account asked %d times, want once, to verify", n)
 	}
 }
 
@@ -521,7 +528,7 @@ func TestVerifiedCredentialsKeepTheirAccountsNameservers(t *testing.T) {
 	o := provider.NewOpener(dnsprovider.Registry{"fake": f.Factory()})
 	ctx := context.Background()
 
-	if err := o.Verify(ctx, "fake", creds("tok")); err != nil {
+	if _, _, err := o.Verify(ctx, "fake", creds("tok")); err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
 
@@ -543,7 +550,7 @@ func TestVerifyTellsFieldsItCannotBuildFromFromARefusal(t *testing.T) {
 	r := newTenanted(dnsprovider.Tenant{ID: tenantID})
 
 	// The fake cannot be built without a token.
-	err := provider.NewOpener(r.registry()).Verify(context.Background(), "tenanted", creds(""))
+	_, _, err := provider.NewOpener(r.registry()).Verify(context.Background(), "tenanted", creds(""))
 
 	var invalid *provider.InvalidCredentialsError
 	if !errors.As(err, &invalid) {
@@ -556,7 +563,53 @@ func TestVerifyTellsFieldsItCannotBuildFromFromARefusal(t *testing.T) {
 
 	r.fake.Fail(providertest.OpAccount, dnsprovider.ErrUnauthorized)
 
-	if err := provider.NewOpener(r.registry()).Verify(context.Background(), "tenanted", creds("bad")); errors.As(err, &invalid) {
+	if _, _, err := provider.NewOpener(r.registry()).Verify(context.Background(), "tenanted", creds("bad")); errors.As(err, &invalid) {
 		t.Errorf("Verify of refused credentials = %v, an InvalidCredentialsError", err)
+	}
+}
+
+func TestVerifyReturnsTheCredentialsWithTheTenantTheyActWithin(t *testing.T) {
+	r := newTenanted(dnsprovider.Tenant{ID: tenantID, Name: "Acme Ltd"})
+	fields := creds("tok")
+
+	scoped, tenant, err := provider.NewOpener(r.registry()).Verify(context.Background(), "tenanted", fields)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+
+	if want := map[string]string{"token": "tok", "scope": tenantID}; !maps.Equal(scoped, want) {
+		t.Errorf("verified credentials = %v, want %v", scoped, want)
+	}
+
+	if tenant != (dnsprovider.Tenant{ID: tenantID, Name: "Acme Ltd"}) {
+		t.Errorf("Tenant = %+v, want Acme Ltd", tenant)
+	}
+
+	if len(fields) != 1 {
+		t.Errorf("Verify changed its field map to %v", fields)
+	}
+}
+
+func TestVerifyAsksForATenantBeforeAskingTheProvider(t *testing.T) {
+	r := newTenanted(dnsprovider.Tenant{ID: "a1"}, dnsprovider.Tenant{ID: "b2"})
+
+	_, _, err := provider.NewOpener(r.registry()).Verify(context.Background(), "tenanted", creds("tok"))
+
+	var choice *provider.TenantChoiceError
+	if !errors.As(err, &choice) || len(choice.Tenants) != 2 {
+		t.Fatalf("Verify = %v, want a TenantChoiceError with both Tenants", err)
+	}
+
+	if n := count(r.fake, providertest.OpAccount); n != 0 {
+		t.Errorf("Account asked %d times, want none", n)
+	}
+}
+
+func TestVerifyOfCredentialsWithoutTenantsReturnsThemAsTheyAre(t *testing.T) {
+	f := providertest.New()
+
+	scoped, tenant, err := provider.NewOpener(dnsprovider.Registry{"fake": f.Factory()}).Verify(context.Background(), "fake", creds("tok"))
+	if err != nil || !maps.Equal(scoped, creds("tok")) || tenant != (dnsprovider.Tenant{}) {
+		t.Errorf("Verify = %v, %+v, %v; want the credentials as they are, no Tenant", scoped, tenant, err)
 	}
 }

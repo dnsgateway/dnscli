@@ -463,7 +463,7 @@ func (m *Model) updateAccount(old, a dns.Account, typed map[string]string, chang
 				}
 			}
 
-			if err := verifyCredentials(ctx, providers, a.Provider, fields); err != nil {
+			if fields, _, err = verifyCredentials(ctx, providers, a.Provider, fields); err != nil {
 				return accountEditedMsg{account: a, attempt: attempt, err: err}
 			}
 
@@ -535,13 +535,13 @@ func saveIfLive(ctx context.Context, save func() error) error {
 
 // verifyCredentials asks the Provider whether it accepts the credentials.
 // Fields its Provider cannot be built from are refused without asking it.
-func verifyCredentials(ctx context.Context, providers *provider.Opener, typ string, fields map[string]string) error {
-	err := providers.Verify(ctx, typ, fields)
+func verifyCredentials(ctx context.Context, providers *provider.Opener, typ string, fields map[string]string) (map[string]string, dnsprovider.Tenant, error) {
+	scoped, tenant, err := providers.Verify(ctx, typ, fields)
 	if err == nil || ctx.Err() != nil || errors.As(err, new(*provider.InvalidCredentialsError)) {
-		return err
+		return scoped, tenant, err
 	}
 
-	return notAccepted(err)
+	return nil, tenant, notAccepted(err)
 }
 
 // notAcceptedError reports credentials the Provider refused when they
@@ -620,7 +620,8 @@ func (m *Model) saveAccount(a dns.Account, fields map[string]string) tea.Cmd {
 	return func() tea.Msg {
 		defer cancel()
 
-		if err := verifyCredentials(ctx, providers, a.Provider, fields); err != nil {
+		fields, _, err := verifyCredentials(ctx, providers, a.Provider, fields)
+		if err != nil {
 			return accountAddedMsg{account: a, attempt: attempt, err: err}
 		}
 
