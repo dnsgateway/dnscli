@@ -51,11 +51,13 @@ func newRefreshHarness(t *testing.T, f *fakeProvider) (*harness, *store.Store, s
 }
 
 // newRefreshHarnessWith is newRefreshHarness with extra dependencies;
-// Providers and UnsealMethod are filled in.
+// UnsealMethod is filled in, and Providers unless given.
 func newRefreshHarnessWith(t *testing.T, f *fakeProvider, deps tui.Deps) (*harness, *store.Store, string) {
 	t.Helper()
 
-	deps.Providers = f.registry()
+	if deps.Providers == nil {
+		deps.Providers = f.registry()
+	}
 	deps.UnsealMethod = fastPassphrase()
 
 	s, path := openStore(t)

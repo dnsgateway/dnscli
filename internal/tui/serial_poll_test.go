@@ -8,6 +8,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/dnsgateway/dnsprovider/providertest"
+
 	"github.com/sergelogvinov/dnscli/internal/dns"
 	"github.com/sergelogvinov/dnscli/internal/tui"
 )
@@ -154,4 +156,49 @@ func TestQuittingStopsPollingForTheSerial(t *testing.T) {
 	if n := len(r.soaAtQueries()) - asked; n != 0 {
 		t.Fatalf("SOA queries after quitting = %d, want none", n)
 	}
+}
+
+func TestAnApplyWithoutABatcherWritesEachChangeAndPollsForTheSerial(t *testing.T) {
+	f := serialZones(zoneNS)
+	f.WithholdSerial(false) // Records report the serial; CRUD writes cannot
+	f.SetBatcher(false)
+
+	r := &fakeResolver{soaAt: map[string]uint32{"work.example": liveSerial}}
+	h, poll := applyHoldingThePolls(t, r, f)
+
+	h.assertShows("Applied 3 changes to work.example.")
+
+	var ops []providertest.Op
+
+	for _, c := range f.Calls() {
+		switch c.Op {
+		case providertest.OpApply:
+			t.Fatal("the Changeset went to a Batcher")
+		case providertest.OpCreateRecord, providertest.OpUpdateRecord, providertest.OpDeleteRecord:
+			ops = append(ops, c.Op)
+		}
+	}
+
+	if want := []providertest.Op{providertest.OpDeleteRecord, providertest.OpUpdateRecord, providertest.OpCreateRecord}; !reflect.DeepEqual(ops, want) {
+		t.Fatalf("writes = %v, want %v", ops, want)
+	}
+
+	want := []dns.Record{
+		{ProviderID: "fake-1", Type: "TXT", Name: "_verify.work.example", Value: "token-123", TTL: 3600},
+		{ProviderID: "rw1", Type: "A", Name: "work.example", Value: "203.0.113.99", TTL: 300},
+	}
+	if got := cachedRecordsOf(t, h, "work.example"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("cached Records = %+v, want %+v", got, want)
+	}
+
+	// No serial came back with the writes: the nameservers are polled.
+	h.press("esc")
+	h.assertShows("serial updating after Apply")
+	assertCachedSerial(t, h, liveSerial)
+
+	r.setSOAAt("work.example", liveSerial+1)
+	h.run(h.step(poll))
+
+	assertCachedSerial(t, h, liveSerial+1)
+	h.assertHides("serial updating after Apply")
 }

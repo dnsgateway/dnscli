@@ -1,6 +1,9 @@
 package tui_test
 
 import (
+	"slices"
+	"sync"
+
 	"github.com/dnsgateway/dnsprovider"
 	"github.com/dnsgateway/dnsprovider/providertest"
 
@@ -123,4 +126,48 @@ func wrapped(f *fakeProvider, wrap func(dnsprovider.Provider) dnsprovider.Provid
 			return wrap(p), nil
 		},
 	}}
+}
+
+// tenantBuilds registers the fake as "cloudflare" taking a Tenant in a
+// field marked as one, as Cloudflare does, and keeps the Tenant each
+// Provider was built with.
+type tenantBuilds struct {
+	mu      sync.Mutex
+	tenants []string // empty for an unscoped build
+}
+
+// tenantRegistry is the Registry tb records the builds of.
+func (f *fakeProvider) tenantRegistry(tb *tenantBuilds) dnsprovider.Registry {
+	inner := f.Factory()
+
+	return dnsprovider.Registry{"cloudflare": {
+		Fields: append(slices.Clone(inner.Fields), dnsprovider.Field{Name: "account", Label: "Account", Tenant: true}),
+		New: func(m map[string]string, opts ...dnsprovider.Option) (dnsprovider.Provider, error) {
+			tb.mu.Lock()
+			tb.tenants = append(tb.tenants, m["account"])
+			tb.mu.Unlock()
+
+			return inner.New(map[string]string{"token": m["token"]}, opts...)
+		},
+	}}
+}
+
+func (tb *tenantBuilds) built() []string {
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+
+	return slices.Clone(tb.tenants)
+}
+
+// count is how many calls of op the fake recorded.
+func (f *fakeProvider) count(op providertest.Op) int {
+	n := 0
+
+	for _, c := range f.Calls() {
+		if c.Op == op {
+			n++
+		}
+	}
+
+	return n
 }
