@@ -1,12 +1,14 @@
 package tui
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"maps"
 	"slices"
 	"strings"
+	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -57,8 +59,15 @@ type addAccountForm struct {
 	stored []string
 	// caret is the focused text field's caret, in runes back from its end.
 	caret int
-	// picker lists the Provider types; nil when closed.
+	// picker lists the Provider types, or the Tenants to pick from; nil
+	// when closed.
 	picker *picker
+	// tenant is the Tenant picked for the credentials typed; nil until
+	// they reach several and one is picked.
+	tenant *dnsprovider.Tenant
+	// pickingTenant is set while picker lists the Tenants, and
+	// tenantPicked once one is picked: the Account is then saved with it.
+	pickingTenant, tenantPicked bool
 	// size is the dialog's size, which it keeps as the user moves
 	// through its fields.
 	size dialogSize
@@ -89,7 +98,7 @@ func (m *Model) openAddAccount() {
 // input for each of its credential fields.
 func (f *addAccountForm) chooseProvider(i int) {
 	f.provider = i
-	f.creds, f.values = nil, nil
+	f.creds, f.values, f.tenant = nil, nil, nil
 
 	if i >= len(f.types) {
 		return
@@ -191,6 +200,17 @@ func (m *Model) addAccountKey(msg tea.KeyMsg) tea.Cmd {
 			f.picker = nil
 		}
 
+		switch {
+		case f.picker != nil || !f.pickingTenant:
+		case f.tenantPicked:
+			f.pickingTenant = false
+
+			return m.saveWithPickedTenant()
+		default:
+			f.pickingTenant = false
+			f.err = "Pick a Tenant to save the Account: nothing was saved."
+		}
+
 		return nil
 	}
 
@@ -201,6 +221,9 @@ func (m *Model) addAccountKey(msg tea.KeyMsg) tea.Cmd {
 		}
 	case i >= 0 && i < len(f.values):
 		if m.keys.typeInto(&f.values[i], &f.caret, msg) {
+			// Other credentials may not reach the Tenant picked.
+			f.tenant = nil
+
 			return nil
 		}
 	}
@@ -237,6 +260,81 @@ func (m *Model) addAccountKey(msg tea.KeyMsg) tea.Cmd {
 	}
 
 	return nil
+}
+
+// pickTenant opens the list of the Tenants the credentials reach, to
+// pick the one the Account acts within.
+func (f *addAccountForm) pickTenant(tenants []dnsprovider.Tenant) {
+	names := make([]string, len(tenants))
+	for i, t := range tenants {
+		names[i] = cmp.Or(t.Name, t.ID)
+	}
+
+	f.err = "The credentials reach several Tenants: pick the one the Account acts within."
+	f.pickingTenant = true
+	f.picker = &picker{title: "Tenant", options: names, pick: func(i int) {
+		f.tenant = &tenants[i]
+		f.tenantPicked = true
+	}}
+}
+
+// saveWithPickedTenant saves the Account with the Tenant just picked, named
+// after it when no name was typed.
+func (m *Model) saveWithPickedTenant() tea.Cmd {
+	f := m.addForm
+	f.tenantPicked = false
+
+	if strings.TrimSpace(f.name) == "" {
+		f.name = tenantAccountName(*f.tenant)
+	}
+
+	if f.editing != nil {
+		return m.submitEditAccount()
+	}
+
+	return m.submitAddAccount()
+}
+
+// tenantAccountName is the Account name suggested for a Tenant: its name
+// in lower case, with each run of other characters than letters and
+// digits a hyphen; empty for a Tenant without a name.
+func tenantAccountName(t dnsprovider.Tenant) string {
+	var b strings.Builder
+
+	hyphen := false
+
+	for _, r := range strings.ToLower(t.Name) {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+			hyphen = b.Len() > 0
+
+			continue
+		}
+
+		if hyphen {
+			b.WriteByte('-')
+			hyphen = false
+		}
+
+		b.WriteRune(r)
+	}
+
+	return b.String()
+}
+
+// tenantField is the name of the field the Provider of the Account in
+// the dialog takes its Tenant in; empty when it takes none.
+func (f *addAccountForm) tenantField() string {
+	if f.provider >= len(f.types) {
+		return ""
+	}
+
+	for _, fd := range f.reg[f.types[f.provider]].Fields {
+		if fd.Tenant {
+			return fd.Name
+		}
+	}
+
+	return ""
 }
 
 // chooseAccountProvider changes the Provider of the Account being added,
@@ -287,7 +385,8 @@ func (m *Model) submitAddAccount() tea.Cmd {
 
 	a := dns.Account{Provider: f.types[f.provider], Name: strings.TrimSpace(f.name)}
 
-	if !f.validName(m.accounts, a) {
+	// Left empty, the name is the Tenant's, once the credentials name it.
+	if (a.Name != "" || f.tenantField() == "") && !f.validName(m.accounts, a) {
 		return nil
 	}
 
@@ -315,6 +414,10 @@ func (f *addAccountForm) typed() map[string]string {
 		if v := f.value(i); v != "" {
 			fields[f.creds[i].Name] = v
 		}
+	}
+
+	if name := f.tenantField(); f.tenant != nil && name != "" {
+		fields[name] = f.tenant.ID
 	}
 
 	return fields
@@ -371,6 +474,10 @@ func (m *Model) submitEditAccount() tea.Cmd {
 // changed reports whether a credential field holds a value other than
 // the stored one; an empty one keeps it.
 func (f *addAccountForm) changed() bool {
+	if f.tenant != nil {
+		return true
+	}
+
 	for i := range f.creds {
 		if v := f.value(i); v != "" && v != f.stored[i] {
 			return true
@@ -579,6 +686,10 @@ func (m *Model) accountEdited(msg accountEditedMsg) tea.Cmd {
 	return m.loadCache
 }
 
+// errNoAccountName is an Account added without a name, whose credentials
+// name no Tenant to name it after.
+var errNoAccountName = errors.New("enter a name for the Account")
+
 // accountSaveFailed shows in the open Account dialog why its save attempt
 // failed; a cancelled attempt has nothing to show.
 func (m *Model) accountSaveFailed(prefix string, a dns.Account, attempt int, err error) {
@@ -590,9 +701,21 @@ func (m *Model) accountSaveFailed(prefix string, a dns.Account, attempt int, err
 	f.busy = false
 	f.err = prefix + err.Error()
 
-	var invalid *provider.InvalidCredentialsError
+	if strings.TrimSpace(f.name) == "" {
+		f.name = a.Name // named after its Tenant
+	}
+
+	var (
+		invalid *provider.InvalidCredentialsError
+		choice  *provider.TenantChoiceError
+	)
 
 	switch {
+	case errors.As(err, &choice):
+		f.pickTenant(choice.Tenants)
+	case errors.Is(err, errNoAccountName):
+		f.err = "Enter a name for the Account."
+		f.field = addFieldName
 	case errors.As(err, new(notAcceptedError)):
 		f.err = err.Error()
 	case errors.As(err, &invalid):
@@ -620,9 +743,15 @@ func (m *Model) saveAccount(a dns.Account, fields map[string]string) tea.Cmd {
 	return func() tea.Msg {
 		defer cancel()
 
-		fields, _, err := verifyCredentials(ctx, providers, a.Provider, fields)
+		fields, tenant, err := verifyCredentials(ctx, providers, a.Provider, fields)
 		if err != nil {
 			return accountAddedMsg{account: a, attempt: attempt, err: err}
+		}
+
+		if a.Name == "" {
+			if a.Name = tenantAccountName(tenant); a.Name == "" {
+				return accountAddedMsg{account: a, attempt: attempt, err: errNoAccountName}
+			}
 		}
 
 		sealed, err := key.Seal(provider.EncodeCredentials(fields), secretLabel(a))
@@ -847,6 +976,9 @@ func (m *Model) accountFormHints(field int) []string {
 		}
 	case field == addFieldName:
 		hint = "The Account shows as <provider>.<name>, such as cloudflare.work; the name has no dots or spaces."
+		if f.editing == nil && f.tenantField() != "" {
+			hint += " Left empty, it is the Tenant's the credentials act within."
+		}
 	case i < len(f.creds):
 		hint = credentialHint(f.creds[i], f.editing != nil)
 	default:

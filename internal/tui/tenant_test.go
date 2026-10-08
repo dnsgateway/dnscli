@@ -1,6 +1,7 @@
 package tui_test
 
 import (
+	"context"
 	"maps"
 	"slices"
 	"testing"
@@ -129,4 +130,86 @@ func TestAddingAnAccountWhoseTokenReachesOneTenantStoresItAndAsksNothingMore(t *
 	if got, want := storedFields(t, s, accountLabeled(t, s, "cloudflare.work")), map[string]string{"token": "tok", "account": acmeTenant}; !maps.Equal(got, want) {
 		t.Errorf("stored credentials = %v, want %v", got, want)
 	}
+}
+
+// twoTenants are the Tenants a token reaching several lists.
+var twoTenants = []dnsprovider.Tenant{{ID: acmeTenant, Name: "Acme Ltd"}, {ID: "b2", Name: "Side project"}}
+
+func TestAddingAnAccountWhoseTokenReachesSeveralTenantsAsksWhichAndNamesItAfterIt(t *testing.T) {
+	f := refreshZones()
+	f.SetTenants(twoTenants...)
+
+	h, s := newTenantHarness(t, f)
+
+	// The name is left empty: the Tenant's is suggested.
+	h.fillAddAccount("", "tok")
+	h.enrollPassphrase()
+
+	h.assertShows("Tenant", "Acme Ltd", "Side project", "pick the one")
+	h.assertHides("work.example")
+
+	for _, c := range f.Calls() {
+		if c.Op != providertest.OpNew && c.Op != providertest.OpTenants {
+			t.Errorf("called %s before a Tenant was picked", c.Op)
+		}
+	}
+
+	h.press("down", "enter")
+	h.assertShows("work.example", "cloudflare.side-project")
+
+	if got, want := storedFields(t, s, accountLabeled(t, s, "cloudflare.side-project")), map[string]string{"token": "tok", "account": "b2"}; !maps.Equal(got, want) {
+		t.Errorf("stored credentials = %v, want %v", got, want)
+	}
+}
+
+func TestAPickedTenantKeepsTheNameTyped(t *testing.T) {
+	f := refreshZones()
+	f.SetTenants(twoTenants...)
+
+	h, s := newTenantHarness(t, f)
+	h.fillAddAccount("work", "tok")
+	h.enrollPassphrase()
+	h.press("enter")
+	h.assertShows("work.example")
+
+	if got := storedFields(t, s, accountLabeled(t, s, "cloudflare.work"))["account"]; got != acmeTenant {
+		t.Errorf("stored Tenant = %q, want %s", got, acmeTenant)
+	}
+}
+
+func TestClosingTheTenantPickerSavesNothing(t *testing.T) {
+	f := refreshZones()
+	f.SetTenants(twoTenants...)
+
+	h, s := newTenantHarness(t, f)
+	h.fillAddAccount("work", "tok")
+	h.enrollPassphrase()
+	h.press("esc")
+
+	h.assertShows("Add Account", "Pick a Tenant")
+
+	if accounts, err := s.Accounts(context.Background()); err != nil || len(accounts) != 0 {
+		t.Errorf("Accounts = %+v, %v; want none saved", accounts, err)
+	}
+}
+
+func TestAnAccountNameIsNeededWhenNoTenantNamesIt(t *testing.T) {
+	f := refreshZones()
+
+	h, s := newTenantHarness(t, f)
+	h.fillAddAccount("", "tok")
+	h.enrollPassphrase()
+
+	h.assertShows("Enter a name for the Account.")
+
+	if accounts, err := s.Accounts(context.Background()); err != nil || len(accounts) != 0 {
+		t.Errorf("Accounts = %+v, %v; want none saved", accounts, err)
+	}
+}
+
+func TestTheNameHintSaysAnEmptyNameIsTheTenants(t *testing.T) {
+	h, _ := newTenantHarness(t, refreshZones())
+	h.press("i", "tab")
+
+	h.assertShows("empty, it is the Tenant's")
 }
