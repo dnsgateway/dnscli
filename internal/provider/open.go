@@ -98,8 +98,8 @@ func (o *Opener) scope(ctx context.Context, typ string, fields map[string]string
 
 	fields = maps.Clone(fields)
 
-	i := slices.IndexFunc(f.Fields, func(fd dnsprovider.Field) bool { return fd.Tenant })
-	if i < 0 || fields[f.Fields[i].Name] != "" {
+	tenantField := TenantField(f)
+	if tenantField == "" || fields[tenantField] != "" {
 		return fields, nil, nil
 	}
 
@@ -133,7 +133,7 @@ func (o *Opener) scope(ctx context.Context, typ string, fields map[string]string
 	case 0:
 		return fields, built, nil
 	case 1:
-		fields[f.Fields[i].Name] = tenants[0].ID
+		fields[tenantField] = tenants[0].ID
 
 		return fields, nil, nil
 	}
@@ -147,13 +147,13 @@ func (o *Opener) scope(ctx context.Context, typ string, fields map[string]string
 func (o *Opener) namedTenant(typ string, fields, scoped map[string]string, tenant dnsprovider.Tenant) dnsprovider.Tenant {
 	f, _ := o.factory(typ)
 
-	i := slices.IndexFunc(f.Fields, func(fd dnsprovider.Field) bool { return fd.Tenant })
-	if i < 0 {
+	tenantField := TenantField(f)
+	if tenantField == "" {
 		return tenant
 	}
 
 	if tenant.ID == "" {
-		tenant.ID = scoped[f.Fields[i].Name]
+		tenant.ID = scoped[tenantField]
 	}
 
 	if listed, ok := o.tenants.kept(credentialsKey(typ, fields)); ok && tenant.Name == "" {
@@ -163,6 +163,16 @@ func (o *Opener) namedTenant(typ string, fields, scoped map[string]string, tenan
 	}
 
 	return tenant
+}
+
+// TenantField is the name of the field f's Provider takes its Tenant in,
+// the one marked Tenant; empty when it takes none.
+func TenantField(f dnsprovider.Factory) string {
+	if i := slices.IndexFunc(f.Fields, func(fd dnsprovider.Field) bool { return fd.Tenant }); i >= 0 {
+		return f.Fields[i].Name
+	}
+
+	return ""
 }
 
 // factory is the registered Factory of Provider type typ.

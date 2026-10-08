@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -265,14 +264,9 @@ func (m *Model) addAccountKey(msg tea.KeyMsg) tea.Cmd {
 // pickTenant opens the list of the Tenants the credentials reach, to
 // pick the one the Account acts within.
 func (f *addAccountForm) pickTenant(tenants []dnsprovider.Tenant) {
-	names := make([]string, len(tenants))
-	for i, t := range tenants {
-		names[i] = cmp.Or(t.Name, t.ID)
-	}
-
 	f.err = "The credentials reach several Tenants: pick the one the Account acts within."
 	f.pickingTenant = true
-	f.picker = &picker{title: "Tenant", options: names, pick: func(i int) {
+	f.picker = &picker{title: "Tenant", options: tenantOptions(tenants), pick: func(i int) {
 		f.tenant = &tenants[i]
 		f.tenantPicked = true
 	}}
@@ -328,7 +322,7 @@ func (f *addAccountForm) tenantField() string {
 		return ""
 	}
 
-	return tenantFieldOf(f.reg[f.types[f.provider]])
+	return provider.TenantField(f.reg[f.types[f.provider]])
 }
 
 // chooseAccountProvider changes the Provider of the Account being added,

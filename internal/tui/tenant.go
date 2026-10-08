@@ -41,13 +41,8 @@ func (m *Model) askTenant(a dns.Account, err error, retry func() tea.Cmd) bool {
 		return true
 	}
 
-	names := make([]string, len(choice.Tenants))
-	for i, t := range choice.Tenants {
-		names[i] = cmp.Or(t.Name, t.ID)
-	}
-
 	tp := &tenantPick{account: a, tenants: choice.Tenants, retry: retry}
-	tp.picker = &picker{title: "Tenant of " + a.Label(), options: names, pick: func(i int) { tp.picked = &tp.tenants[i] }}
+	tp.picker = &picker{title: "Tenant of " + a.Label(), options: tenantOptions(choice.Tenants), pick: func(i int) { tp.picked = &tp.tenants[i] }}
 	m.tenantPick = tp
 	m.notice = notice{text: "The credentials of " + a.Label() + " reach several Tenants: pick the one it acts within."}
 
@@ -97,7 +92,7 @@ type tenantPinnedMsg struct {
 // verified within it, unless they were saved again meanwhile.
 func (m *Model) pinTenant(tp *tenantPick) tea.Cmd {
 	ctx, s, key, providers := m.ctx, m.deps.Store, m.key, m.providers
-	field := tenantFieldOf(m.deps.Providers[tp.account.Provider])
+	field := provider.TenantField(m.deps.Providers[tp.account.Provider])
 
 	return func() tea.Msg {
 		sealed, fields, err := sealedCredentials(ctx, s, key, providers, tp.account)
@@ -140,14 +135,13 @@ func (m *Model) tenantPinned(msg tenantPinnedMsg) tea.Cmd {
 	return msg.pick.retry()
 }
 
-// tenantFieldOf is the name of the field f takes its Tenant in; empty
-// when it takes none.
-func tenantFieldOf(f dnsprovider.Factory) string {
-	for _, fd := range f.Fields {
-		if fd.Tenant {
-			return fd.Name
-		}
+// tenantOptions are the Tenants as a picker lists them: by name, else
+// by ID.
+func tenantOptions(tenants []dnsprovider.Tenant) []string {
+	names := make([]string, len(tenants))
+	for i, t := range tenants {
+		names[i] = cmp.Or(t.Name, t.ID)
 	}
 
-	return ""
+	return names
 }
