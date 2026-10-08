@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"time"
 
@@ -314,8 +315,13 @@ func refresh(ctx context.Context, s *store.Store, key *vault.Key, providers *pro
 
 // accountProvider opens the Provider for an Account with its credentials,
 // unsealed with the data key, and returns them too.
+//
+// Credentials without a Tenant are scoped to the only one they reach,
+// which is then saved with them: the Account is pinned to it. Ones
+// reaching several are a *provider.TenantChoiceError, and nothing is
+// asked of the Provider until one is picked (pinTenant).
 func accountProvider(ctx context.Context, s *store.Store, key *vault.Key, providers *provider.Opener, a dns.Account) (dnsprovider.Provider, map[string]string, error) {
-	fields, err := accountCredentials(ctx, s, key, providers, a)
+	sealed, fields, err := sealedCredentials(ctx, s, key, providers, a)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -324,25 +330,57 @@ func accountProvider(ctx context.Context, s *store.Store, key *vault.Key, provid
 		return nil, nil, errors.New("this Account has no credentials")
 	}
 
-	p, err := providers.Open(ctx, a.Provider, fields)
+	scoped, err := providers.Scope(ctx, a.Provider, fields)
+	if err != nil {
+		return nil, nil, err
+	}
 
-	return p, fields, err
+	if !maps.Equal(scoped, fields) {
+		// Not pinned now, it is the next time it is used.
+		_, _ = replaceCredentials(ctx, s, key, a, sealed, scoped)
+	}
+
+	p, err := providers.Open(ctx, a.Provider, scoped)
+
+	return p, scoped, err
+}
+
+// replaceCredentials seals fields as an Account's credentials in place of
+// sealed, the ones read, unless they were saved again meanwhile. It
+// reports whether they were replaced.
+func replaceCredentials(ctx context.Context, s *store.Store, key *vault.Key, a dns.Account, sealed []byte, fields map[string]string) (bool, error) {
+	resealed, err := key.Seal(provider.EncodeCredentials(fields), secretLabel(a))
+	if err != nil {
+		return false, err
+	}
+
+	return s.ReplaceAccountSecret(ctx, a.ID, sealed, resealed)
 }
 
 // accountCredentials are an Account's credentials, unsealed with the data
 // key and read into its Provider's field map; nil when it has none.
 func accountCredentials(ctx context.Context, s *store.Store, key *vault.Key, providers *provider.Opener, a dns.Account) (map[string]string, error) {
+	_, fields, err := sealedCredentials(ctx, s, key, providers, a)
+
+	return fields, err
+}
+
+// sealedCredentials are an Account's credentials as sealed, and read
+// into its Provider's field map; nil when it has none.
+func sealedCredentials(ctx context.Context, s *store.Store, key *vault.Key, providers *provider.Opener, a dns.Account) ([]byte, map[string]string, error) {
 	sealed, err := s.AccountSecret(ctx, a.ID)
 	if err != nil || sealed == nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	plain, err := key.Open(sealed, secretLabel(a))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return providers.Credentials(a.Provider, plain)
+	fields, err := providers.Credentials(a.Provider, plain)
+
+	return sealed, fields, err
 }
 
 // zoneRefreshed records a Refresh result and starts the next queued one.

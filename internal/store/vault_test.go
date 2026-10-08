@@ -146,3 +146,26 @@ func TestUpdatingAnAccountRenamesItAndReplacesItsSecret(t *testing.T) {
 		t.Fatalf("updating a removed Account: %v, want ErrAccountNotFound", err)
 	}
 }
+
+func TestASecretIsReplacedOnlyWhileItIsTheOneRead(t *testing.T) {
+	s := open(t, filepath.Join(t.TempDir(), "dnscli.db"))
+	ctx := context.Background()
+
+	work, err := s.AddAccountWithSecret(ctx, dns.Account{Provider: "cloudflare", Name: "work"}, []byte{1})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if replaced, err := s.ReplaceAccountSecret(ctx, work.ID, []byte{1}, []byte{2}); err != nil || !replaced {
+		t.Fatalf("replacing the secret read: %v, %v; want it replaced", replaced, err)
+	}
+
+	// Saved meanwhile, as by an edit, the secret is not the one read.
+	if replaced, err := s.ReplaceAccountSecret(ctx, work.ID, []byte{1}, []byte{3}); err != nil || replaced {
+		t.Fatalf("replacing a secret changed meanwhile: %v, %v; want it kept", replaced, err)
+	}
+
+	if sealed, err := s.AccountSecret(ctx, work.ID); err != nil || string(sealed) != "\x02" {
+		t.Fatalf("secret = %v, %v; want the first replacement", sealed, err)
+	}
+}

@@ -49,6 +49,24 @@ func (s *Store) UpdateAccountWithSecret(ctx context.Context, a dns.Account, seal
 	return nil
 }
 
+// ReplaceAccountSecret replaces an Account's sealed credentials with
+// sealed, for its label as it is, provided they are still old, as when
+// they were read. It reports whether they were: credentials saved
+// meanwhile, as by an edit or a rename, are kept.
+func (s *Store) ReplaceAccountSecret(ctx context.Context, accountID int64, old, sealed []byte) (bool, error) {
+	res, err := s.db.ExecContext(ctx, `UPDATE accounts SET secret = ? WHERE id = ? AND secret = ?`, sealed, accountID, old)
+	if err != nil {
+		return false, fmt.Errorf("replace account secret: %w", err)
+	}
+
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("replace account secret: %w", err)
+	}
+
+	return n > 0, nil
+}
+
 // AccountSecret returns an Account's sealed credentials; nil when it has none.
 // It returns ErrAccountNotFound when the Account is not stored.
 func (s *Store) AccountSecret(ctx context.Context, accountID int64) ([]byte, error) {

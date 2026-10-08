@@ -213,3 +213,35 @@ func TestTheNameHintSaysAnEmptyNameIsTheTenants(t *testing.T) {
 
 	h.assertShows("empty, it is the Tenant's")
 }
+
+// newUpgradedHarness starts a session on a Store holding cloudflare.work
+// and cloudflare.old, an Account an earlier dnscli stored with its API
+// token alone, no Tenant, with the fake registered as in tenantRegistry.
+// The cursor is on cloudflare.old in the Accounts pane.
+func newUpgradedHarness(t *testing.T, f *fakeProvider) (*harness, *store.Store) {
+	t.Helper()
+
+	s, _ := enrollFirstAccount(t)
+	addOldAccount(t, s, "cloudflare", "old", "tok")
+
+	h := newHarnessWith(t, s, tui.Deps{Providers: f.tenantRegistry(&tenantBuilds{}), UnsealMethod: fastPassphrase()})
+	h.press("shift+tab")
+
+	return h, s
+}
+
+func TestAnUpgradedAccountIsPinnedToTheOnlyTenantItReachesOnFirstUse(t *testing.T) {
+	f := refreshZones()
+	f.SetTenants(dnsprovider.Tenant{ID: acmeTenant, Name: "Acme Ltd"})
+
+	h, s := newUpgradedHarness(t, f)
+	h.press("L")
+	h.unsealWith(passphrase)
+
+	h.assertShows("Re-listed cloudflare.old")
+	h.assertHides("Tenant")
+
+	if got, want := storedFields(t, s, accountLabeled(t, s, "cloudflare.old")), map[string]string{"token": "tok", "account": acmeTenant}; !maps.Equal(got, want) {
+		t.Errorf("stored credentials = %v, want %v", got, want)
+	}
+}
