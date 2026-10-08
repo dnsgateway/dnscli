@@ -5,6 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/dnsgateway/dnsprovider"
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
@@ -97,5 +100,67 @@ func TestTheHostingStateMarkFollowsTheAccountOfASharedZoneName(t *testing.T) {
 
 	if row := h.domainRow("example.com · cloudflare.personal"); strings.Contains(row, "pending") {
 		t.Errorf("personal row = %q, want no mark", row)
+	}
+}
+
+// domainCells returns the Domains pane's cells that mention text.
+func (h *harness) domainCells(text string) []string {
+	h.t.Helper()
+
+	var out []string
+
+	for _, line := range strings.Split(ansi.Strip(h.rawView()), "\n") {
+		cells := strings.FieldsFunc(line, func(r rune) bool { return r == '│' || r == '┃' })
+		if len(cells) > 1 && strings.Contains(cells[0], text) {
+			out = append(out, cells[0])
+		}
+	}
+
+	return out
+}
+
+// At any width, the cursor row included, a Zone's Hosting State mark is
+// shown whole, with the label cut short to make room, or not at all when
+// the row has no room for it and a label.
+func TestTheHostingStateMarkIsShownWholeOrNotAtAllAtAnyWidth(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+	setHostingState(t, s, "example.org", dnsprovider.HostingPending)
+	setHostingState(t, s, "two.tv", dnsprovider.HostingPending)
+
+	h := newWideHarness(t, s)
+	h.press("j", "j") // the cursor is on two.tv, below example.org
+
+	for width := 1; width <= 120; width++ {
+		h.send(tea.WindowSizeMsg{Width: width, Height: 30})
+
+		for _, cell := range h.domainCells("pend") {
+			if !strings.Contains(cell, " · pending") {
+				t.Errorf("width %d: row %q cuts the mark", width, cell)
+			}
+		}
+	}
+
+	// The label is cut, never the mark: on the cursor row and off it.
+	for width, want := range map[int][2]string{36: {" e… · pending", "›t… · pending"}, 40: {" exa… · pending", "›two… · pending"}} {
+		h.send(tea.WindowSizeMsg{Width: width, Height: 30})
+
+		if cells := h.domainCells("· pending"); len(cells) != 2 || !strings.HasPrefix(cells[0], want[0]) || !strings.HasPrefix(cells[1], want[1]) {
+			t.Errorf("width %d: marked rows = %q, want %q", width, cells, want)
+		}
+	}
+
+	// Too narrow for the mark and two columns of label: the label alone,
+	// cut as usual.
+	for width, want := range map[int][2]string{26: {" exampl…", "›two.tv"}, 32: {" example.o…", "›two.tv"}} {
+		h.send(tea.WindowSizeMsg{Width: width, Height: 30})
+
+		if cells := h.domainCells("·"); len(cells) != 0 {
+			t.Errorf("width %d: rows %q, want no mark", width, cells)
+		}
+
+		if org, tv := h.domainCells("ex"), h.domainCells("two"); len(org) != 2 || !strings.HasPrefix(org[1], want[0]) || len(tv) != 1 || !strings.HasPrefix(tv[0], want[1]) {
+			t.Errorf("width %d: rows %q %q, want %q", width, org, tv, want)
+		}
 	}
 }
