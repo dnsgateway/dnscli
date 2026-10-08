@@ -343,6 +343,10 @@ func (m *Model) zoneOnboarded(msg zoneOnboardedMsg) tea.Cmd {
 		if d != nil {
 			d.busy, d.confirming = false, false
 			d.err = "Could not Onboard " + msg.name + ": " + msg.err.Error()
+			if errors.Is(msg.err, dnsprovider.ErrConflict) {
+				d.err = "Could not Onboard " + msg.name + ": the Provider holds it already, in this account or another " +
+					"(re-list the Account's Zones to see it if here). " + msg.err.Error()
+			}
 		}
 
 		return nil

@@ -139,7 +139,8 @@ func TestAZoneNameTheProviderHoldsAlreadyKeepsTheDialogOpenWithTheErrorAndTheCac
 	h.typeText("taken.example")
 	h.press("enter", "enter")
 
-	h.assertShows("Onboard a zone at cloudflare.work", "Could not Onboard taken.example", "already exists")
+	h.assertShows("Onboard a zone at cloudflare.work", "Could not Onboard taken.example", "already exists",
+		"the Provider holds it", "in this account or another")
 	h.assertHides("is Onboarded")
 
 	if got := zonesCached(t, s); got != before {
@@ -288,4 +289,29 @@ func TestHelpOffersOnboardingInTheDomainsPane(t *testing.T) {
 
 	h.press("?")
 	h.assertShows("Onboard a zone name")
+}
+
+func TestAZoneOnboardedButNotCachedClosesTheDialogNamingIt(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	f := onboardFake()
+	h := newAccountHarness(t, s, f)
+
+	h.press("i")
+	h.unsealWith(passphrase)
+	h.typeText("new.example")
+	h.press("enter")
+
+	// The Account is removed meanwhile, as by another dnscli.
+	if err := s.RemoveAccount(context.Background(), accountLabeled(t, s, "cloudflare.work").ID); err != nil {
+		t.Fatal(err)
+	}
+
+	h.press("enter")
+
+	if calls := createZoneCalls(f); len(calls) != 1 {
+		t.Fatalf("CreateZone calls = %q, want one", calls)
+	}
+
+	h.assertShows("new.example was Onboarded at cloudflare.work, but could not be cached")
+	h.assertHides("Onboard a zone at", "onboarding…")
 }
