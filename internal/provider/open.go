@@ -110,34 +110,27 @@ func (o *Opener) scope(ctx context.Context, typ string, fields map[string]string
 
 	var built dnsprovider.Provider
 
-	tenants, ok := o.tenants.get(ctx, credentialsKey(typ, fields), func() ([]dnsprovider.Tenant, bool) {
+	tenants, err := o.tenants.get(ctx, credentialsKey(typ, fields), func() ([]dnsprovider.Tenant, error) {
+		var err error
 		if built, err = o.build(typ, fields); err != nil {
-			return nil, false
+			return nil, err
 		}
 
 		lister, ok := built.(dnsprovider.TenantLister)
 		if !ok {
-			return nil, true
+			return nil, nil
 		}
-
-		var list []dnsprovider.Tenant
 
 		// Credentials that may not list Tenants have none to choose
 		// from; any other failure says nothing of them.
-		if list, err = lister.Tenants(ctx); errors.Is(err, dnsprovider.ErrUnauthorized) {
-			return nil, true
+		list, err := lister.Tenants(ctx)
+		if errors.Is(err, dnsprovider.ErrUnauthorized) {
+			return nil, nil
 		}
 
-		return list, err == nil
+		return list, err
 	})
-	if !ok {
-		if err == nil {
-			err = errors.New("the Tenants the credentials reach could not be listed")
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				err = ctxErr
-			}
-		}
-
+	if err != nil {
 		return nil, nil, err
 	}
 
@@ -217,7 +210,7 @@ func (o *Opener) Verify(ctx context.Context, typ string, fields map[string]strin
 		return nil, dnsprovider.Tenant{}, err
 	}
 
-	o.nameservers.get(ctx, credentialsKey(typ, scoped), func() ([]string, bool) { return info.Nameservers, true })
+	_, _ = o.nameservers.get(ctx, credentialsKey(typ, scoped), func() ([]string, error) { return info.Nameservers, nil })
 
 	return scoped, o.namedTenant(typ, fields, scoped, info.Tenant), nil
 }
@@ -226,21 +219,11 @@ func (o *Opener) Verify(ctx context.Context, typ string, fields map[string]strin
 // fields, expects Delegation to name, from its Account call. They are
 // asked once per credentials: a failure is not kept, and is asked again.
 func (o *Opener) Nameservers(ctx context.Context, p dnsprovider.Provider, typ string, fields map[string]string) ([]string, error) {
-	var err error
+	ns, err := o.nameservers.get(ctx, credentialsKey(typ, fields), func() ([]string, error) {
+		info, err := p.Account(ctx)
 
-	ns, ok := o.nameservers.get(ctx, credentialsKey(typ, fields), func() ([]string, bool) {
-		var info dnsprovider.AccountInfo
-
-		info, err = p.Account(ctx)
-
-		return info.Nameservers, err == nil
+		return info.Nameservers, err
 	})
-	if !ok && err == nil {
-		err = errors.New("the Account's nameservers could not be read")
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			err = ctxErr
-		}
-	}
 
 	return slices.Clone(ns), err
 }
@@ -263,7 +246,7 @@ type memo[T any] struct {
 type memoEntry[T any] struct {
 	done chan struct{}
 	v    T
-	ok   bool
+	err  error
 }
 
 // kept is the value kept for key, if any.
@@ -275,7 +258,7 @@ func (c *memo[T]) kept(key string) (T, bool) {
 	if found {
 		select {
 		case <-e.done:
-			if e.ok {
+			if e.err == nil {
 				return e.v, true
 			}
 		default:
@@ -287,22 +270,32 @@ func (c *memo[T]) kept(key string) (T, bool) {
 	return zero, false
 }
 
-// get is the value kept for key, else fn's, which is kept when fn reports
-// ok. Callers asking while fn runs wait for its value; a caller whose ctx
-// ends first gets none.
-func (c *memo[T]) get(ctx context.Context, key string, fn func() (T, bool)) (T, bool) {
-	c.mu.Lock()
+// get is the value kept for key, else fn's, which is kept unless fn
+// fails. Callers asking while fn runs wait for its value, or its error; a
+// caller whose ctx ends first gets ctx's error. A waiter whose fn ended
+// with its own caller's context asks again.
+func (c *memo[T]) get(ctx context.Context, key string, fn func() (T, error)) (T, error) {
+	var zero T
 
-	if e, found := c.m[key]; found {
+	for {
+		c.mu.Lock()
+
+		e, found := c.m[key]
+		if !found {
+			break
+		}
+
 		c.mu.Unlock()
 
 		select {
 		case <-e.done:
-			return e.v, e.ok
 		case <-ctx.Done():
-			var zero T
+			return zero, ctx.Err()
+		}
 
-			return zero, false
+		if e.err == nil || ctx.Err() != nil ||
+			(!errors.Is(e.err, context.Canceled) && !errors.Is(e.err, context.DeadlineExceeded)) {
+			return e.v, e.err
 		}
 	}
 
@@ -314,9 +307,9 @@ func (c *memo[T]) get(ctx context.Context, key string, fn func() (T, bool)) (T, 
 	c.m[key] = e
 	c.mu.Unlock()
 
-	e.v, e.ok = fn()
+	e.v, e.err = fn()
 
-	if !e.ok {
+	if e.err != nil {
 		c.mu.Lock()
 		delete(c.m, key)
 		c.mu.Unlock()
@@ -324,5 +317,5 @@ func (c *memo[T]) get(ctx context.Context, key string, fn func() (T, bool)) (T, 
 
 	close(e.done)
 
-	return e.v, e.ok
+	return e.v, e.err
 }

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/dnsgateway/dnsprovider"
 	"github.com/dnsgateway/dnsprovider/providers"
@@ -127,6 +128,11 @@ type tenanted struct {
 
 	mu    sync.Mutex
 	built []string
+
+	// listing, when set, is sent to as the Tenants are listed, which then
+	// wait for release.
+	listing chan struct{}
+	release chan struct{}
 }
 
 func newTenanted(tenants ...dnsprovider.Tenant) *tenanted {
@@ -152,7 +158,7 @@ func (r *tenanted) registry() dnsprovider.Registry {
 				return nil, err
 			}
 
-			return scoped{Provider: p, scope: m["scope"], owned: strings.HasPrefix(m["token"], ownedPrefix)}, nil
+			return scoped{Provider: p, scope: m["scope"], owned: strings.HasPrefix(m["token"], ownedPrefix), r: r}, nil
 		},
 	}}
 }
@@ -169,9 +175,15 @@ type scoped struct {
 	dnsprovider.Provider
 	scope string
 	owned bool
+	r     *tenanted
 }
 
 func (s scoped) Tenants(ctx context.Context) ([]dnsprovider.Tenant, error) {
+	if s.r.listing != nil {
+		s.r.listing <- struct{}{}
+		<-s.r.release
+	}
+
 	return s.Provider.(dnsprovider.TenantLister).Tenants(ctx)
 }
 
@@ -349,6 +361,37 @@ func TestConcurrentOpensListTheTenantsOnce(t *testing.T) {
 
 	if n := count(r.fake, providertest.OpTenants); n != 1 {
 		t.Errorf("Tenants listed %d times, want once", n)
+	}
+}
+
+func TestOpensWaitingOnAFailedTenantListGetItsError(t *testing.T) {
+	r := newTenanted(dnsprovider.Tenant{ID: "a1"}, dnsprovider.Tenant{ID: "b2"})
+	r.fake.Fail(providertest.OpTenants, dnsprovider.ErrRateLimited)
+	r.listing, r.release = make(chan struct{}, 8), make(chan struct{})
+
+	o := provider.NewOpener(r.registry())
+	errs := make(chan error, 4)
+
+	open := func() {
+		_, err := o.Open(context.Background(), "tenanted", creds("tok"))
+		errs <- err
+	}
+
+	go open()
+	<-r.listing
+
+	// These wait for the listing in flight.
+	for range 3 {
+		go open()
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	close(r.release)
+
+	for range 4 {
+		if err := <-errs; !errors.Is(err, dnsprovider.ErrRateLimited) {
+			t.Errorf("Open = %v, want the listing's ErrRateLimited", err)
+		}
 	}
 }
 
