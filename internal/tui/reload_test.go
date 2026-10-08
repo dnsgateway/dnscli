@@ -4,8 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"testing"
-
-	"github.com/sergelogvinov/dnscli/internal/provider/fake"
 )
 
 // execSQL changes the database behind the app's back, as another process
@@ -27,7 +25,7 @@ func execSQL(t *testing.T, path, query string) {
 func TestAFailedReloadKeepsTheShownAccountsAndZones(t *testing.T) {
 	s, path := openStore(t)
 	seedCache(t, s)
-	h := newAccountHarness(t, s, fake.New())
+	h := newAccountHarness(t, s, newFake())
 	h.assertShows("example.com", "cloudflare.personal", "cloudflare.work")
 
 	// A row the Store cannot read makes every later reload fail.

@@ -15,6 +15,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/dnsgateway/dnsprovider"
+
 	"github.com/sergelogvinov/dnscli/internal/dns"
 )
 
@@ -164,7 +166,7 @@ func (t Template) Changes(zone string, current []dns.Record, v Values, ttl uint3
 	var out []dns.Change
 
 	for _, s := range t.sets(v) {
-		name, err := dns.QualifyName(zone, s.name)
+		name, err := dnsprovider.QualifyName(zone, s.name)
 		if err != nil {
 			return nil, err
 		}
@@ -178,7 +180,7 @@ func (t Template) Changes(zone string, current []dns.Record, v Values, ttl uint3
 		}
 
 		for _, w := range s.want {
-			if err := dns.CheckValue(w.typ, w.value); err != nil {
+			if err := dnsprovider.CheckValue(w.typ, w.value); err != nil {
 				return nil, err
 			}
 		}
@@ -426,7 +428,7 @@ func dmarcRecord(v Values) recordSet {
 // existingDMARC returns the tags of a Zone's DMARC Record: the single
 // TXT or CNAME Record at _dmarc, if it is a DMARC TXT Record.
 func existingDMARC(zone string, current []dns.Record) ([]string, bool) {
-	name, err := dns.QualifyName(zone, "_dmarc")
+	name, err := dnsprovider.QualifyName(zone, "_dmarc")
 	if err != nil {
 		return nil, false
 	}
@@ -623,7 +625,7 @@ func checkProtonToken(v string) (string, error) {
 // without a trailing dot.
 func checkHost(v string) (string, error) {
 	v = strings.TrimSuffix(v, ".")
-	if err := dns.CheckValue("CNAME", v); err != nil {
+	if err := dnsprovider.CheckValue("CNAME", v); err != nil {
 		return "", fmt.Errorf("%q is not a host name", v)
 	}
 

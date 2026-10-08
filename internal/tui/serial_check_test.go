@@ -11,8 +11,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/sergelogvinov/dnscli/internal/provider"
-	"github.com/sergelogvinov/dnscli/internal/provider/fake"
 	"github.com/sergelogvinov/dnscli/internal/store"
 	"github.com/sergelogvinov/dnscli/internal/tui"
 )
@@ -233,7 +231,7 @@ func newSerialCheckHarness(t *testing.T, s *store.Store, r tui.Resolver) *harnes
 	t.Helper()
 
 	return newHarnessWith(t, s, tui.Deps{
-		Providers:    provider.Registry{"cloudflare": fake.New().New},
+		Providers:    newFake().registry(),
 		UnsealMethod: fastPassphrase(),
 		Resolver:     r,
 	})

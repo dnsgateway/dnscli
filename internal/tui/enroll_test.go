@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
-	"github.com/sergelogvinov/dnscli/internal/provider/fake"
 	"github.com/sergelogvinov/dnscli/internal/store"
 )
 
@@ -38,7 +37,7 @@ func TestEnrollingWhenAnotherSessionEnrolledFirstUnsealsWithItsDataKey(t *testin
 
 	// Both sessions start before either has enrolled a passphrase.
 	first := newAccountHarness(t, s1, workZones())
-	second := newAccountHarness(t, s2, fake.New().AddZone(dns.Zone{Name: "home.example", ProviderID: "zh1"}))
+	second := newAccountHarness(t, s2, newFake().AddZone(dns.Zone{Name: "home.example", ProviderID: "zh1"}))
 
 	first.fillAddAccount("work", token)
 	first.typeText(passphrase)
@@ -59,7 +58,7 @@ func TestEnrollingWhenAnotherSessionEnrolledFirstUnsealsWithItsDataKey(t *testin
 	assertKeySlots(t, s1, 1)
 
 	// A later session unseals both Accounts with the one data key.
-	f := fake.New()
+	f := newFake()
 	later := newAccountHarness(t, s1, f)
 	later.fillAddAccount("lab", "lab-token")
 	later.typeText(passphrase)
@@ -72,7 +71,7 @@ func TestADifferentPassphraseCannotEnrollASecondDataKey(t *testing.T) {
 	s2 := secondProcess(t, path)
 
 	first := newAccountHarness(t, s1, workZones())
-	second := newAccountHarness(t, s2, fake.New())
+	second := newAccountHarness(t, s2, newFake())
 
 	first.fillAddAccount("work", token)
 	first.typeText(passphrase)

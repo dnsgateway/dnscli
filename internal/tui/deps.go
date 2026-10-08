@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sergelogvinov/dnscli/internal/provider"
+	"github.com/dnsgateway/dnsprovider"
+
 	"github.com/sergelogvinov/dnscli/internal/store"
 	"github.com/sergelogvinov/dnscli/internal/vault"
 )
@@ -24,8 +25,9 @@ type Deps struct {
 	// which also replaces a profile that fails Validate.
 	Shortcuts *ShortcutProfile
 
-	// Providers builds a Provider for an Account from its Provider type.
-	Providers provider.Registry
+	// Providers builds a Provider for an Account from its Provider type,
+	// through internal/provider.Open.
+	Providers dnsprovider.Registry
 	// Resolver is the system DNS resolver the Serial Checks and the
 	// Delegation lookups ask; it also asks a Zone's own nameservers for
 	// the serial its Provider does not report. Nil runs none of them.

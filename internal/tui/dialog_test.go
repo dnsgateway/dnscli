@@ -7,7 +7,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/sergelogvinov/dnscli/internal/provider/fake"
 	"github.com/sergelogvinov/dnscli/internal/vault"
 )
 
@@ -31,7 +30,7 @@ func (h *harness) assertDialogFits(title string) {
 
 func TestALongMaskedTokenKeepsTheDialogInsideTheTerminal(t *testing.T) {
 	s, _ := openStore(t)
-	h := newAccountHarness(t, s, fake.New())
+	h := newAccountHarness(t, s, newFake())
 	h.send(tea.WindowSizeMsg{Width: 80, Height: 30})
 
 	h.press("i", "tab")
@@ -51,7 +50,7 @@ func TestALongUnsealErrorIsWrappedInsideTheDialog(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	h := newAccountHarness(t, s, fake.New())
+	h := newAccountHarness(t, s, newFake())
 	h.send(tea.WindowSizeMsg{Width: 80, Height: 30})
 
 	h.fillAddAccount("work", token)

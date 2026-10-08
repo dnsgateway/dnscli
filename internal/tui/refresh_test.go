@@ -11,9 +11,10 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/dnsgateway/dnsprovider"
+	"github.com/dnsgateway/dnsprovider/providertest"
+
 	"github.com/sergelogvinov/dnscli/internal/dns"
-	"github.com/sergelogvinov/dnscli/internal/provider"
-	"github.com/sergelogvinov/dnscli/internal/provider/fake"
 	"github.com/sergelogvinov/dnscli/internal/store"
 	"github.com/sergelogvinov/dnscli/internal/tui"
 )
@@ -34,8 +35,8 @@ const liveSerial = 2026100705
 
 // refreshZones scripts the fake Provider with work.example, holding
 // liveRecords at liveSerial, and an empty work.test.
-func refreshZones() *fake.Provider {
-	return fake.New().
+func refreshZones() *fakeProvider {
+	return newFake().
 		AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial}, liveRecords...).
 		AddZone(dns.Zone{Name: "work.test", ProviderID: "zw2"})
 }
@@ -43,7 +44,7 @@ func refreshZones() *fake.Provider {
 // newRefreshHarness starts an unsealed session with cloudflare.work, whose
 // Zones were discovered from f, and work.example's Records cached from an
 // older Refresh. The cursor is on work.example.
-func newRefreshHarness(t *testing.T, f *fake.Provider) (*harness, *store.Store, string) {
+func newRefreshHarness(t *testing.T, f *fakeProvider) (*harness, *store.Store, string) {
 	t.Helper()
 
 	return newRefreshHarnessWith(t, f, tui.Deps{})
@@ -51,10 +52,10 @@ func newRefreshHarness(t *testing.T, f *fake.Provider) (*harness, *store.Store, 
 
 // newRefreshHarnessWith is newRefreshHarness with extra dependencies;
 // Providers and UnsealMethod are filled in.
-func newRefreshHarnessWith(t *testing.T, f *fake.Provider, deps tui.Deps) (*harness, *store.Store, string) {
+func newRefreshHarnessWith(t *testing.T, f *fakeProvider, deps tui.Deps) (*harness, *store.Store, string) {
 	t.Helper()
 
-	deps.Providers = provider.Registry{"cloudflare": f.New}
+	deps.Providers = f.registry()
 	deps.UnsealMethod = fastPassphrase()
 
 	s, path := openStore(t)
@@ -112,11 +113,11 @@ func cachedRecordValues(t *testing.T, s *store.Store, name string) []string {
 }
 
 // recordsCalls counts the Provider's Records calls for a Zone.
-func recordsCalls(f *fake.Provider, zoneProviderID string) int {
+func recordsCalls(f *fakeProvider, zoneProviderID string) int {
 	n := 0
 
 	for _, c := range f.Calls() {
-		if c.Op == fake.OpRecords && c.Zone.ProviderID == zoneProviderID {
+		if c.Op == providertest.OpRecords && c.Zone.ID == zoneProviderID {
 			n++
 		}
 	}
@@ -192,7 +193,7 @@ func TestAFailedRefreshKeepsTheCacheAndTheRetryKeyRefreshesAgain(t *testing.T) {
 	f := refreshZones()
 	h, s, _ := newRefreshHarness(t, f)
 
-	f.Fail(fake.OpRecords, errors.New("connection reset by peer"))
+	f.Fail(providertest.OpRecords, errors.New("connection reset by peer"))
 	h.press("enter")
 
 	h.assertShows("203.0.113.9", "Refresh failed (r retries): connection reset by peer")
@@ -209,7 +210,7 @@ func TestAFailedRefreshKeepsTheCacheAndTheRetryKeyRefreshesAgain(t *testing.T) {
 		t.Fatalf("cached zone = %+v, want no serial and no Refresh time", z)
 	}
 
-	f.Fail(fake.OpRecords, nil)
+	f.Fail(providertest.OpRecords, nil)
 	h.press("r")
 
 	h.assertShows("203.0.113.20", "validated this session")
@@ -225,7 +226,7 @@ func TestARateLimitedRefreshShowsWhenToRetryAndIsNotRetriedOnItsOwn(t *testing.T
 	f := refreshZones()
 	h, _, _ := newRefreshHarness(t, f)
 
-	f.Fail(fake.OpRecords, &provider.APIError{Provider: "cloudflare", StatusCode: http.StatusTooManyRequests, RetryAfter: 90 * time.Second})
+	f.Fail(providertest.OpRecords, &dnsprovider.APIError{Provider: "cloudflare", StatusCode: http.StatusTooManyRequests, RetryAfter: 90 * time.Second})
 	h.press("enter")
 
 	retryAt := testNow.Add(90 * time.Second).Local().Format(time.TimeOnly)
@@ -245,9 +246,9 @@ func TestARateLimitedZoneIsNotRefreshedUntilTheProviderSaid(t *testing.T) {
 	now := testNow
 	h, _, _ := newRefreshHarnessWith(t, f, tui.Deps{Clock: func() time.Time { return now }})
 
-	f.Fail(fake.OpRecords, &provider.APIError{Provider: "cloudflare", StatusCode: http.StatusTooManyRequests, RetryAfter: 90 * time.Second})
+	f.Fail(providertest.OpRecords, &dnsprovider.APIError{Provider: "cloudflare", StatusCode: http.StatusTooManyRequests, RetryAfter: 90 * time.Second})
 	h.press("enter")
-	f.Fail(fake.OpRecords, nil)
+	f.Fail(providertest.OpRecords, nil)
 
 	retryAt := testNow.Add(90 * time.Second).Local().Format(time.TimeOnly)
 
@@ -440,7 +441,7 @@ func TestAFailedRefreshOfAValidatedZoneMakesItStaleAgain(t *testing.T) {
 	h.press("enter")
 	h.assertShows("validated this session")
 
-	f.Fail(fake.OpRecords, &provider.APIError{Provider: "cloudflare", StatusCode: http.StatusServiceUnavailable})
+	f.Fail(providertest.OpRecords, &dnsprovider.APIError{Provider: "cloudflare", StatusCode: http.StatusServiceUnavailable})
 	h.press("r")
 
 	h.assertShows("Refresh failed", "503", "203.0.113.20")

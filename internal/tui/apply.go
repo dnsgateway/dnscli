@@ -11,6 +11,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/dnsgateway/dnsprovider"
+
 	"github.com/sergelogvinov/dnscli/internal/dns"
 	"github.com/sergelogvinov/dnscli/internal/provider"
 	"github.com/sergelogvinov/dnscli/internal/store"
@@ -78,26 +80,12 @@ type conflict struct {
 	now dns.Record
 }
 
-// conflicts returns the Records the changes were built from that the
-// Provider no longer has as they were. An addition is built from no
-// Record, so it never conflicts.
-func conflicts(changes []dns.Change, live []dns.Record) []conflict {
-	byID := map[string]dns.Record{}
-	for _, r := range live {
-		byID[r.ProviderID] = r
-	}
-
-	var out []conflict
-
-	for _, c := range changes {
-		if c.Kind == dns.ChangeAdd {
-			continue
-		}
-
-		now, ok := byID[c.Before.ProviderID]
-		if !ok || !sameRecord(c.Before, now) {
-			out = append(out, conflict{before: c.Before, now: now})
-		}
+// staleConflicts are the stale changes dnsprovider.Apply refused a
+// Changeset for, as the conflict view shows them.
+func staleConflicts(err *dnsprovider.StaleError) []conflict {
+	out := make([]conflict, len(err.Changes))
+	for i, c := range err.Changes {
+		out[i] = conflict{before: provider.CacheRecord(c.Change.Before), now: provider.CacheRecord(c.Now)}
 	}
 
 	return out
@@ -268,45 +256,39 @@ func (m *Model) applyChanges() tea.Cmd {
 	m.applying[z.ID] = true
 	p.busy = true
 
-	ctx, s, key, newProvider := m.ctx, m.deps.Store, m.key, m.deps.Providers[a.Provider]
+	ctx, s, key, reg := m.ctx, m.deps.Store, m.key, m.deps.Providers
 
 	return func() tea.Msg {
-		return apply(ctx, s, key, newProvider, a, cs)
+		return apply(ctx, s, key, reg, a, cs)
 	}
 }
 
-// apply re-checks the Records a Changeset was built from against the
-// Provider and, when none changed, sends the Changeset and saves the
-// changes the Provider confirmed to the cache, from the Records it
-// returned.
+// apply sends a Changeset through dnsprovider.Apply, which first
+// re-checks the Records it was built from and refuses it when any
+// changed, and saves the changes the Provider confirmed to the cache,
+// from the Records it returned.
 //
 // It stores the Zone's new serial when the Provider reports it. Else the
 // model polls the Zone's nameservers for it afterwards (serialPoll).
-func apply(ctx context.Context, s *store.Store, key *vault.Key, newProvider provider.Constructor, a dns.Account, cs dns.Changeset) changesAppliedMsg {
+func apply(ctx context.Context, s *store.Store, key *vault.Key, reg dnsprovider.Registry, a dns.Account, cs dns.Changeset) changesAppliedMsg {
 	msg := changesAppliedMsg{zoneID: cs.Zone.ID, sent: cs}
 
-	p, err := accountProvider(ctx, s, key, newProvider, a)
+	p, err := accountProvider(ctx, s, key, reg, a)
 	if err != nil {
 		msg.err = err
 
 		return msg
 	}
 
-	// Additions are built from no Record: only the others are re-checked.
-	if slices.ContainsFunc(cs.Changes, func(c dns.Change) bool { return c.Kind != dns.ChangeAdd }) {
-		live, err := p.Records(ctx, cs.Zone)
-		if err != nil {
-			msg.err = fmt.Errorf("re-check the Records: %w", err)
+	res, err := dnsprovider.Apply(ctx, p, provider.ModuleChangeset(cs))
 
-			return msg
-		}
+	var stale *dnsprovider.StaleError
+	if errors.As(err, &stale) {
+		msg.conflicts = staleConflicts(stale)
 
-		if msg.conflicts = conflicts(cs.Changes, live.Records); msg.conflicts != nil {
-			return msg
-		}
+		return msg
 	}
 
-	res, err := p.Apply(ctx, cs)
 	if err == nil && len(res.Results) != len(cs.Changes) {
 		err = fmt.Errorf("the Provider reported %d results for %d changes", len(res.Results), len(cs.Changes))
 	}
@@ -330,7 +312,7 @@ func apply(ctx context.Context, s *store.Store, key *vault.Key, newProvider prov
 
 		c := cs.Changes[i]
 		if c.Kind != dns.ChangeDelete {
-			c.After = storedRecord(c, r.Record)
+			c.After = storedRecord(c, provider.CacheRecord(r.Record))
 		}
 
 		// A Record without its Provider ID cannot be told apart from

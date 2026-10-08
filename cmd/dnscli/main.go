@@ -16,11 +16,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/pflag"
 
+	"github.com/dnsgateway/dnsprovider/providers"
+
 	"github.com/sergelogvinov/dnscli/internal/keychain"
-	"github.com/sergelogvinov/dnscli/internal/provider"
-	"github.com/sergelogvinov/dnscli/internal/provider/cloudflare"
-	"github.com/sergelogvinov/dnscli/internal/provider/godaddy"
-	"github.com/sergelogvinov/dnscli/internal/provider/namecheap"
 	"github.com/sergelogvinov/dnscli/internal/resolver"
 	"github.com/sergelogvinov/dnscli/internal/store"
 	"github.com/sergelogvinov/dnscli/internal/tui"
@@ -30,13 +28,9 @@ import (
 // unsealEnv chooses the session's Unseal Method when --unseal is not given.
 const unsealEnv = "DNSCLI_UNSEAL"
 
-// providers maps each Provider type this build supports to its constructor.
+// registry maps each Provider type this build supports to its Factory.
 // A build with the fakeprovider tag adds an in-memory fake for trying the UI.
-var providers = provider.Registry{
-	"cloudflare": cloudflare.Config{}.New,
-	"godaddy":    godaddy.Config{}.New,
-	"namecheap":  namecheap.Config{}.New,
-}
+var registry = providers.Registry()
 
 // unsealMethods are the Unseal Methods a build supports, by name: the
 // passphrase everywhere, and the Keychain where the platform has one.
@@ -172,7 +166,7 @@ func run(opts options) error {
 	model := tui.New(ctx, tui.Deps{
 		Store:        s,
 		Clock:        time.Now,
-		Providers:    providers,
+		Providers:    registry,
 		Resolver:     &resolver.System{},
 		SerialChecks: opts.serialChecks,
 		UnsealMethod: opts.unseal,

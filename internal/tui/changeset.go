@@ -9,6 +9,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/dnsgateway/dnsprovider"
+
 	"github.com/sergelogvinov/dnscli/internal/dns"
 )
 
@@ -192,7 +194,7 @@ func (m *Model) recordAction(a Action) tea.Cmd {
 		return nil
 	}
 
-	if !dns.Editable(row.rec.Type) {
+	if !dnsprovider.Editable(row.rec.Type) {
 		m.notice = notice{text: fmt.Sprintf("dnscli cannot edit %s Records; %s deletes one.", row.rec.Type, m.keys.keysFor(ActionDelete)), err: true}
 
 		return nil
@@ -326,7 +328,7 @@ func describeChange(zone string, c dns.Change) string {
 // describeRecord is a Record as the Changeset preview shows it, named
 // relative to its Zone, with its proxy flag when it has one.
 func describeRecord(zone string, r dns.Record) string {
-	parts := []string{dns.RelativeName(zone, r.Name), r.Type, r.Value, "TTL " + strconv.FormatUint(uint64(r.TTL), 10)}
+	parts := []string{dnsprovider.RelativeName(zone, r.Name), r.Type, r.Value, "TTL " + strconv.FormatUint(uint64(r.TTL), 10)}
 
 	if v, ok := r.Extras[proxiedExtra]; ok {
 		if v == "true" {

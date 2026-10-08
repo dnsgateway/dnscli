@@ -5,6 +5,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/dnsgateway/dnsprovider"
+
 	"github.com/sergelogvinov/dnscli/internal/dns"
 	"github.com/sergelogvinov/dnscli/internal/template"
 )
@@ -71,13 +73,13 @@ func renderZoneStatus(items []string) string {
 
 // settingBadge is a Zone setting's name, green when on and red when off.
 // A pending or unknown setting also says so in words.
-func settingBadge(name string, s dns.Setting) string {
+func settingBadge(name string, s dnsprovider.Setting) string {
 	switch s {
-	case dns.On:
+	case dnsprovider.On:
 		return badgeOnStyle.Render(name)
-	case dns.Off:
+	case dnsprovider.Off:
 		return badgeOffStyle.Render(name)
-	case dns.Pending:
+	case dnsprovider.Pending:
 		return badgePendingStyle.Render(name + " pending")
 	}
 

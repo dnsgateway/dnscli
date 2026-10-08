@@ -9,8 +9,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/dnsgateway/dnsprovider/providertest"
+
 	"github.com/sergelogvinov/dnscli/internal/dns"
-	"github.com/sergelogvinov/dnscli/internal/provider/fake"
 )
 
 // mailRecords are work.example's Records with mail already set up: an
@@ -24,8 +25,8 @@ var mailRecords = []dns.Record{
 }
 
 // mailZones scripts the fake Provider with work.example holding mailRecords.
-func mailZones() *fake.Provider {
-	return fake.New().
+func mailZones() *fakeProvider {
+	return newFake().
 		AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial}, mailRecords...).
 		AddZone(dns.Zone{Name: "work.test", ProviderID: "zw2"})
 }
@@ -308,7 +309,7 @@ func TestATemplateKeepsAChangeTheUserStagedThatItAgreesWith(t *testing.T) {
 
 func TestATemplateDoesNotModifyARecordIntoOneStagedForDeletion(t *testing.T) {
 	strict := dns.Record{ProviderID: "rm6", Type: "TXT", Name: "work.example", Value: "v=spf1 -all", TTL: 3600}
-	f := fake.New().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial},
+	f := newFake().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial},
 		mailRecords[0], mailRecords[2], strict)
 	h := openValidatedShowing(t, f, "v=spf1 mx -all")
 
@@ -329,7 +330,7 @@ func TestATemplateDoesNotModifyARecordIntoOneStagedForDeletion(t *testing.T) {
 
 func TestATemplateDoesNotChangeARecordWithoutAProviderID(t *testing.T) {
 	noID := dns.Record{Type: "TXT", Name: "work.example", Value: "v=spf1 mx -all", TTL: 3600}
-	f := fake.New().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial}, mailRecords[0], noID)
+	f := newFake().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial}, mailRecords[0], noID)
 	h := openValidatedShowing(t, f, "v=spf1 mx -all")
 
 	h.openTemplate(parkedDomain)
@@ -342,7 +343,7 @@ func TestATemplateDoesNotChangeARecordWithoutAProviderID(t *testing.T) {
 func TestTheNoProviderIDErrorListsNoConflicts(t *testing.T) {
 	strict := dns.Record{ProviderID: "rm6", Type: "TXT", Name: "work.example", Value: "v=spf1 -all", TTL: 3600}
 	noID := dns.Record{Type: "TXT", Name: "_dmarc.work.example", Value: "v=DMARC1; p=none", TTL: 3600}
-	f := fake.New().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial},
+	f := newFake().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial},
 		mailRecords[0], mailRecords[2], strict, noID)
 	h := openValidatedShowing(t, f, "v=spf1 mx -all")
 
@@ -364,7 +365,7 @@ func TestTheWriteGateRefusesTemplatesOnAStaleZone(t *testing.T) {
 	f := refreshZones()
 	h, _, _ := newRefreshHarness(t, f)
 
-	f.Fail(fake.OpRecords, errors.New("connection reset by peer"))
+	f.Fail(providertest.OpRecords, errors.New("connection reset by peer"))
 	h.press("enter", "tab")
 	h.assertShows("Refresh failed")
 
@@ -391,7 +392,7 @@ func TestTheWriteGateRefusesTemplatesInASealedSession(t *testing.T) {
 func TestAMailTemplateKeepsTheZonesDMARCUnlessItIsEdited(t *testing.T) {
 	hardened := dns.Record{ProviderID: "rm4", Type: "TXT", Name: "_dmarc.work.example",
 		Value: "v=DMARC1; p=quarantine; sp=reject; rua=mailto:a@work.example; adkim=s", TTL: 3600}
-	f := fake.New().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial},
+	f := newFake().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial},
 		mailRecords[0], mailRecords[1], mailRecords[2], hardened)
 	h := openValidatedShowing(t, f, "v=spf1 mx -all")
 

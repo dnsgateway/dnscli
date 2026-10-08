@@ -5,8 +5,9 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/dnsgateway/dnsprovider/providertest"
+
 	"github.com/sergelogvinov/dnscli/internal/dns"
-	"github.com/sergelogvinov/dnscli/internal/provider/fake"
 )
 
 func TestApplyReChecksTheAffectedRecordsBeforeSending(t *testing.T) {
@@ -19,7 +20,7 @@ func TestApplyReChecksTheAffectedRecordsBeforeSending(t *testing.T) {
 	calls := f.Calls()
 	last := len(calls) - 1
 
-	if last < 1 || calls[last].Op != fake.OpApply || calls[last-1].Op != fake.OpRecords || calls[last-1].Zone.ProviderID != "zw1" {
+	if last < 1 || calls[last].Op != providertest.OpApply || calls[last-1].Op != providertest.OpRecords || calls[last-1].Zone.ID != "zw1" {
 		t.Fatalf("the Provider was not asked for the Zone's Records right before Apply: %+v", calls)
 	}
 
@@ -211,12 +212,12 @@ func TestAnApplyWhoseReCheckFailsIsNotSent(t *testing.T) {
 	h := openValidated(t, f)
 	h.buildChangeset()
 
-	f.Fail(fake.OpRecords, errors.New("connection reset by peer"))
+	f.Fail(providertest.OpRecords, errors.New("connection reset by peer"))
 	h.press("p", "enter")
 
 	if calls := applyCalls(f); len(calls) != 0 {
 		t.Fatalf("a Changeset that could not be re-checked was sent: %+v", calls)
 	}
 
-	h.assertShows("Changes to work.example", "Could not apply the changes to work.example: re-check the Records: connection reset by peer")
+	h.assertShows("Changes to work.example", "Could not apply the changes to work.example: re-check", "the Records the Changeset was built from: connection", "reset by peer")
 }

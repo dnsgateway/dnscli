@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sergelogvinov/dnscli/internal/dns"
-	"github.com/sergelogvinov/dnscli/internal/provider"
+	"github.com/dnsgateway/dnsprovider"
+
 	"github.com/sergelogvinov/dnscli/internal/tui"
 )
 
@@ -30,17 +30,17 @@ func (r *serialFirst) SOAAt(ctx context.Context, zone string, servers []string) 
 }
 
 type serialFirstRecords struct {
-	provider.Provider
+	dnsprovider.Provider
 
 	asked chan struct{}
 }
 
-func (p *serialFirstRecords) Records(ctx context.Context, z dns.Zone) (provider.RecordSet, error) {
+func (p *serialFirstRecords) Records(ctx context.Context, z dnsprovider.Zone, rf dnsprovider.RecordFilter) (dnsprovider.RecordSet, error) {
 	select {
 	case <-p.asked:
-		return p.Provider.Records(ctx, z)
+		return p.Provider.Records(ctx, z, rf)
 	case <-time.After(5 * time.Second):
-		return provider.RecordSet{}, errors.New("the serial was not asked for alongside the Records")
+		return dnsprovider.RecordSet{}, errors.New("the serial was not asked for alongside the Records")
 	}
 }
 
@@ -50,11 +50,9 @@ func TestARefreshAsksForTheSerialAlongsideTheRecords(t *testing.T) {
 
 	s, _ := openStore(t)
 	h := newHarnessWith(t, s, tui.Deps{
-		Providers: provider.Registry{"cloudflare": func(a dns.Account, token string) (provider.Provider, error) {
-			p, err := f.New(a, token)
-
-			return &serialFirstRecords{Provider: p, asked: r.asked}, err
-		}},
+		Providers: wrapped(f, func(p dnsprovider.Provider) dnsprovider.Provider {
+			return &serialFirstRecords{Provider: p, asked: r.asked}
+		}),
 		UnsealMethod: fastPassphrase(),
 		Resolver:     r,
 	})

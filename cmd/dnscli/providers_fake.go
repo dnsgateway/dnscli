@@ -3,18 +3,19 @@
 package main
 
 import (
-	"github.com/sergelogvinov/dnscli/internal/dns"
-	"github.com/sergelogvinov/dnscli/internal/provider/fake"
+	"github.com/dnsgateway/dnsprovider"
+	"github.com/dnsgateway/dnsprovider/providertest"
 )
 
 // A development build (go build -tags fakeprovider) offers an in-memory
 // "fake" Provider with a few Zones, to try adding an Account without a
 // real Provider. Its Zones and Records live only for the session.
 func init() {
-	f := fake.New().
-		AddZone(dns.Zone{Name: "example.com", ProviderID: "fz1", Serial: 2026100701},
-			dns.Record{ProviderID: "fr1", Type: "A", Name: "example.com", Value: "192.0.2.1", TTL: 300}).
-		AddZone(dns.Zone{Name: "example.net", ProviderID: "fz2"})
+	f := providertest.New().
+		AddZone(dnsprovider.Zone{ID: "fz1", Name: "example.com", State: dnsprovider.HostingActive},
+			dnsprovider.Record{ID: "fr1", Type: "A", Name: "example.com", Value: "192.0.2.1", TTL: 300}).
+		AddZone(dnsprovider.Zone{ID: "fz2", Name: "example.net", State: dnsprovider.HostingActive}).
+		SetSerial("fz1", 2026100701)
 
-	providers["fake"] = f.New
+	registry["fake"] = f.Factory()
 }

@@ -4,23 +4,24 @@ import (
 	"context"
 	"testing"
 
+	"github.com/dnsgateway/dnsprovider"
+	"github.com/dnsgateway/dnsprovider/providertest"
+
 	"github.com/sergelogvinov/dnscli/internal/dns"
-	"github.com/sergelogvinov/dnscli/internal/provider"
-	"github.com/sergelogvinov/dnscli/internal/provider/fake"
 	"github.com/sergelogvinov/dnscli/internal/tui"
 )
 
 // relistToken re-lists the highlighted Account's Zones and returns the API
 // token its Provider was built with.
-func (h *harness) relistToken(f *fake.Provider) string {
+func (h *harness) relistToken(f *fakeProvider) string {
 	h.t.Helper()
 
 	h.press("L")
 	h.assertShows("Re-listed")
 
 	for _, c := range f.Calls() {
-		if c.Op == fake.OpNew {
-			return c.Token
+		if c.Op == providertest.OpNew {
+			return c.Fields["token"]
 		}
 	}
 
@@ -82,7 +83,7 @@ func TestEditingAnAccountReplacesItsAPIToken(t *testing.T) {
 func TestAnAccountCannotBeRenamedToAnotherAccountsName(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
 	withPersonalAccount(t, s)
-	h := newAccountHarness(t, s, fake.New())
+	h := newAccountHarness(t, s, newFake())
 
 	// Accounts are listed by label: cloudflare.personal, then cloudflare.work.
 	h.press("shift+tab", "j", "e")
@@ -106,7 +107,7 @@ func TestAnAccountCannotBeRenamedToAnotherAccountsName(t *testing.T) {
 
 func TestTheAccountsPaneInsertsAnAccountWithTheRecordKeys(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
-	h := newAccountHarness(t, s, fake.New())
+	h := newAccountHarness(t, s, newFake())
 
 	// Outside the Accounts and Records panes, the keys say where they act.
 	for _, key := range []string{"i", "e", "d"} {
@@ -126,7 +127,7 @@ func TestTheAccountsPaneInsertsAnAccountWithTheRecordKeys(t *testing.T) {
 func TestAnAccountKeepsItsProviderWhenEdited(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
 	h := newHarnessWith(t, s, tui.Deps{
-		Providers:    provider.Registry{"cloudflare": fake.New().New, "godaddy": fake.New().New},
+		Providers:    dnsprovider.Registry{"cloudflare": newFake().Factory(), "godaddy": newFake().Factory()},
 		UnsealMethod: fastPassphrase(),
 	})
 
@@ -150,7 +151,7 @@ func TestAnAccountKeepsItsProviderWhenEdited(t *testing.T) {
 func TestTheAccountDialogMovesLikeTheRecordForm(t *testing.T) {
 	s, _ := openStore(t)
 	h := newHarnessWith(t, s, tui.Deps{
-		Providers:    provider.Registry{"cloudflare": fake.New().New, "godaddy": fake.New().New},
+		Providers:    dnsprovider.Registry{"cloudflare": newFake().Factory(), "godaddy": newFake().Factory()},
 		UnsealMethod: fastPassphrase(),
 	})
 
@@ -207,7 +208,7 @@ func TestARenamedAccountIsUsedAtOnceNotOnlyAfterTheCacheReloads(t *testing.T) {
 func TestAnAccountWithoutAnAPITokenCanBeRenamed(t *testing.T) {
 	s, path := enrollFirstAccount(t)
 	execSQL(t, path, `UPDATE accounts SET secret = NULL`)
-	h := newAccountHarness(t, s, fake.New())
+	h := newAccountHarness(t, s, newFake())
 
 	h.press("shift+tab", "e")
 	h.unsealWith(passphrase)

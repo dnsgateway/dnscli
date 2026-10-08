@@ -8,8 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dnsgateway/dnsprovider"
+
 	"github.com/sergelogvinov/dnscli/internal/dns"
-	"github.com/sergelogvinov/dnscli/internal/provider/fake"
 )
 
 // cachedRecordsOf returns a Zone's cached Records, read back through the Store.
@@ -194,7 +195,7 @@ func TestChangingARecordsTypeKeepsTheProxyFlagOnlyWhereItApplies(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.typ, func(t *testing.T) {
-			f := fake.New().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial},
+			f := newFake().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial},
 				liveRecords[0], liveRecords[1], proxied)
 			f.SetProxiableTypes("A", "AAAA", "CNAME")
 			h := openValidated(t, f)
@@ -203,7 +204,7 @@ func TestChangingARecordsTypeKeepsTheProxyFlagOnlyWhereItApplies(t *testing.T) {
 			h.press("j", "j", "e")
 			h.assertShows("Edit Record", "‹ CNAME ›")
 
-			key, steps := "right", slices.Index(dns.EditableTypes, c.typ)-slices.Index(dns.EditableTypes, "CNAME")
+			key, steps := "right", slices.Index(dnsprovider.EditableTypes, c.typ)-slices.Index(dnsprovider.EditableTypes, "CNAME")
 			if steps < 0 {
 				key, steps = "left", -steps
 			}
@@ -277,7 +278,7 @@ func TestTheRecordFormTakesAnAutomaticTTLWhereTheProviderHasOne(t *testing.T) {
 
 func TestEditingARecordKeepsItsNamesCase(t *testing.T) {
 	mixed := dns.Record{ProviderID: "rw9", Type: "A", Name: "WWW.Work.Example", Value: "192.0.2.1", TTL: 300}
-	f := fake.New().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial}, mixed)
+	f := newFake().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial}, mixed)
 	h := openValidatedShowing(t, f, "WWW.Work.Example")
 
 	// Submitting the form unchanged changes nothing.
@@ -309,7 +310,7 @@ func TestEditingARecordKeepsItsNamesCase(t *testing.T) {
 }
 
 func TestARecordWithoutAProviderIDCannotBeChanged(t *testing.T) {
-	f := fake.New().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial},
+	f := newFake().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial},
 		dns.Record{Type: "TXT", Name: "work.example", Value: "first", TTL: 300},
 		dns.Record{Type: "TXT", Name: "work.example", Value: "second", TTL: 300})
 	h := openValidatedShowing(t, f, "second")

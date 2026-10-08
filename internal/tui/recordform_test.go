@@ -5,12 +5,11 @@ import (
 	"testing"
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
-	"github.com/sergelogvinov/dnscli/internal/provider/fake"
 )
 
 // proxyingZones is refreshZones at a Provider that proxies A, AAAA and
 // CNAME Records, as Cloudflare does.
-func proxyingZones() *fake.Provider {
+func proxyingZones() *fakeProvider {
 	f := refreshZones()
 	f.SetProxiableTypes("A", "AAAA", "CNAME")
 
@@ -71,7 +70,7 @@ func TestAddingAProxiedRecord(t *testing.T) {
 func TestEditingARecordShowsAndChangesItsProxyFlag(t *testing.T) {
 	proxied := dns.Record{ProviderID: "rw3", Type: "CNAME", Name: "www.work.example", Value: "work.example", TTL: 300,
 		Extras: map[string]string{"proxied": "true", "comment": "kept"}}
-	f := fake.New().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial}, proxied)
+	f := newFake().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial}, proxied)
 	f.SetProxiableTypes("A", "AAAA", "CNAME")
 	h := openValidatedShowing(t, f, "www")
 
@@ -100,7 +99,7 @@ func TestEditingARecordShowsAndChangesItsProxyFlag(t *testing.T) {
 func TestThePreviewShowsAProxyOnlyChange(t *testing.T) {
 	proxied := dns.Record{ProviderID: "rw3", Type: "CNAME", Name: "www.work.example", Value: "work.example", TTL: 300,
 		Extras: map[string]string{"proxied": "true"}}
-	f := fake.New().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial}, proxied)
+	f := newFake().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial}, proxied)
 	f.SetProxiableTypes("A", "AAAA", "CNAME")
 	h := openValidatedShowing(t, f, "www")
 
@@ -116,7 +115,7 @@ func TestThePreviewShowsAProxyOnlyChange(t *testing.T) {
 var unproxiable = dns.Record{ProviderID: "rw3", Type: "A", Name: "lan.work.example", Value: "10.0.0.1", TTL: 300}
 
 func TestEditingARecordTheProviderCannotProxyHasNoProxyFlag(t *testing.T) {
-	f := fake.New().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial}, unproxiable)
+	f := newFake().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial}, unproxiable)
 	f.SetProxiableTypes("A", "AAAA", "CNAME")
 	h := openValidatedShowing(t, f, "10.0.0.1")
 
@@ -167,7 +166,7 @@ func TestAddingARecordWithTheProxyFlagOffSendsNoFlag(t *testing.T) {
 }
 
 func TestARecordWithoutTheProxyFlagIsTheSameAsOneWithItOff(t *testing.T) {
-	f := fake.New().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial}, unproxiable)
+	f := newFake().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial}, unproxiable)
 	f.SetProxiableTypes("A", "AAAA", "CNAME")
 	h := openValidatedShowing(t, f, "10.0.0.1")
 

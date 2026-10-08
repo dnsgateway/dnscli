@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dnsgateway/dnsprovider"
+
 	"github.com/sergelogvinov/dnscli/internal/dns"
 	"github.com/sergelogvinov/dnscli/internal/store"
 )
@@ -52,14 +54,14 @@ func TestTheZoneStatusAndNameserversRoundTrip(t *testing.T) {
 	z := putZone(t, s, dns.Zone{Name: "example.com", ProviderID: "z1", Nameservers: ns})
 
 	at := time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC)
-	z.Status, z.StatusAt = dns.ZoneStatus{DNSSEC: dns.On, HSTS: dns.Off}, at
+	z.Status, z.StatusAt = dnsprovider.ZoneStatus{DNSSEC: dnsprovider.On, HSTS: dnsprovider.Off}, at
 
 	if _, err := s.SaveRefresh(ctx, z, nil, 2026100701, at); err != nil {
 		t.Fatalf("save refresh: %v", err)
 	}
 
 	got := onlyZone(t, s)
-	if got.Status != (dns.ZoneStatus{DNSSEC: dns.On, HSTS: dns.Off}) || !got.StatusAt.Equal(at) || !slices.Equal(got.Nameservers, ns) {
+	if got.Status != (dnsprovider.ZoneStatus{DNSSEC: dnsprovider.On, HSTS: dnsprovider.Off}) || !got.StatusAt.Equal(at) || !slices.Equal(got.Nameservers, ns) {
 		t.Fatalf("zone = %+v, want DNSSEC on, HSTS off, read at %v, nameservers %v", got, at, ns)
 	}
 
@@ -80,7 +82,7 @@ func TestAZoneRelistedWithAnotherProviderIDForgetsItsStatusAndSerial(t *testing.
 	z := putZone(t, s, dns.Zone{Name: "example.com", ProviderID: "z1"})
 
 	at := time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC)
-	z.Status, z.StatusAt = dns.ZoneStatus{DNSSEC: dns.On, HSTS: dns.On}, at
+	z.Status, z.StatusAt = dnsprovider.ZoneStatus{DNSSEC: dnsprovider.On, HSTS: dnsprovider.On}, at
 
 	if _, err := s.SaveRefresh(ctx, z, nil, 2026100701, at); err != nil {
 		t.Fatalf("save refresh: %v", err)
@@ -92,7 +94,7 @@ func TestAZoneRelistedWithAnotherProviderIDForgetsItsStatusAndSerial(t *testing.
 	}
 
 	got := onlyZone(t, s)
-	if got.ProviderID != "z2" || got.Serial != 0 || got.Status != (dns.ZoneStatus{}) || !got.StatusAt.IsZero() {
+	if got.ProviderID != "z2" || got.Serial != 0 || got.Status != (dnsprovider.ZoneStatus{}) || !got.StatusAt.IsZero() {
 		t.Fatalf("zone = %+v, want provider ID z2 with no serial and no Zone Status", got)
 	}
 }
@@ -166,7 +168,7 @@ func TestAVersion2DatabaseMigratesWithNoZoneStatusOrNameservers(t *testing.T) {
 		t.Fatalf("zone = %+v, want example.com with its serial and Refresh time kept", got)
 	}
 
-	if got.Status != (dns.ZoneStatus{}) || !got.StatusAt.IsZero() || got.Nameservers != nil {
+	if got.Status != (dnsprovider.ZoneStatus{}) || !got.StatusAt.IsZero() || got.Nameservers != nil {
 		t.Fatalf("zone = %+v, want no Zone Status and no nameservers", got)
 	}
 }

@@ -6,8 +6,6 @@ import (
 	"testing"
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
-	"github.com/sergelogvinov/dnscli/internal/provider"
-	"github.com/sergelogvinov/dnscli/internal/provider/fake"
 	"github.com/sergelogvinov/dnscli/internal/store"
 	"github.com/sergelogvinov/dnscli/internal/tui"
 )
@@ -88,7 +86,7 @@ func TestRemovingAnAccountAsksForConfirmationThenDeletesItsZonesRecordsAndSecret
 		t.Fatal(err)
 	}
 
-	f := fake.New()
+	f := newFake()
 	h := newAccountHarness(t, s, f)
 
 	// Accounts are listed by label: cloudflare.personal, then cloudflare.work.
@@ -151,7 +149,7 @@ func TestRemovingTheLastAccountKeepsTheDataKeyEnrolled(t *testing.T) {
 		t.Fatalf("key slots = %+v, %v", slots, err)
 	}
 
-	h := newAccountHarness(t, s, fake.New())
+	h := newAccountHarness(t, s, newFake())
 
 	h.press("shift+tab", "d")
 	h.unsealWith(passphrase)
@@ -170,7 +168,7 @@ func TestRemovingTheLastAccountKeepsTheDataKeyEnrolled(t *testing.T) {
 
 	// A later session adds an Account by Unsealing with the same
 	// passphrase: no new one is chosen, so the data key stays the same.
-	later := newAccountHarness(t, s, fake.New().AddZone(dns.Zone{Name: "home.example", ProviderID: "zh1"}))
+	later := newAccountHarness(t, s, newFake().AddZone(dns.Zone{Name: "home.example", ProviderID: "zh1"}))
 	later.fillAddAccount("home", "home-token")
 	later.assertHides("Choose a passphrase")
 	later.unsealWith(passphrase)
@@ -180,7 +178,7 @@ func TestRemovingTheLastAccountKeepsTheDataKeyEnrolled(t *testing.T) {
 func TestCancellingTheRemovalKeepsTheAccountAndTypesBoundKeys(t *testing.T) {
 	ctx := context.Background()
 	s, _ := enrollFirstAccount(t)
-	h := newAccountHarness(t, s, fake.New())
+	h := newAccountHarness(t, s, newFake())
 
 	h.press("shift+tab", "d")
 	h.unsealWith(passphrase)
@@ -215,7 +213,7 @@ func TestCancellingTheRemovalKeepsTheAccountAndTypesBoundKeys(t *testing.T) {
 
 func TestRemovingAnAccountNeedsTheAccountsPane(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
-	h := newAccountHarness(t, s, fake.New())
+	h := newAccountHarness(t, s, newFake())
 
 	h.press("d")
 
@@ -235,7 +233,7 @@ func TestRemovingTheAccountOfTheOpenZoneClosesIt(t *testing.T) {
 
 	withPersonalAccount(t, s)
 
-	h := newAccountHarness(t, s, fake.New())
+	h := newAccountHarness(t, s, newFake())
 
 	// Unseal first, then open work.example: Zones are listed by name.
 	h.press("shift+tab", "d")
@@ -256,7 +254,7 @@ func TestAZoneThatReusesARemovedZonesIDGetsItsOwnSerialCheck(t *testing.T) {
 
 	// work.example is possibly stale; the resolver has no answer for home.example.
 	h := newHarnessWith(t, s, tui.Deps{
-		Providers:    provider.Registry{"cloudflare": fake.New().AddZone(dns.Zone{Name: "home.example", ProviderID: "zh1"}).New},
+		Providers:    newFake().AddZone(dns.Zone{Name: "home.example", ProviderID: "zh1"}).registry(),
 		UnsealMethod: fastPassphrase(),
 		Resolver:     &fakeResolver{serials: map[string]uint32{"work.example": 5, "work.test": 5}},
 	})
@@ -338,7 +336,7 @@ func TestRemovingAnAccountWhileItsZonesWaitForASerialCheckDropsThem(t *testing.T
 
 	// One check at a time: personal.example runs, the work Zones wait.
 	h, checks := newHarnessHoldingStartup(t, s, tui.Deps{
-		Providers:    provider.Registry{"cloudflare": fake.New().New},
+		Providers:    newFake().registry(),
 		UnsealMethod: fastPassphrase(),
 		Resolver:     &fakeResolver{serials: map[string]uint32{"personal.example": 7, "work.example": 5, "work.test": 5}},
 		SerialChecks: 1,

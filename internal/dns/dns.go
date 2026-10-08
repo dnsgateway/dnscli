@@ -1,9 +1,14 @@
-// Package dns holds dnscli's domain types: Account, Zone, Record,
-// Changeset and Zone Status.
-// They are plain values with no Provider or UI dependencies.
+// Package dns holds dnscli's cache types: Account, and the Zone, Record
+// and Changeset as the cache holds them, with database IDs, Refresh times
+// and the cached Zone Status. The dnsprovider module owns the Provider
+// side; internal/provider converts between the two.
 package dns
 
-import "time"
+import (
+	"time"
+
+	"github.com/dnsgateway/dnsprovider"
+)
 
 // Account is one set of credentials at a Provider.
 type Account struct {
@@ -34,7 +39,7 @@ type Zone struct {
 	Nameservers []string
 
 	// Status is the cached Provider-side Zone Status.
-	Status ZoneStatus
+	Status dnsprovider.ZoneStatus
 	// StatusAt is when Status was read; zero when it never was. A Refresh
 	// that could not read it leaves it older than RefreshedAt.
 	StatusAt time.Time
@@ -75,40 +80,4 @@ type Change struct {
 type Changeset struct {
 	Zone    Zone
 	Changes []Change
-}
-
-// ZoneStatus is the Provider-side summary of a Zone shown in the status bar.
-// Mail records and the Live Zone marker are worked out by dnscli itself.
-type ZoneStatus struct {
-	DNSSEC Setting
-	HSTS   Setting
-}
-
-// Setting is a Zone setting that is on, off, pending a change between
-// the two, or unknown, such as when the API token may not read it.
-type Setting int8
-
-// Settings. The zero value is Unknown. The values are stored in the cache:
-// append new ones, never renumber.
-const (
-	Unknown Setting = iota
-	Off
-	On
-	// Pending is a setting the Provider is still turning on or off, such
-	// as DNSSEC waiting for its DS record at the registrar.
-	Pending
-)
-
-// String is "on", "off", "pending" or "?".
-func (s Setting) String() string {
-	switch s {
-	case On:
-		return "on"
-	case Off:
-		return "off"
-	case Pending:
-		return "pending"
-	}
-
-	return "?"
 }

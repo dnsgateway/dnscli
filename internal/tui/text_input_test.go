@@ -6,13 +6,11 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-
-	"github.com/sergelogvinov/dnscli/internal/provider/fake"
 )
 
 func TestATypedFieldEditsAtItsCaret(t *testing.T) {
 	s, _ := openStore(t)
-	h := newAccountHarness(t, s, fake.New())
+	h := newAccountHarness(t, s, newFake())
 
 	h.press("i", "down")
 	h.typeText("work")
@@ -57,7 +55,7 @@ func TestATypedFieldEditsAtItsCaret(t *testing.T) {
 
 func TestALongValueKeepsItsCaretInView(t *testing.T) {
 	s, _ := openStore(t)
-	h := newAccountHarness(t, s, fake.New())
+	h := newAccountHarness(t, s, newFake())
 
 	h.press("i", "down")
 	h.typeText("start" + strings.Repeat("m", 60) + "finish")
@@ -100,7 +98,7 @@ func (h *harness) assertCaret(before, under, after string) {
 
 func TestLeavingAFieldMovesItsCaretBackToTheEnd(t *testing.T) {
 	s, _ := openStore(t)
-	h := newAccountHarness(t, s, fake.New())
+	h := newAccountHarness(t, s, newFake())
 
 	h.press("i", "down")
 	h.typeText("work")
@@ -113,7 +111,7 @@ func TestLeavingAFieldMovesItsCaretBackToTheEnd(t *testing.T) {
 
 func TestAFixedFieldShowsNoCaret(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
-	h := newAccountHarness(t, s, fake.New())
+	h := newAccountHarness(t, s, newFake())
 
 	h.press("shift+tab", "e")
 	h.unsealWith(passphrase)
@@ -125,7 +123,7 @@ func TestAFixedFieldShowsNoCaret(t *testing.T) {
 
 func TestWideCharactersKeepTheDialogInsideItsSize(t *testing.T) {
 	s, _ := openStore(t)
-	h := newAccountHarness(t, s, fake.New())
+	h := newAccountHarness(t, s, newFake())
 
 	h.press("i")
 	w, ht := h.dialogSize("Add Account")
@@ -143,7 +141,7 @@ func TestWideCharactersKeepTheDialogInsideItsSize(t *testing.T) {
 
 func TestTypingDoesNotChangeTheKeyMessage(t *testing.T) {
 	s, _ := openStore(t)
-	h := newAccountHarness(t, s, fake.New())
+	h := newAccountHarness(t, s, newFake())
 
 	h.press("i", "down")
 	h.typeText("work")

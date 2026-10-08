@@ -9,6 +9,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/dnsgateway/dnsprovider"
+
 	"github.com/sergelogvinov/dnscli/internal/dns"
 	"github.com/sergelogvinov/dnscli/internal/template"
 )
@@ -338,7 +340,7 @@ func (m *Model) pendingRecords() ([]recordRow, []dns.Record) {
 func (m *Model) templateTTL(zoneID int64) uint32 {
 	r := m.refreshOf(zoneID).caps.ttlRange()
 	if r.Auto {
-		return dns.TTLAuto
+		return dnsprovider.TTLAuto
 	}
 
 	return min(max(templateTTL, r.Min), r.Max)

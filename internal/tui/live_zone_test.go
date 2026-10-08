@@ -9,9 +9,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/dnsgateway/dnsprovider/providertest"
+
 	"github.com/sergelogvinov/dnscli/internal/dns"
-	"github.com/sergelogvinov/dnscli/internal/provider"
-	"github.com/sergelogvinov/dnscli/internal/provider/fake"
 	"github.com/sergelogvinov/dnscli/internal/store"
 	"github.com/sergelogvinov/dnscli/internal/tui"
 )
@@ -169,12 +169,12 @@ func TestTheDelegationViewSaysWhyTheLiveZoneIsUnknown(t *testing.T) {
 }
 
 // addWorkAccount adds cloudflare.work, backed by f, in a session that asks r.
-func addWorkAccount(t *testing.T, f *fake.Provider, r tui.Resolver) (*harness, *store.Store) {
+func addWorkAccount(t *testing.T, f *fakeProvider, r tui.Resolver) (*harness, *store.Store) {
 	t.Helper()
 
 	s, _ := openStore(t)
 	h := newHarnessWith(t, s, tui.Deps{
-		Providers:    provider.Registry{"cloudflare": f.New},
+		Providers:    f.registry(),
 		UnsealMethod: fastPassphrase(),
 		Resolver:     r,
 	})
@@ -191,7 +191,7 @@ func addWorkAccount(t *testing.T, f *fake.Provider, r tui.Resolver) (*harness, *
 var cruzDee = []string{"cruz.ns.cloudflare.com", "dee.ns.cloudflare.com"}
 
 func TestZoneDiscoveryCachesTheNameserversEachZoneExpects(t *testing.T) {
-	f := fake.New().
+	f := newFake().
 		AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Nameservers: cruzDee}).
 		AddZone(dns.Zone{Name: "work.test", ProviderID: "zw2", Nameservers: []string{"ada.ns.cloudflare.com", "bob.ns.cloudflare.com"}})
 
@@ -207,7 +207,7 @@ func TestZoneDiscoveryCachesTheNameserversEachZoneExpects(t *testing.T) {
 }
 
 func TestZonesListedWithoutNameserversExpectTheAccountsNameservers(t *testing.T) {
-	f := fake.New().
+	f := newFake().
 		AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1"}).
 		AddZone(dns.Zone{Name: "work.test", ProviderID: "zw2"})
 	f.SetNameservers(cruzDee...)
@@ -222,11 +222,11 @@ func TestZonesListedWithoutNameserversExpectTheAccountsNameservers(t *testing.T)
 }
 
 // nameserversCalls counts how often the Account's nameservers were asked for.
-func nameserversCalls(f *fake.Provider) int {
+func nameserversCalls(f *fakeProvider) int {
 	n := 0
 
 	for _, c := range f.Calls() {
-		if c.Op == fake.OpNameservers {
+		if c.Op == providertest.OpAccount {
 			n++
 		}
 	}
@@ -235,7 +235,7 @@ func nameserversCalls(f *fake.Provider) int {
 }
 
 func TestAZoneListedWithoutNameserversExpectsTheOnesItsAccountsOtherZonesShare(t *testing.T) {
-	f := fake.New().
+	f := newFake().
 		AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1"}).
 		AddZone(dns.Zone{Name: "work.test", ProviderID: "zw2", Nameservers: cruzDee}).
 		AddZone(dns.Zone{Name: "work.net", ProviderID: "zw3", Nameservers: []string{"DEE.ns.cloudflare.com.", "cruz.ns.cloudflare.com"}})
@@ -252,7 +252,7 @@ func TestAZoneListedWithoutNameserversExpectsTheOnesItsAccountsOtherZonesShare(t
 
 func TestAZoneListedWithoutNameserversInAnAccountWithSeveralSetsHasNoneExpected(t *testing.T) {
 	adaBob := []string{"ada.ns.cloudflare.com", "bob.ns.cloudflare.com"}
-	f := fake.New().
+	f := newFake().
 		AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1"}).
 		AddZone(dns.Zone{Name: "work.test", ProviderID: "zw2", Nameservers: cruzDee}).
 		AddZone(dns.Zone{Name: "work.net", ProviderID: "zw3", Nameservers: adaBob})
@@ -271,10 +271,10 @@ func TestAZoneListedWithoutNameserversInAnAccountWithSeveralSetsHasNoneExpected(
 }
 
 func TestAFailureToReadTheAccountsNameserversStillCachesItsZones(t *testing.T) {
-	f := fake.New().
+	f := newFake().
 		AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1"}).
 		AddZone(dns.Zone{Name: "work.test", ProviderID: "zw2"})
-	f.Fail(fake.OpNameservers, errors.New("forbidden"))
+	f.Fail(providertest.OpAccount, errors.New("forbidden"))
 
 	h, _ := addWorkAccount(t, f, &fakeResolver{ns: map[string][]string{"work.example": cruzDee}})
 
@@ -384,7 +384,7 @@ func TestADelegationIsResolvedAgainOnReloadOnceItExpires(t *testing.T) {
 	now := testNow
 	r := &fakeResolver{ns: map[string][]string{"example.com": adaBob}}
 	h := newHarnessWith(t, s, tui.Deps{
-		Providers:    provider.Registry{"cloudflare": fake.New().New},
+		Providers:    newFake().registry(),
 		UnsealMethod: fastPassphrase(),
 		Resolver:     r,
 		Clock:        func() time.Time { return now },
@@ -405,7 +405,7 @@ func TestADelegationIsResolvedAgainOnReloadOnceItExpires(t *testing.T) {
 }
 
 func TestRelistingAnAccountResolvesItsZoneNamesDelegationAgain(t *testing.T) {
-	f := fake.New().
+	f := newFake().
 		AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Nameservers: cruzDee}).
 		AddZone(dns.Zone{Name: "work.test", ProviderID: "zw2", Nameservers: cruzDee})
 

@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dnsgateway/dnsprovider/providertest"
+
 	"github.com/sergelogvinov/dnscli/internal/dns"
-	"github.com/sergelogvinov/dnscli/internal/provider"
-	"github.com/sergelogvinov/dnscli/internal/provider/fake"
 	"github.com/sergelogvinov/dnscli/internal/store"
 	"github.com/sergelogvinov/dnscli/internal/tui"
 	"github.com/sergelogvinov/dnscli/internal/vault"
@@ -26,18 +26,18 @@ func fastPassphrase() vault.Method {
 
 // newAccountHarness starts the model with a fake Provider registered as
 // "cloudflare" and the fast passphrase Unseal Method.
-func newAccountHarness(t *testing.T, s *store.Store, f *fake.Provider) *harness {
+func newAccountHarness(t *testing.T, s *store.Store, f *fakeProvider) *harness {
 	t.Helper()
 
 	return newHarnessWith(t, s, tui.Deps{
-		Providers:    provider.Registry{"cloudflare": f.New},
+		Providers:    f.registry(),
 		UnsealMethod: fastPassphrase(),
 	})
 }
 
 func TestAddAccountDialogAsksForProviderNameAndToken(t *testing.T) {
 	s, _ := openStore(t)
-	h := newAccountHarness(t, s, fake.New())
+	h := newAccountHarness(t, s, newFake())
 
 	h.press("i")
 
@@ -49,8 +49,8 @@ func TestAddAccountDialogAsksForProviderNameAndToken(t *testing.T) {
 const token = "cf-token-Zx81-secret"
 
 // workZones scripts the fake Provider with two Zones.
-func workZones() *fake.Provider {
-	return fake.New().
+func workZones() *fakeProvider {
+	return newFake().
 		AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1"}).
 		AddZone(dns.Zone{Name: "work.test", ProviderID: "zw2"})
 }
@@ -113,7 +113,7 @@ func TestAddingTheFirstAccountEnrollsAPassphraseAndDiscoversItsZones(t *testing.
 	// The fake Provider was built with the token decrypted from the Store.
 	// Its Zones list no nameservers, so the Account's are asked for.
 	calls := f.Calls()
-	if len(calls) != 3 || calls[0].Op != fake.OpNew || calls[0].Token != token || calls[0].Account.Label() != "cloudflare.work" || calls[1].Op != fake.OpZones || calls[2].Op != fake.OpNameservers {
+	if len(calls) != 3 || calls[0].Op != providertest.OpNew || calls[0].Fields["token"] != token || calls[1].Op != providertest.OpZones || calls[2].Op != providertest.OpAccount {
 		t.Fatalf("provider calls = %+v", calls)
 	}
 
@@ -164,7 +164,7 @@ func TestALaterSessionStartsSealedAndBrowsingNeverPrompts(t *testing.T) {
 
 func TestAWrongPassphraseIsReportedAndTheSessionStaysSealed(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
-	f := fake.New().AddZone(dns.Zone{Name: "home.example", ProviderID: "zh1"})
+	f := newFake().AddZone(dns.Zone{Name: "home.example", ProviderID: "zh1"})
 	h := newAccountHarness(t, s, f)
 
 	h.fillAddAccount("home", "home-token")
@@ -193,7 +193,7 @@ func TestAWrongPassphraseIsReportedAndTheSessionStaysSealed(t *testing.T) {
 
 func TestOneUnsealPerSessionUnlocksEveryAccount(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
-	f := fake.New()
+	f := newFake()
 	h := newAccountHarness(t, s, f)
 
 	h.fillAddAccount("home", "home-token")
@@ -206,15 +206,7 @@ func TestOneUnsealPerSessionUnlocksEveryAccount(t *testing.T) {
 	h.assertHides("Unseal ", "Passphrase")
 	h.assertShows("cloudflare.lab")
 
-	var tokens []string
-
-	for _, c := range f.Calls() {
-		if c.Op == fake.OpNew {
-			tokens = append(tokens, c.Account.Label()+"="+c.Token)
-		}
-	}
-
-	if want := []string{"cloudflare.home=home-token", "cloudflare.lab=lab-token"}; !slices.Equal(tokens, want) {
+	if tokens, want := f.tokens(), []string{"home-token", "lab-token"}; !slices.Equal(tokens, want) {
 		t.Fatalf("Provider built with %v, want %v", tokens, want)
 	}
 }
@@ -255,7 +247,7 @@ func TestTheAddAccountDialogTypesKeysThatAreBoundToActions(t *testing.T) {
 
 func TestTheAddAccountDialogRefusesIncompleteInput(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
-	h := newAccountHarness(t, s, fake.New())
+	h := newAccountHarness(t, s, newFake())
 
 	h.fillAddAccount("", "t")
 	h.assertShows("Enter a name for the Account.")
@@ -272,7 +264,7 @@ func TestTheAddAccountDialogRefusesIncompleteInput(t *testing.T) {
 
 func TestAnAccountAddedElsewhereMeanwhileIsReportedAsExisting(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
-	f := fake.New()
+	f := newFake()
 	h := newAccountHarness(t, s, f)
 
 	// Another dnscli process adds cloudflare.home after this one loaded its cache.
@@ -292,7 +284,7 @@ func TestAnAccountAddedElsewhereMeanwhileIsReportedAsExisting(t *testing.T) {
 
 func TestDiscoveryForAnAccountWithoutAnAPITokenSaysSo(t *testing.T) {
 	s, path := enrollFirstAccount(t)
-	f := fake.New()
+	f := newFake()
 	h := newAccountHarness(t, s, f)
 
 	h.fillAddAccount("home", "home-token")
@@ -328,7 +320,7 @@ func TestTheDiscoveryNoticeCountsZones(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, _ := enrollFirstAccount(t)
-			f := fake.New()
+			f := newFake()
 
 			for i, z := range tc.zones {
 				f.AddZone(dns.Zone{Name: z, ProviderID: "zh" + string(rune('1'+i))})
@@ -364,7 +356,7 @@ func TestMismatchedPassphrasesAreNotEnrolled(t *testing.T) {
 func TestFailedZoneDiscoveryIsShownAndKeepsTheAccount(t *testing.T) {
 	s, _ := openStore(t)
 	f := workZones()
-	f.Fail(fake.OpZones, errors.New("API is down"))
+	f.Fail(providertest.OpZones, errors.New("API is down"))
 	h := newAccountHarness(t, s, f)
 
 	h.fillAddAccount("work", token)

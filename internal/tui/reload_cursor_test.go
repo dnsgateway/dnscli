@@ -4,13 +4,12 @@ import (
 	"testing"
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
-	"github.com/sergelogvinov/dnscli/internal/provider/fake"
 )
 
 func TestCursorsStayOnTheirItemsWhenAReloadReordersTheLists(t *testing.T) {
 	s, _ := openStore(t)
 	seedCache(t, s)
-	h := newAccountHarness(t, s, fake.New().AddZone(dns.Zone{Name: "aaa.example", ProviderID: "za1"}))
+	h := newAccountHarness(t, s, newFake().AddZone(dns.Zone{Name: "aaa.example", ProviderID: "za1"}))
 
 	// Domains: example.com, example.org, two.tv. Accounts: personal, work.
 	h.press("j", "shift+tab", "j")

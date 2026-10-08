@@ -8,8 +8,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/dnsgateway/dnsprovider"
+
 	"github.com/sergelogvinov/dnscli/internal/dns"
-	"github.com/sergelogvinov/dnscli/internal/provider"
 )
 
 // Fields of the Record form. The proxy flag is last, and shown only for
@@ -25,7 +26,7 @@ const (
 // proxiedExtra is the Record extra holding Cloudflare's proxy flag, which
 // only the types the Provider can proxy take: changing a Record to another
 // type drops it.
-const proxiedExtra = provider.ProxiedExtra
+const proxiedExtra = dnsprovider.ExtraProxied
 
 // defaultTTL is the TTL the Record form offers for a new Record.
 const defaultTTL = 300
@@ -35,7 +36,7 @@ const defaultTTL = 300
 type recordForm struct {
 	zone  dns.Zone
 	field int
-	typ   int // index into dns.EditableTypes
+	typ   int // index into dnsprovider.EditableTypes
 	name  string
 	value string
 	ttl   string
@@ -57,8 +58,8 @@ func newRecordForm(z dns.Zone, edit *recordRow) *recordForm {
 
 	if edit != nil {
 		r := edit.rec
-		f.typ = max(slices.Index(dns.EditableTypes, r.Type), 0)
-		f.name = dns.RelativeName(z.Name, r.Name)
+		f.typ = max(slices.Index(dnsprovider.EditableTypes, r.Type), 0)
+		f.name = dnsprovider.RelativeName(z.Name, r.Name)
 		f.value = r.Value
 		f.ttl = strconv.FormatUint(uint64(r.TTL), 10)
 		f.proxied = r.Extras[proxiedExtra] == "true"
@@ -150,7 +151,7 @@ var onOff = []string{"off", "on"}
 func (f *recordForm) options() (options []string, at int, ok bool) {
 	switch f.field {
 	case recordFieldType:
-		return dns.EditableTypes, f.typ, true
+		return dnsprovider.EditableTypes, f.typ, true
 	case recordFieldProxied:
 		if f.proxied {
 			return onOff, 1, true
@@ -212,25 +213,29 @@ func (m *Model) submitRecordForm() tea.Cmd {
 func (f *recordForm) record(caps providerCaps) (dns.Record, int, string) {
 	ttlRange := caps.ttlRange()
 
-	typ := dns.EditableTypes[f.typ]
+	typ := dnsprovider.EditableTypes[f.typ]
 
-	name, err := dns.QualifyName(f.zone.Name, f.name)
+	name, err := dnsprovider.QualifyName(f.zone.Name, f.name)
 	if err != nil {
 		return dns.Record{}, recordFieldName, capitalise(err.Error()) + "."
 	}
 
 	// An edit that leaves the name as it was keeps the Record's own case,
 	// whatever the case of the zone name.
-	if f.edit != nil && strings.TrimSpace(f.name) == dns.RelativeName(f.zone.Name, f.edit.rec.Name) {
+	if f.edit != nil && strings.TrimSpace(f.name) == dnsprovider.RelativeName(f.zone.Name, f.edit.rec.Name) {
 		name = strings.TrimSuffix(f.edit.rec.Name, ".")
 	}
 
 	value := strings.TrimSpace(f.value)
-	if err := dns.CheckValue(typ, value); err != nil {
+	if value == "" {
+		return dns.Record{}, recordFieldValue, "Enter a value."
+	}
+
+	if err := dnsprovider.CheckValue(typ, value); err != nil {
 		return dns.Record{}, recordFieldValue, capitalise(err.Error()) + "."
 	}
 
-	ttl := uint64(dns.TTLAuto)
+	ttl := uint64(dnsprovider.TTLAuto)
 	if s := strings.TrimSpace(f.ttl); s != "auto" {
 		ttl, err = strconv.ParseUint(s, 10, 32)
 		if err != nil {
@@ -274,7 +279,7 @@ func (f *recordForm) record(caps providerCaps) (dns.Record, int, string) {
 // cannot proxy every Record of a proxiable type, such as one with a
 // private address.
 func (f *recordForm) proxiable(types []string) bool {
-	if !slices.Contains(types, dns.EditableTypes[f.typ]) {
+	if !slices.Contains(types, dnsprovider.EditableTypes[f.typ]) {
 		return false
 	}
 
@@ -315,7 +320,7 @@ func (m *Model) recordFormView() string {
 	}
 
 	fields := []dialogField{
-		{label: "Type", value: dns.EditableTypes[f.typ], choice: true},
+		{label: "Type", value: dnsprovider.EditableTypes[f.typ], choice: true},
 		{label: "Name", value: f.name},
 		{label: "Value", value: f.value},
 		{label: "TTL", value: f.ttl},

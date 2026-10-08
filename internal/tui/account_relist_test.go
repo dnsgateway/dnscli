@@ -6,9 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dnsgateway/dnsprovider"
+	"github.com/dnsgateway/dnsprovider/providertest"
+
 	"github.com/sergelogvinov/dnscli/internal/dns"
-	"github.com/sergelogvinov/dnscli/internal/provider"
-	"github.com/sergelogvinov/dnscli/internal/provider/fake"
 )
 
 func TestRelistingAddsNewZonesAndDropsGoneOnesKeepingTheCacheOfTheRest(t *testing.T) {
@@ -35,7 +36,7 @@ func TestRelistingAddsNewZonesAndDropsGoneOnesKeepingTheCacheOfTheRest(t *testin
 		t.Fatal(err)
 	}
 
-	f := fake.New().
+	f := newFake().
 		AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1"}).
 		AddZone(dns.Zone{Name: "work.new", ProviderID: "zw3"})
 	h := newAccountHarness(t, s, f)
@@ -75,7 +76,7 @@ func TestRelistingAddsNewZonesAndDropsGoneOnesKeepingTheCacheOfTheRest(t *testin
 
 	// The listed Zones carry no nameservers, so the Account's are asked for.
 	calls := f.Calls()
-	if len(calls) != 3 || calls[0].Op != fake.OpNew || calls[0].Account.Label() != "cloudflare.work" || calls[0].Token != token || calls[1].Op != fake.OpZones || calls[2].Op != fake.OpNameservers {
+	if len(calls) != 3 || calls[0].Op != providertest.OpNew || calls[0].Fields["token"] != token || calls[1].Op != providertest.OpZones || calls[2].Op != providertest.OpAccount {
 		t.Fatalf("provider calls = %+v", calls)
 	}
 }
@@ -83,8 +84,8 @@ func TestRelistingAddsNewZonesAndDropsGoneOnesKeepingTheCacheOfTheRest(t *testin
 func TestAFailedRelistingLeavesTheCacheAndShowsTheError(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
 
-	f := fake.New().AddZone(dns.Zone{Name: "work.new", ProviderID: "zw3"})
-	f.Fail(fake.OpZones, &provider.APIError{Provider: "cloudflare", StatusCode: 403, Messages: []string{"Authentication error"}})
+	f := newFake().AddZone(dns.Zone{Name: "work.new", ProviderID: "zw3"})
+	f.Fail(providertest.OpZones, &dnsprovider.APIError{Provider: "cloudflare", StatusCode: 403, Messages: []string{"Authentication error"}})
 
 	h := newAccountHarness(t, s, f)
 
@@ -110,7 +111,7 @@ func TestRelistingNoZonesKeepsTheCacheAndHintsAtTheTokenPermission(t *testing.T)
 	}
 
 	// A token that may not list Zones lists none.
-	h := newAccountHarness(t, s, fake.New())
+	h := newAccountHarness(t, s, newFake())
 
 	h.press("shift+tab", "L")
 	h.unsealWith(passphrase)
@@ -128,7 +129,7 @@ func TestRelistingNoZonesKeepsTheCacheAndHintsAtTheTokenPermission(t *testing.T)
 
 func TestARelistingThatFinishesAfterItsAccountWasRemovedIsDropped(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
-	f := fake.New().AddZone(dns.Zone{Name: "work.new", ProviderID: "zw3"})
+	f := newFake().AddZone(dns.Zone{Name: "work.new", ProviderID: "zw3"})
 	h := newAccountHarness(t, s, f)
 
 	// Unseal first, so the re-listing starts at once.

@@ -9,7 +9,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
-	"github.com/sergelogvinov/dnscli/internal/provider/fake"
 	"github.com/sergelogvinov/dnscli/internal/tui"
 )
 
@@ -17,7 +16,7 @@ import (
 // serial, with the serial its nameservers answer cached, builds a
 // Changeset and applies it. It returns the first of the background polls
 // of the nameservers for the new serial, held back.
-func applyHoldingThePolls(t *testing.T, r *fakeResolver, f *fake.Provider) (*harness, tea.Cmd) {
+func applyHoldingThePolls(t *testing.T, r *fakeResolver, f *fakeProvider) (*harness, tea.Cmd) {
 	t.Helper()
 
 	h, _, _ := newRefreshHarnessWith(t, f, tui.Deps{Resolver: r})

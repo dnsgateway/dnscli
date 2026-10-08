@@ -8,8 +8,6 @@ import (
 	"testing"
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
-	"github.com/sergelogvinov/dnscli/internal/provider"
-	"github.com/sergelogvinov/dnscli/internal/provider/fake"
 	"github.com/sergelogvinov/dnscli/internal/store"
 	"github.com/sergelogvinov/dnscli/internal/tui"
 	"github.com/sergelogvinov/dnscli/internal/vault"
@@ -68,13 +66,13 @@ func (k *fakeKeychain) Delete(ref []byte) error {
 
 // newKeychainHarness starts a session on a Mac: the Keychain is available
 // and is the session's Unseal Method.
-func newKeychainHarness(t *testing.T, s *store.Store, f *fake.Provider, kc *fakeKeychain) *harness {
+func newKeychainHarness(t *testing.T, s *store.Store, f *fakeProvider, kc *fakeKeychain) *harness {
 	t.Helper()
 
 	keychain := vault.Keychain{Backend: kc}
 
 	return newHarnessWith(t, s, tui.Deps{
-		Providers:    provider.Registry{"cloudflare": f.New},
+		Providers:    f.registry(),
 		UnsealMethod: keychain,
 		Passphrase:   fastPassphrase(),
 		Keychain:     keychain,
@@ -83,11 +81,11 @@ func newKeychainHarness(t *testing.T, s *store.Store, f *fake.Provider, kc *fake
 
 // newPassphraseOnMacHarness starts a session on a Mac with the passphrase
 // chosen as its Unseal Method.
-func newPassphraseOnMacHarness(t *testing.T, s *store.Store, f *fake.Provider, kc *fakeKeychain) *harness {
+func newPassphraseOnMacHarness(t *testing.T, s *store.Store, f *fakeProvider, kc *fakeKeychain) *harness {
 	t.Helper()
 
 	return newHarnessWith(t, s, tui.Deps{
-		Providers:    provider.Registry{"cloudflare": f.New},
+		Providers:    f.registry(),
 		UnsealMethod: fastPassphrase(),
 		Keychain:     vault.Keychain{Backend: kc},
 	})
@@ -97,7 +95,7 @@ func newPassphraseOnMacHarness(t *testing.T, s *store.Store, f *fake.Provider, k
 func enrollKeychain(t *testing.T, s *store.Store, kc *fakeKeychain) {
 	t.Helper()
 
-	h := newPassphraseOnMacHarness(t, s, fake.New(), kc)
+	h := newPassphraseOnMacHarness(t, s, newFake(), kc)
 	h.press("K")
 	h.typeText(passphrase)
 	h.press("enter")
@@ -108,7 +106,7 @@ func enrollKeychain(t *testing.T, s *store.Store, kc *fakeKeychain) {
 func TestTheKeychainIsEnrolledFromAnUnsealedSessionAndThenUnsealsWithTouchID(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
 	kc := &fakeKeychain{}
-	h := newPassphraseOnMacHarness(t, s, fake.New(), kc)
+	h := newPassphraseOnMacHarness(t, s, newFake(), kc)
 
 	// Enrolling needs the data key, so a sealed session Unseals first.
 	h.press("K")
@@ -126,7 +124,7 @@ func TestTheKeychainIsEnrolledFromAnUnsealedSessionAndThenUnsealsWithTouchID(t *
 	assertKeySlots(t, s, 2)
 
 	// A later session Unseals with Touch ID: nothing to type.
-	f := fake.New().AddZone(dns.Zone{Name: "home.example", ProviderID: "zh1"})
+	f := newFake().AddZone(dns.Zone{Name: "home.example", ProviderID: "zh1"})
 	later := newKeychainHarness(t, s, f, kc)
 	later.fillAddAccount("home", "home-token")
 
@@ -137,7 +135,7 @@ func TestTheKeychainIsEnrolledFromAnUnsealedSessionAndThenUnsealsWithTouchID(t *
 		t.Fatalf("Touch ID prompted %d times, want 1", kc.touches)
 	}
 
-	if calls := f.Calls(); len(calls) == 0 || calls[0].Token != "home-token" {
+	if calls := f.Calls(); len(calls) == 0 || calls[0].Fields["token"] != "home-token" {
 		t.Fatalf("provider calls = %+v", calls)
 	}
 }
@@ -147,7 +145,7 @@ func TestUnsealWithTheKeychainPromptsForTouchID(t *testing.T) {
 	kc := &fakeKeychain{}
 	enrollKeychain(t, s, kc)
 
-	h := newKeychainHarness(t, s, fake.New(), kc)
+	h := newKeychainHarness(t, s, newFake(), kc)
 	h.press("shift+tab", "i", "tab")
 	h.typeText("home")
 	h.press("tab")
@@ -164,7 +162,7 @@ func TestUnsealWithTheKeychainPromptsForTouchID(t *testing.T) {
 
 func TestCancellingTheKeychainEnrollmentEnrollsNothing(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
-	h := newPassphraseOnMacHarness(t, s, fake.New(), &fakeKeychain{})
+	h := newPassphraseOnMacHarness(t, s, newFake(), &fakeKeychain{})
 
 	h.press("K")
 	h.press("esc")
@@ -180,7 +178,7 @@ func TestCancellingTheKeychainEnrollmentEnrollsNothing(t *testing.T) {
 
 func TestTheKeychainIsNotOfferedWhereItIsUnavailable(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
-	h := newAccountHarness(t, s, fake.New())
+	h := newAccountHarness(t, s, newFake())
 
 	h.press("K")
 
@@ -192,7 +190,7 @@ func TestTheKeychainIsNotOfferedWhereItIsUnavailable(t *testing.T) {
 func TestAKeychainSessionWithoutAKeychainKeySlotAsksForThePassphrase(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
 	kc := &fakeKeychain{}
-	h := newKeychainHarness(t, s, fake.New(), kc)
+	h := newKeychainHarness(t, s, newFake(), kc)
 
 	h.fillAddAccount("home", "home-token")
 
@@ -228,7 +226,7 @@ func TestWhenTouchIDFailsThePassphraseStillUnseals(t *testing.T) {
 	enrollKeychain(t, s, kc)
 
 	kc.denied = true
-	h := newKeychainHarness(t, s, fake.New(), kc)
+	h := newKeychainHarness(t, s, newFake(), kc)
 	h.fillAddAccount("home", "home-token")
 
 	h.assertShows("Touch ID was canceled", "Passphrase", "sealed · read-only")
@@ -248,7 +246,7 @@ func TestReenrollingTheKeychainReplacesItsKeySlot(t *testing.T) {
 	enrollKeychain(t, s, kc)
 	assertKeySlots(t, s, 2)
 
-	h := newKeychainHarness(t, s, fake.New(), kc)
+	h := newKeychainHarness(t, s, newFake(), kc)
 	h.fillAddAccount("home", "home-token")
 	h.assertShows("unsealed", "cloudflare.home")
 }
@@ -263,7 +261,7 @@ func TestReenrollingTheKeychainDeletesTheReplacedItem(t *testing.T) {
 		t.Fatalf("Keychain items = %v, want only the latest one", slices.Collect(maps.Keys(kc.items)))
 	}
 
-	h := newKeychainHarness(t, s, fake.New(), kc)
+	h := newKeychainHarness(t, s, newFake(), kc)
 	h.fillAddAccount("home", "home-token")
 	h.assertShows("unsealed", "cloudflare.home")
 }
@@ -274,7 +272,7 @@ func TestTheKeychainIsNotEnrolledWhereTouchIDCannotProtectIt(t *testing.T) {
 		t.Run(why, func(t *testing.T) {
 			s, _ := enrollFirstAccount(t)
 			kc := &fakeKeychain{refuse: fmt.Errorf("%w: %s", vault.ErrTouchIDUnavailable, why)}
-			h := newPassphraseOnMacHarness(t, s, fake.New(), kc)
+			h := newPassphraseOnMacHarness(t, s, newFake(), kc)
 
 			h.press("K")
 			h.typeText(passphrase)
@@ -290,7 +288,7 @@ func TestTheKeychainIsNotEnrolledWhereTouchIDCannotProtectIt(t *testing.T) {
 func TestAFailedKeychainEnrollmentLeavesNoKeychainItem(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
 	kc := &fakeKeychain{}
-	h := newPassphraseOnMacHarness(t, s, fake.New(), kc)
+	h := newPassphraseOnMacHarness(t, s, newFake(), kc)
 
 	h.press("K")
 	h.typeText(passphrase)

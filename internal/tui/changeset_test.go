@@ -8,14 +8,17 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dnsgateway/dnsprovider"
+
+	"github.com/dnsgateway/dnsprovider/providertest"
+
 	"github.com/sergelogvinov/dnscli/internal/dns"
-	"github.com/sergelogvinov/dnscli/internal/provider/fake"
 )
 
 // openValidated opens work.example in an unsealed session, lets its
 // Refresh validate it, and focuses the Records pane. The Records pane then
 // lists liveRecords: the A Record first, then the MX Record.
-func openValidated(t *testing.T, f *fake.Provider) *harness {
+func openValidated(t *testing.T, f *fakeProvider) *harness {
 	t.Helper()
 
 	return openValidatedShowing(t, f, "203.0.113.20")
@@ -23,7 +26,7 @@ func openValidated(t *testing.T, f *fake.Provider) *harness {
 
 // openValidatedShowing is openValidated for a Zone scripted in f with
 // other Records, one of which shows text.
-func openValidatedShowing(t *testing.T, f *fake.Provider, text string) *harness {
+func openValidatedShowing(t *testing.T, f *fakeProvider, text string) *harness {
 	t.Helper()
 
 	h, _, _ := newRefreshHarness(t, f)
@@ -37,7 +40,7 @@ func TestTheWriteGateRefusesEditsOnAStaleZone(t *testing.T) {
 	f := refreshZones()
 	h, _, _ := newRefreshHarness(t, f)
 
-	f.Fail(fake.OpRecords, errors.New("connection reset by peer"))
+	f.Fail(providertest.OpRecords, errors.New("connection reset by peer"))
 	h.press("enter", "tab")
 	h.assertShows("Refresh failed")
 
@@ -98,7 +101,7 @@ func (h *harness) addRecord(typ, name, value, ttl string) {
 	h.press("i")
 	h.assertShows("Add Record")
 
-	for range slices.Index(dns.EditableTypes, typ) {
+	for range slices.Index(dnsprovider.EditableTypes, typ) {
 		h.press("right")
 	}
 
@@ -345,7 +348,7 @@ func TestAFailedApplyKeepsTheChangesPendingAndTheCacheAsItWas(t *testing.T) {
 	h := openValidated(t, f)
 	h.buildChangeset()
 
-	f.Fail(fake.OpApply, errors.New("not implemented"))
+	f.Fail(providertest.OpApply, errors.New("not implemented"))
 	h.press("p", "enter")
 
 	h.assertShows("Changes to work.example", "Could not apply the changes to work.example: not implemented")
@@ -367,19 +370,6 @@ func TestTheHelpOverlayListsTheRecordKeys(t *testing.T) {
 
 	h.assertShows("── Records ─", "insert a new Record", "edit the Record", "delete the Record", "apply a Template",
 		"preview the pending changes", "discard the pending changes")
-}
-
-// applyCalls returns the Changesets the fake Provider was asked to apply.
-func applyCalls(f *fake.Provider) []dns.Changeset {
-	var out []dns.Changeset
-
-	for _, c := range f.Calls() {
-		if c.Op == fake.OpApply {
-			out = append(out, c.Changeset)
-		}
-	}
-
-	return out
 }
 
 func TestEnterDeleteAndInsertInTheRecordsPaneEditDeleteAndAddRecords(t *testing.T) {

@@ -9,6 +9,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/dnsgateway/dnsprovider"
+
 	"github.com/sergelogvinov/dnscli/internal/dns"
 	"github.com/sergelogvinov/dnscli/internal/provider"
 	"github.com/sergelogvinov/dnscli/internal/store"
@@ -40,17 +42,17 @@ type zoneRefresh struct {
 // its TTL range, whether TTL 1 is automatic, and the Record types it can
 // proxy.
 type providerCaps struct {
-	ttl       dns.TTLRange
+	ttl       dnsprovider.TTLRange
 	autoTTL   bool
 	proxiable []string
 }
 
-// ttlRange is the TTLs the Provider takes: dns.DefaultTTLRange when it
-// did not say, and TTL dns.TTLAuto only where it is automatic.
-func (c providerCaps) ttlRange() dns.TTLRange {
+// ttlRange is the TTLs the Provider takes: dnsprovider.DefaultTTLRange when it
+// did not say, and TTL dnsprovider.TTLAuto only where it is automatic.
+func (c providerCaps) ttlRange() dnsprovider.TTLRange {
 	r := c.ttl
 	if r.Min == 0 && r.Max == 0 {
-		r = dns.DefaultTTLRange
+		r = dnsprovider.DefaultTTLRange
 	}
 
 	r.Auto = c.autoTTL
@@ -58,8 +60,8 @@ func (c providerCaps) ttlRange() dns.TTLRange {
 	return r
 }
 
-func capsOf(p provider.Provider) providerCaps {
-	return providerCaps{ttl: provider.TTLRangeOf(p), autoTTL: provider.AutoTTLOf(p), proxiable: provider.ProxiableTypesOf(p)}
+func capsOf(p dnsprovider.Provider) providerCaps {
+	return providerCaps{ttl: dnsprovider.TTLRangeOf(p), autoTTL: dnsprovider.AutoTTLOf(p), proxiable: dnsprovider.ProxiableTypesOf(p)}
 }
 
 // zoneRefreshedMsg carries the result of one Refresh.
@@ -104,7 +106,9 @@ func (m *Model) refreshOf(id int64) zoneRefresh {
 func (m *Model) canRefresh(z dns.Zone) bool {
 	a, ok := m.account(z.AccountID)
 
-	return ok && m.deps.Providers[a.Provider] != nil
+	_, built := m.deps.Providers[a.Provider]
+
+	return ok && built
 }
 
 // rateLimited reports whether the Provider asked not to be called again
@@ -200,7 +204,7 @@ func (m *Model) startRefreshes() tea.Cmd {
 
 // refreshCmd Refreshes a Zone from its Provider in the background.
 func (m *Model) refreshCmd(z dns.Zone, a dns.Account, r *zoneRefresh) tea.Cmd {
-	ctx, s, key, newProvider, now := m.ctx, m.deps.Store, m.key, m.deps.Providers[a.Provider], m.deps.now
+	ctx, s, key, newProvider, now := m.ctx, m.deps.Store, m.key, m.deps.Providers, m.deps.now
 	q := m.serialQueryFor(z)
 
 	return func() tea.Msg {
@@ -217,7 +221,7 @@ const zoneStatusTimeout = 10 * time.Second
 
 // zoneStatusRead is the result of a Zone Status read.
 type zoneStatusRead struct {
-	status dns.ZoneStatus
+	status dnsprovider.ZoneStatus
 	err    error
 }
 
@@ -251,8 +255,8 @@ type refreshResult struct {
 // A Zone Status that cannot be read does not fail the Refresh: the cached
 // one is kept, and shows as older than the Refresh. Why it could not be
 // read is returned as statusErr.
-func refresh(ctx context.Context, s *store.Store, key *vault.Key, newProvider provider.Constructor, a dns.Account, z dns.Zone, q serialQuery, now func() time.Time) refreshResult {
-	p, err := accountProvider(ctx, s, key, newProvider, a)
+func refresh(ctx context.Context, s *store.Store, key *vault.Key, reg dnsprovider.Registry, a dns.Account, z dns.Zone, q serialQuery, now func() time.Time) refreshResult {
+	p, err := accountProvider(ctx, s, key, reg, a)
 	if err != nil {
 		return refreshResult{err: err}
 	}
@@ -265,7 +269,7 @@ func refresh(ctx context.Context, s *store.Store, key *vault.Key, newProvider pr
 	read := make(chan zoneStatusRead, 1)
 
 	go func() {
-		status, err := p.ZoneStatus(statusCtx, z)
+		status, err := dnsprovider.ZoneStatusOf(statusCtx, p, provider.ModuleZone(z))
 		read <- zoneStatusRead{status: status, err: err}
 	}()
 
@@ -280,7 +284,7 @@ func refresh(ctx context.Context, s *store.Store, key *vault.Key, newProvider pr
 		queried <- serialRead{serial: serial, failed: failed}
 	}()
 
-	rs, err := p.Records(ctx, z)
+	rs, err := p.Records(ctx, provider.ModuleZone(z), dnsprovider.RecordFilter{})
 	if err != nil {
 		res.err = err
 
@@ -297,21 +301,21 @@ func refresh(ctx context.Context, s *store.Store, key *vault.Key, newProvider pr
 	status := <-read
 	at := now()
 
-	z.Status, z.StatusAt = dns.ZoneStatus{}, time.Time{}
+	z.Status, z.StatusAt = dnsprovider.ZoneStatus{}, time.Time{}
 	if status.err == nil {
 		z.Status, z.StatusAt = status.status, at
 	}
 
 	res.statusErr = status.err
-	res.zone, res.err = s.SaveRefresh(ctx, z, rs.Records, rs.Serial, at)
+	res.zone, res.err = s.SaveRefresh(ctx, z, provider.CacheRecords(rs.Records), rs.Serial, at)
 
 	return res
 }
 
 // accountProvider builds the Provider for an Account with its API token,
 // opened with the data key.
-func accountProvider(ctx context.Context, s *store.Store, key *vault.Key, newProvider provider.Constructor, a dns.Account) (provider.Provider, error) {
-	if newProvider == nil {
+func accountProvider(ctx context.Context, s *store.Store, key *vault.Key, reg dnsprovider.Registry, a dns.Account) (dnsprovider.Provider, error) {
+	if _, ok := reg[a.Provider]; !ok {
 		return nil, fmt.Errorf("Provider type %q is not available in this build", a.Provider)
 	}
 
@@ -329,7 +333,7 @@ func accountProvider(ctx context.Context, s *store.Store, key *vault.Key, newPro
 		return nil, err
 	}
 
-	return newProvider(a, string(token))
+	return provider.Open(ctx, reg, a.Provider, string(token))
 }
 
 // zoneRefreshed records a Refresh result and starts the next queued one.
@@ -369,7 +373,7 @@ func (m *Model) zoneRefreshed(msg zoneRefreshedMsg) tea.Cmd {
 // retryAt is when the Provider asked to be called again, after err;
 // zero when it did not say.
 func (m *Model) retryAt(err error) time.Time {
-	var apiErr *provider.APIError
+	var apiErr *dnsprovider.APIError
 	if errors.As(err, &apiErr) && apiErr.RetryAfter > 0 {
 		return m.deps.now().Add(apiErr.RetryAfter)
 	}

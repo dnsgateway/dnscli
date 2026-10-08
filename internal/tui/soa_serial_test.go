@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
-	"github.com/sergelogvinov/dnscli/internal/provider/fake"
 	"github.com/sergelogvinov/dnscli/internal/tui"
 )
 
@@ -15,8 +14,8 @@ var zoneNS = []string{"cruz.ns.cloudflare.com", "dee.ns.cloudflare.com"}
 
 // serialZones is refreshZones for a Provider that reports no SOA serial,
 // with work.example's nameservers as assigned, or none when ns is nil.
-func serialZones(ns []string) *fake.Provider {
-	f := fake.New().
+func serialZones(ns []string) *fakeProvider {
+	f := newFake().
 		AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial, Nameservers: ns}, liveRecords...).
 		AddZone(dns.Zone{Name: "work.test", ProviderID: "zw2"})
 	f.WithholdSerial(true)

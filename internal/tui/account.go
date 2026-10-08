@@ -9,6 +9,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/dnsgateway/dnsprovider"
+
 	"github.com/sergelogvinov/dnscli/internal/dns"
 	"github.com/sergelogvinov/dnscli/internal/provider"
 	"github.com/sergelogvinov/dnscli/internal/store"
@@ -378,10 +380,10 @@ func (m *Model) accountAdded(msg accountAddedMsg) tea.Cmd {
 // background and caches them. Re-listing an existing Account's Zones runs
 // the same discovery; relist changes only how the result is reported.
 func (m *Model) discoverZones(a dns.Account, relist bool) tea.Cmd {
-	key, store, ctx, newProvider := m.key, m.deps.Store, m.ctx, m.deps.Providers[a.Provider]
+	key, store, ctx, reg := m.key, m.deps.Store, m.ctx, m.deps.Providers
 
 	return func() tea.Msg {
-		n, sync, err := discover(ctx, store, key, newProvider, a)
+		n, sync, err := discover(ctx, store, key, reg, a)
 
 		return zonesDiscoveredMsg{account: a, relist: relist, count: n, sync: sync, err: err}
 	}
@@ -391,16 +393,18 @@ func (m *Model) discoverZones(a dns.Account, relist bool) tea.Cmd {
 // Zones match them. A Provider error leaves the cache untouched, and so
 // does an empty list: an API token without zone read permission lists no
 // Zones, which must not drop the Account's cache.
-func discover(ctx context.Context, s *store.Store, key *vault.Key, newProvider provider.Constructor, a dns.Account) (int, store.ZoneSync, error) {
-	p, err := accountProvider(ctx, s, key, newProvider, a)
+func discover(ctx context.Context, s *store.Store, key *vault.Key, reg dnsprovider.Registry, a dns.Account) (int, store.ZoneSync, error) {
+	p, err := accountProvider(ctx, s, key, reg, a)
 	if err != nil {
 		return 0, store.ZoneSync{}, err
 	}
 
-	zones, err := p.Zones(ctx)
-	if err != nil || len(zones) == 0 {
+	listed, err := p.Zones(ctx, dnsprovider.ZoneFilter{})
+	if err != nil || len(listed) == 0 {
 		return 0, store.ZoneSync{}, err
 	}
+
+	zones := provider.CacheZones(listed)
 
 	expectAccountNameservers(ctx, p, zones)
 
@@ -418,7 +422,7 @@ func discover(ctx context.Context, s *store.Store, key *vault.Key, newProvider p
 // set; an Account with several sets leaves them unknown. When none was,
 // the Provider is asked. Not knowing them leaves the Live Zone unknown, so
 // a failure here does not fail the discovery.
-func expectAccountNameservers(ctx context.Context, p provider.Provider, zones []dns.Zone) {
+func expectAccountNameservers(ctx context.Context, p dnsprovider.Provider, zones []dns.Zone) {
 	if !slices.ContainsFunc(zones, func(z dns.Zone) bool { return len(z.Nameservers) == 0 }) {
 		return
 	}
@@ -436,10 +440,12 @@ func expectAccountNameservers(ctx context.Context, p provider.Provider, zones []
 	}
 
 	if ns == nil {
-		var err error
-		if ns, err = p.Nameservers(ctx); err != nil {
+		info, err := p.Account(ctx)
+		if err != nil {
 			return
 		}
+
+		ns = info.Nameservers
 	}
 
 	for i := range zones {
