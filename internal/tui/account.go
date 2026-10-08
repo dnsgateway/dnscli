@@ -272,14 +272,19 @@ func (f *addAccountForm) pickTenant(tenants []dnsprovider.Tenant) {
 	}}
 }
 
-// saveWithPickedTenant saves the Account with the Tenant just picked, named
-// after it when no name was typed.
+// saveWithPickedTenant saves the Account with the Tenant just picked.
+// With no name typed, the Tenant's is suggested instead, for the user to
+// save or edit.
 func (m *Model) saveWithPickedTenant() tea.Cmd {
 	f := m.addForm
 	f.tenantPicked = false
 
-	if strings.TrimSpace(f.name) == "" {
-		f.name = tenantAccountName(*f.tenant)
+	if strings.TrimSpace(f.name) == "" && f.editing == nil {
+		if name := tenantAccountName(*f.tenant); name != "" {
+			f.suggestName(name)
+
+			return nil
+		}
 	}
 
 	if f.editing != nil {
@@ -289,16 +294,38 @@ func (m *Model) saveWithPickedTenant() tea.Cmd {
 	return m.submitAddAccount()
 }
 
+// suggestName fills the Name field with name, suggested after the
+// Account's Tenant, and moves to the Save button, which accepts it.
+func (f *addAccountForm) suggestName(name string) {
+	f.name, f.caret = name, 0
+	f.field = f.saveField()
+	f.err = "Suggested " + dns.Account{Provider: f.types[f.provider], Name: name}.Label() +
+		" after its Tenant: save to accept it, or edit the name."
+}
+
 // tenantAccountName is the Account name suggested for a Tenant: its name
 // in lower case, with each run of other characters than letters and
-// digits a hyphen; empty for a Tenant without a name.
+// digits a hyphen, and apostrophes left out. Cloudflare names a user's
+// own account "<email>'s Account": the suggestion is then the email's.
+// It is empty for a Tenant without a name.
 func tenantAccountName(t dnsprovider.Tenant) string {
+	name := strings.ToLower(strings.TrimSpace(t.Name))
+
+	for _, suffix := range []string{"'s account", "’s account"} {
+		if base, ok := strings.CutSuffix(name, suffix); ok && strings.TrimSpace(base) != "" {
+			name = base
+		}
+	}
+
 	var b strings.Builder
 
 	hyphen := false
 
-	for _, r := range strings.ToLower(t.Name) {
-		if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+	for _, r := range name {
+		switch {
+		case r == '\'' || r == '’':
+			continue
+		case !unicode.IsLetter(r) && !unicode.IsDigit(r):
 			hyphen = b.Len() > 0
 
 			continue
@@ -735,6 +762,12 @@ func (m *Model) accountEdited(msg accountEditedMsg) tea.Cmd {
 // name no Tenant to name it after.
 var errNoAccountName = errors.New("enter a name for the Account")
 
+// nameSuggestion stops saving an Account added without a name, whose
+// credentials act within tenant: its name is suggested from it.
+type nameSuggestion struct{ tenant dnsprovider.Tenant }
+
+func (nameSuggestion) Error() string { return "the Account is named after its Tenant" }
+
 // accountSaveFailed shows in the open Account dialog why its save attempt
 // failed; a cancelled attempt has nothing to show.
 func (m *Model) accountSaveFailed(prefix string, a dns.Account, attempt int, err error) {
@@ -746,16 +779,16 @@ func (m *Model) accountSaveFailed(prefix string, a dns.Account, attempt int, err
 	f.busy = false
 	f.err = prefix + err.Error()
 
-	if strings.TrimSpace(f.name) == "" {
-		f.name = a.Name // named after its Tenant
-	}
-
 	var (
 		invalid *provider.InvalidCredentialsError
 		choice  *provider.TenantChoiceError
+		suggest nameSuggestion
 	)
 
 	switch {
+	case errors.As(err, &suggest):
+		f.tenant = &suggest.tenant
+		f.suggestName(tenantAccountName(suggest.tenant))
 	case errors.As(err, &choice):
 		f.pickTenant(choice.Tenants)
 	case errors.Is(err, errNoAccountName):
@@ -794,9 +827,12 @@ func (m *Model) saveAccount(a dns.Account, fields map[string]string) tea.Cmd {
 		}
 
 		if a.Name == "" {
-			if a.Name = tenantAccountName(tenant); a.Name == "" {
+			if tenantAccountName(tenant) == "" {
 				return accountAddedMsg{account: a, attempt: attempt, err: errNoAccountName}
 			}
+
+			// The Tenant's name is suggested, not saved unseen.
+			return accountAddedMsg{account: a, attempt: attempt, err: nameSuggestion{tenant}}
 		}
 
 		sealed, err := key.Seal(provider.EncodeCredentials(fields), secretLabel(a))
@@ -1032,7 +1068,7 @@ func (m *Model) accountFormHints(field int) []string {
 	case field == addFieldName:
 		hint = "The Account shows as <provider>.<name>, such as cloudflare.work; the name has no dots or spaces."
 		if f.editing == nil && f.tenantField() != "" {
-			hint += " Left empty, it is the Tenant's the credentials act within."
+			hint += " Left empty, the Tenant's name is suggested once the credentials are checked."
 		}
 	case i < len(f.creds):
 		hint = credentialHint(f.creds[i], f.editing != nil)

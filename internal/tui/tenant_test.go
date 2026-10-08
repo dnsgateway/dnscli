@@ -156,11 +156,60 @@ func TestAddingAnAccountWhoseTokenReachesSeveralTenantsAsksWhichAndNamesItAfterI
 		}
 	}
 
+	// The picked Tenant's name is suggested in the Name field, and
+	// nothing is saved until the user saves it.
 	h.press("down", "enter")
+	h.assertShows("Add Account", "side-project", "cloudflare.side-project")
+	noAccounts(t, s)
+
+	h.press("enter")
 	h.assertShows("work.example", "cloudflare.side-project")
 
 	if got, want := storedFields(t, s, accountLabeled(t, s, "cloudflare.side-project")), map[string]string{"token": "tok", "account": "b2"}; !maps.Equal(got, want) {
 		t.Errorf("stored credentials = %v, want %v", got, want)
+	}
+}
+
+// noAccounts fails t when s holds an Account.
+func noAccounts(t *testing.T, s *store.Store) {
+	t.Helper()
+
+	if accounts, err := s.Accounts(context.Background()); err != nil || len(accounts) != 0 {
+		t.Errorf("Accounts = %+v, %v; want none saved", accounts, err)
+	}
+}
+
+func TestTheOnlyTenantsNameIsSuggestedForTheUserToAcceptOrEdit(t *testing.T) {
+	for name, tc := range map[string]struct {
+		tenant  string
+		suggest string
+		edit    []string // keys that edit the suggestion from the Save button
+		label   string
+	}{
+		"accepted":        {tenant: "Acme Ltd", suggest: "acme-ltd", label: "cloudflare.acme-ltd"},
+		"a user's":        {tenant: "user@example.com's Account", suggest: "user-example-com", label: "cloudflare.user-example-com"},
+		"edited":          {tenant: "Acme Ltd", suggest: "acme-ltd", edit: []string{"up", "up", "backspace", "backspace", "backspace", "backspace", "down", "down"}, label: "cloudflare.acme"},
+		"an apostrophe's": {tenant: "Bob's DNS", suggest: "bobs-dns", label: "cloudflare.bobs-dns"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := refreshZones()
+			f.SetTenants(dnsprovider.Tenant{ID: acmeTenant, Name: tc.tenant})
+
+			h, s := newTenantHarness(t, f)
+			h.fillAddAccount("", "tok")
+			h.enrollPassphrase()
+
+			h.assertShows("Add Account", "cloudflare."+tc.suggest)
+			noAccounts(t, s)
+
+			h.press(tc.edit...)
+			h.press("enter")
+			h.assertShows("work.example", tc.label)
+
+			if got := storedFields(t, s, accountLabeled(t, s, tc.label))["account"]; got != acmeTenant {
+				t.Errorf("stored Tenant = %q, want %s", got, acmeTenant)
+			}
+		})
 	}
 }
 
@@ -213,7 +262,7 @@ func TestTheNameHintSaysAnEmptyNameIsTheTenants(t *testing.T) {
 	h, _ := newTenantHarness(t, refreshZones())
 	h.press("i", "tab")
 
-	h.assertShows("empty, it is the Tenant's")
+	h.assertShows("empty, the Tenant's name is suggested")
 }
 
 // newUpgradedHarness starts a session on a Store holding cloudflare.work
