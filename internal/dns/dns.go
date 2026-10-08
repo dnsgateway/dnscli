@@ -1,6 +1,6 @@
 // Package dns holds dnscli's cache types: Account, and the Zone, Record
 // and Changeset as the cache holds them, with database IDs, Refresh times
-// and the cached Zone Status. The dnsprovider module owns the Provider
+// the cached Hosting State and Zone Status. The dnsprovider module owns the Provider
 // side; internal/provider converts between the two.
 package dns
 
@@ -33,6 +33,9 @@ type Zone struct {
 	Serial uint32
 	// RefreshedAt is the time of the last Refresh; zero when never Refreshed.
 	RefreshedAt time.Time
+	// State is the Zone's Hosting State as its Provider last listed it;
+	// Unknown until then.
+	State dnsprovider.HostingState
 	// Nameservers are the nameservers the Zone's Account expects its
 	// Delegation to name, as the Provider assigned them to this Zone; nil
 	// when not known.

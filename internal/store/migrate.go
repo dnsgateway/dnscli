@@ -67,6 +67,10 @@ var migrations = []string{
 	`
 	ALTER TABLE zones ADD COLUMN nameservers TEXT NOT NULL DEFAULT ''; -- space-separated; '' = unknown
 	`,
+	// 5: the Hosting State each Zone was last listed in.
+	`
+	ALTER TABLE zones ADD COLUMN hosting_state INTEGER NOT NULL DEFAULT 0; -- dnsprovider.HostingState: 0 unknown until the next listing
+	`,
 }
 
 // migrate applies pending migrations in one write transaction. BEGIN IMMEDIATE

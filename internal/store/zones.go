@@ -16,6 +16,7 @@ import (
 // Account and zone name, and returns it as stored, with its ID set.
 // A zero Serial or RefreshedAt, or no Nameservers, keeps the cached value,
 // so relisting an Account's Zones does not forget their last Refresh. The
+// Hosting State is always written: Unknown is what a Provider may list. The
 // Zone Status is never written here; it keeps the cached one. A changed
 // Provider zone ID is another zone at the Provider, so it forgets the
 // cached Zone Status and serial, which belonged to the old one.
@@ -35,10 +36,11 @@ func putZone(ctx context.Context, db queryRower, z dns.Zone) (dns.Zone, error) {
 	)
 
 	err := db.QueryRowContext(ctx, `
-		INSERT INTO zones (account_id, name, provider_zone_id, soa_serial, refreshed_at, nameservers)
-		VALUES (?, ?, ?, ?, ?, ?)
+		INSERT INTO zones (account_id, name, provider_zone_id, soa_serial, refreshed_at, nameservers, hosting_state)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (account_id, name) DO UPDATE SET
 			provider_zone_id = excluded.provider_zone_id,
+			hosting_state    = excluded.hosting_state,
 			soa_serial       = IIF(excluded.soa_serial = 0 AND excluded.provider_zone_id = provider_zone_id, soa_serial, excluded.soa_serial),
 			refreshed_at     = IIF(excluded.refreshed_at = 0, refreshed_at, excluded.refreshed_at),
 			nameservers      = IIF(excluded.nameservers = '', nameservers, excluded.nameservers),
@@ -46,7 +48,7 @@ func putZone(ctx context.Context, db queryRower, z dns.Zone) (dns.Zone, error) {
 			hsts             = IIF(excluded.provider_zone_id = provider_zone_id, hsts, 0),
 			status_at        = IIF(excluded.provider_zone_id = provider_zone_id, status_at, 0)
 		RETURNING id, soa_serial, refreshed_at, dnssec, hsts, status_at, nameservers`,
-		z.AccountID, z.Name, z.ProviderID, z.Serial, unixOrZero(z.RefreshedAt), joinNames(z.Nameservers),
+		z.AccountID, z.Name, z.ProviderID, z.Serial, unixOrZero(z.RefreshedAt), joinNames(z.Nameservers), z.State,
 	).Scan(&z.ID, &z.Serial, &refreshed, &z.Status.DNSSEC, &z.Status.HSTS, &statusAt, &ns)
 	if err != nil {
 		return dns.Zone{}, fmt.Errorf("put zone %s: %w", z.Name, err)
@@ -162,7 +164,7 @@ func accountZones(ctx context.Context, conn *sql.Conn, accountID int64) (map[str
 func (s *Store) Zones(ctx context.Context) ([]dns.Zone, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT z.id, z.account_id, z.name, z.provider_zone_id, z.soa_serial, z.refreshed_at,
-			z.dnssec, z.hsts, z.status_at, z.nameservers
+			z.dnssec, z.hsts, z.status_at, z.nameservers, z.hosting_state
 		FROM zones z JOIN accounts a ON a.id = z.account_id
 		ORDER BY z.name, a.provider, a.name`)
 	if err != nil {
@@ -180,7 +182,7 @@ func (s *Store) Zones(ctx context.Context) ([]dns.Zone, error) {
 		)
 
 		if err := rows.Scan(&z.ID, &z.AccountID, &z.Name, &z.ProviderID, &z.Serial, &refreshed,
-			&z.Status.DNSSEC, &z.Status.HSTS, &statusAt, &ns); err != nil {
+			&z.Status.DNSSEC, &z.Status.HSTS, &statusAt, &ns, &z.State); err != nil {
 			return nil, fmt.Errorf("list zones: %w", err)
 		}
 
