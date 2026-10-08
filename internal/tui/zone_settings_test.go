@@ -198,3 +198,26 @@ func TestHelpOffersZoneSettingsInTheDomainsPane(t *testing.T) {
 	h.press("?")
 	h.assertShows("turn the Zone's DNSSEC or HSTS on or off")
 }
+
+func TestZoneSettingsOfAnUpgradedAccountReachingSeveralTenantsAskForOneThenOpen(t *testing.T) {
+	f := refreshZones()
+	f.SetTenants(twoTenants...)
+	f.SetZoneUpdater(true)
+
+	h, s := newUpgradedHarness(t, f)
+	old := accountLabeled(t, s, "cloudflare.old")
+	mustZone(t, s, dns.Zone{AccountID: old.ID, Name: "old.example", ProviderID: "zw2"})
+	h.run(h.model.Init())
+
+	// Show cloudflare.old's Zones, and ask for old.example's settings.
+	h.press("enter", "tab", "S")
+	h.unsealWith(passphrase)
+
+	h.assertShows("Tenant of cloudflare.old")
+	h.assertHides("Zone settings of")
+	onlyTenantsListed(t, f)
+
+	// Picked, the Tenant is saved, and the dialog opens.
+	h.press("enter")
+	h.assertShows("Zone settings of old.example", "Turn DNSSEC on")
+}
