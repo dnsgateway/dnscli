@@ -3,6 +3,7 @@ package tui_test
 import (
 	"context"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -243,5 +244,30 @@ func TestAZoneNameListedTwiceIsCachedInItsServedHostingState(t *testing.T) {
 
 	if z := zoneNamed(t, s, "work.test"); z.ProviderID != "zw9" || z.State != dnsprovider.HostingPending {
 		t.Errorf("work.test = %+v, want zw9 pending", z)
+	}
+}
+
+// A zone name the Provider now lists under another zone ID is another
+// zone: nothing this session built on the old one may reach it.
+func TestRelistingThatReplacesAZonesProviderIDForgetsItsChangesetAndValidation(t *testing.T) {
+	f := refreshZones()
+	h := openValidated(t, f)
+	h.buildChangeset()
+
+	f.RemoveZone("zw1")
+	f.AddZone(dns.Zone{Name: "work.example", ProviderID: "zw7"})
+
+	h.press("shift+tab", "shift+tab", "L")
+
+	h.assertShows("Re-listed cloudflare.work: no Zones added, 0 dropped, 1 replaced by a new zone; its cache and changes were reset.")
+	h.assertHides("pending change", "203.0.113.20", "_verify.work.example")
+
+	if z := zoneNamed(t, h.store, "work.example"); z.ProviderID != "zw7" {
+		t.Fatalf("work.example = %+v, want zw7", z)
+	}
+
+	// The new zone was never Refreshed: it is not validated.
+	if row := h.domainRow("work.example"); strings.Contains(row, "✓") {
+		t.Fatalf("work.example row = %q, still validated", row)
 	}
 }

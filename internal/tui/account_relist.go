@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -53,21 +54,25 @@ func (m *Model) zonesRelisted(msg zonesDiscoveredMsg) tea.Cmd {
 		return nil
 	}
 
-	dropped := make([]int64, len(msg.sync.Dropped))
-	for i, z := range msg.sync.Dropped {
-		dropped[i] = z.ID
+	// A replaced Zone keeps its ID but is another zone at the Provider:
+	// like a dropped one, it keeps nothing this session built on the old.
+	var forget []int64
+	for _, z := range slices.Concat(msg.sync.Dropped, msg.sync.Replaced) {
+		forget = append(forget, z.ID)
 	}
 
-	m.forgetZones(dropped)
+	m.forgetZones(forget)
 	m.forgetDelegations(msg.account.ID)
 
-	switch added, gone := len(msg.sync.Added), len(msg.sync.Dropped); {
+	switch added, gone, replaced := len(msg.sync.Added), len(msg.sync.Dropped), len(msg.sync.Replaced); {
 	case msg.count == 0:
 		m.notice = notice{text: "Re-listed " + label + ": no Zones listed, cache kept. Check that its API token may list Zones."}
-	case added == 0 && gone == 0:
+	case added == 0 && gone == 0 && replaced == 0:
 		m.notice = notice{text: "Re-listed " + label + ": no changes, " + zoneCount(msg.count) + "."}
-	default:
+	case replaced == 0:
 		m.notice = notice{text: fmt.Sprintf("Re-listed %s: %s added, %d dropped.", label, zoneCount(added), gone)}
+	default:
+		m.notice = notice{text: fmt.Sprintf("Re-listed %s: %s added, %d dropped, %d replaced by a new zone; its cache and changes were reset.", label, zoneCount(added), gone, replaced)}
 	}
 
 	return m.loadCache
