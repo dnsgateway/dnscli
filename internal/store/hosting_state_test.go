@@ -33,12 +33,44 @@ func TestTheHostingStateRoundTripsAndEachListingReplacesIt(t *testing.T) {
 		t.Fatalf("zone after relist = %+v, want active", got)
 	}
 
-	// Unknown is what the Provider reported, not a missing value: it replaces the cached state too.
-	if _, err := s.PutZone(ctx, dns.Zone{AccountID: z.AccountID, Name: "example.com", ProviderID: "z1", State: dnsprovider.HostingMoved}); err != nil {
+	// Unknown is what the Provider listed, not a missing value: a listing
+	// replaces the cached state with it too.
+	if _, err := s.SyncAccountZones(ctx, z.AccountID, []dns.Zone{{Name: "example.com", ProviderID: "z1"}}); err != nil {
+		t.Fatalf("sync zones: %v", err)
+	}
+
+	if got := onlyZone(t, s); got.State != dnsprovider.HostingUnknown {
+		t.Fatalf("zone after an Unknown listing = %+v, want unknown", got)
+	}
+}
+
+// PutZone is not a listing: like a zero Serial, an Unknown Hosting State
+// keeps the cached one, unless the Provider zone ID changed.
+func TestPutZoneWithoutAHostingStateKeepsTheCachedOne(t *testing.T) {
+	ctx := context.Background()
+	s := open(t, filepath.Join(t.TempDir(), "dnscli.db"))
+
+	z := putZone(t, s, dns.Zone{Name: "example.com", ProviderID: "z1", State: dnsprovider.HostingMoved})
+
+	stored, err := s.PutZone(ctx, dns.Zone{AccountID: z.AccountID, Name: "example.com", ProviderID: "z1"})
+	if err != nil {
 		t.Fatalf("put zone: %v", err)
 	}
 
-	if _, err := s.PutZone(ctx, dns.Zone{AccountID: z.AccountID, Name: "example.com", ProviderID: "z1"}); err != nil {
+	if got := onlyZone(t, s); got.State != dnsprovider.HostingMoved || stored.State != dnsprovider.HostingMoved {
+		t.Fatalf("zone = %+v, returned %+v; want moved kept", got, stored)
+	}
+
+	if _, err := s.PutZone(ctx, dns.Zone{AccountID: z.AccountID, Name: "example.com", ProviderID: "z1", State: dnsprovider.HostingActive}); err != nil {
+		t.Fatalf("put zone: %v", err)
+	}
+
+	if got := onlyZone(t, s); got.State != dnsprovider.HostingActive {
+		t.Fatalf("zone = %+v, want active", got)
+	}
+
+	// Another zone at the Provider: the old one's state is not its.
+	if _, err := s.PutZone(ctx, dns.Zone{AccountID: z.AccountID, Name: "example.com", ProviderID: "z2"}); err != nil {
 		t.Fatalf("put zone: %v", err)
 	}
 

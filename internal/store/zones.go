@@ -17,14 +17,16 @@ import (
 // PutZone inserts a Zone, or updates the existing Zone with the same
 // Account and zone name, and returns it as stored, with its ID set.
 // A zero Serial or RefreshedAt, or no Nameservers, keeps the cached value,
-// so relisting an Account's Zones does not forget their last Refresh. The
-// Hosting State is always written: Unknown is what a Provider may list. The
-// Zone Status is never written here; it keeps the cached one.
+// so relisting an Account's Zones does not forget their last Refresh. So
+// does an Unknown Hosting State: PutZone sets a Zone's state, it does not
+// clear it. Only a listing, through SyncAccountZones, stores Unknown, which
+// is what a Provider may list. The Zone Status is never written here; it
+// keeps the cached one.
 //
 // A changed Provider zone ID is another zone at the Provider, so it
 // forgets, in the same transaction, everything cached of the old one: its
 // Records, serial, last Refresh time, nameservers and Zone Status. Only
-// what z itself sets is kept.
+// what z itself sets is stored.
 func (s *Store) PutZone(ctx context.Context, z dns.Zone) (dns.Zone, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -32,7 +34,7 @@ func (s *Store) PutZone(ctx context.Context, z dns.Zone) (dns.Zone, error) {
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	z, _, err = putZone(ctx, tx, z)
+	z, _, err = putZone(ctx, tx, z, false)
 	if err != nil {
 		return dns.Zone{}, err
 	}
@@ -51,12 +53,13 @@ type execQueryRower interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
-// putZone stores z as PutZone does, inside a transaction. replaced reports
-// that a cached Zone of that name had another Provider zone ID.
-func putZone(ctx context.Context, db execQueryRower, z dns.Zone) (stored dns.Zone, replaced bool, err error) {
+// putZone stores z as PutZone does, inside a transaction. A listing
+// stores z's Hosting State even when it is Unknown. replaced reports that
+// a cached Zone of that name had another Provider zone ID.
+func putZone(ctx context.Context, db execQueryRower, z dns.Zone, listing bool) (stored dns.Zone, replaced bool, err error) {
 	var (
 		refreshed, statusAt int64
-		ns, oldID           string
+		ns, oldID, state    string
 	)
 
 	err = db.QueryRowContext(ctx, `SELECT provider_zone_id FROM zones WHERE account_id = ? AND name = ?`,
@@ -79,19 +82,19 @@ func putZone(ctx context.Context, db execQueryRower, z dns.Zone) (stored dns.Zon
 
 	err = db.QueryRowContext(ctx, `
 		INSERT INTO zones (account_id, name, provider_zone_id, soa_serial, refreshed_at, nameservers, hosting_state)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
 		ON CONFLICT (account_id, name) DO UPDATE SET
 			provider_zone_id = excluded.provider_zone_id,
-			hosting_state    = excluded.hosting_state,
+			hosting_state    = IIF(?8 = 0 AND excluded.hosting_state = '' AND excluded.provider_zone_id = provider_zone_id, hosting_state, excluded.hosting_state),
 			soa_serial       = IIF(excluded.soa_serial = 0 AND excluded.provider_zone_id = provider_zone_id, soa_serial, excluded.soa_serial),
 			refreshed_at     = IIF(excluded.refreshed_at = 0 AND excluded.provider_zone_id = provider_zone_id, refreshed_at, excluded.refreshed_at),
 			nameservers      = IIF(excluded.nameservers = '' AND excluded.provider_zone_id = provider_zone_id, nameservers, excluded.nameservers),
 			dnssec           = IIF(excluded.provider_zone_id = provider_zone_id, dnssec, 0),
 			hsts             = IIF(excluded.provider_zone_id = provider_zone_id, hsts, 0),
 			status_at        = IIF(excluded.provider_zone_id = provider_zone_id, status_at, 0)
-		RETURNING id, soa_serial, refreshed_at, dnssec, hsts, status_at, nameservers`,
-		z.AccountID, z.Name, z.ProviderID, z.Serial, unixOrZero(z.RefreshedAt), joinNames(z.Nameservers), hostingWord(z.State),
-	).Scan(&z.ID, &z.Serial, &refreshed, &z.Status.DNSSEC, &z.Status.HSTS, &statusAt, &ns)
+		RETURNING id, soa_serial, refreshed_at, dnssec, hsts, status_at, nameservers, hosting_state`,
+		z.AccountID, z.Name, z.ProviderID, z.Serial, unixOrZero(z.RefreshedAt), joinNames(z.Nameservers), hostingWord(z.State), listing,
+	).Scan(&z.ID, &z.Serial, &refreshed, &z.Status.DNSSEC, &z.Status.HSTS, &statusAt, &ns, &state)
 	if err != nil {
 		return dns.Zone{}, false, fmt.Errorf("put zone %s: %w", z.Name, err)
 	}
@@ -99,6 +102,7 @@ func putZone(ctx context.Context, db execQueryRower, z dns.Zone) (stored dns.Zon
 	z.RefreshedAt = timeOrZero(refreshed)
 	z.StatusAt = timeOrZero(statusAt)
 	z.Nameservers = splitNames(ns)
+	z.State = hostingStateOf(state)
 
 	return z, replaced, nil
 }
@@ -118,7 +122,8 @@ type ZoneSync struct {
 
 // SyncAccountZones makes an Account's cached Zones match a Zone list from
 // its Provider, in one transaction. Each listed Zone is stored as PutZone
-// stores it, so a Zone that was already cached keeps its ID, serial, last
+// stores it, except that its Hosting State is always stored, Unknown
+// included, so a Zone that was already cached keeps its ID, serial, last
 // Refresh time and Records, unless its Provider zone ID changed. A cached Zone the list does not have is
 // deleted with its Records. It returns ErrAccountNotFound when the Account
 // was removed meanwhile.
@@ -152,7 +157,7 @@ func (s *Store) SyncAccountZones(ctx context.Context, accountID int64, zones []d
 			z.AccountID = accountID
 			listed[z.Name] = true
 
-			stored, replaced, err := putZone(ctx, conn, z)
+			stored, replaced, err := putZone(ctx, conn, z, true)
 			if err != nil {
 				return err
 			}
