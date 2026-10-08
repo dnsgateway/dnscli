@@ -339,3 +339,16 @@ func TestTurningHSTSOnWarnsThatBrowsersWillPinHTTPS(t *testing.T) {
 
 	h.assertShows("Turn HSTS on for work.example", "HTTPS", "six months")
 }
+
+func TestZoneSettingsOfAProviderTypeWithoutThemAreRefusedWithoutUnseal(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	home := mustAccount(t, s, "namecheap", "home")
+	mustZone(t, s, dns.Zone{AccountID: home.ID, Name: "home.example", ProviderID: "home.example"})
+
+	h := newAccountHarness(t, s, workZones())
+
+	h.press("S")
+
+	h.assertShows("namecheap.home cannot change Zone settings")
+	h.assertHides("Unseal", "Zone settings of")
+}
