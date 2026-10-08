@@ -26,7 +26,7 @@ type Deps struct {
 	Shortcuts *ShortcutProfile
 
 	// Providers builds a Provider for an Account from its Provider type,
-	// through internal/provider.Open.
+	// through an internal/provider.Opener the Model keeps.
 	Providers dnsprovider.Registry
 	// Resolver is the system DNS resolver the Serial Checks and the
 	// Delegation lookups ask; it also asks a Zone's own nameservers for

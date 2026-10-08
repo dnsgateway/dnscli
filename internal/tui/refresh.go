@@ -204,11 +204,11 @@ func (m *Model) startRefreshes() tea.Cmd {
 
 // refreshCmd Refreshes a Zone from its Provider in the background.
 func (m *Model) refreshCmd(z dns.Zone, a dns.Account, r *zoneRefresh) tea.Cmd {
-	ctx, s, key, newProvider, now := m.ctx, m.deps.Store, m.key, m.deps.Providers, m.deps.now
+	ctx, s, key, providers, now := m.ctx, m.deps.Store, m.key, m.providers, m.deps.now
 	q := m.serialQueryFor(z)
 
 	return func() tea.Msg {
-		res := refresh(ctx, s, key, newProvider, a, z, q, now)
+		res := refresh(ctx, s, key, providers, a, z, q, now)
 
 		return zoneRefreshedMsg{zoneID: z.ID, state: r, zone: res.zone, caps: res.caps, err: res.err,
 			statusErr: res.statusErr, serialFailed: res.serialFailed}
@@ -255,8 +255,8 @@ type refreshResult struct {
 // A Zone Status that cannot be read does not fail the Refresh: the cached
 // one is kept, and shows as older than the Refresh. Why it could not be
 // read is returned as statusErr.
-func refresh(ctx context.Context, s *store.Store, key *vault.Key, reg dnsprovider.Registry, a dns.Account, z dns.Zone, q serialQuery, now func() time.Time) refreshResult {
-	p, err := accountProvider(ctx, s, key, reg, a)
+func refresh(ctx context.Context, s *store.Store, key *vault.Key, providers *provider.Opener, a dns.Account, z dns.Zone, q serialQuery, now func() time.Time) refreshResult {
+	p, _, err := accountProvider(ctx, s, key, providers, a)
 	if err != nil {
 		return refreshResult{err: err}
 	}
@@ -312,28 +312,26 @@ func refresh(ctx context.Context, s *store.Store, key *vault.Key, reg dnsprovide
 	return res
 }
 
-// accountProvider builds the Provider for an Account with its API token,
-// opened with the data key.
-func accountProvider(ctx context.Context, s *store.Store, key *vault.Key, reg dnsprovider.Registry, a dns.Account) (dnsprovider.Provider, error) {
-	if _, ok := reg[a.Provider]; !ok {
-		return nil, fmt.Errorf("Provider type %q is not available in this build", a.Provider)
-	}
-
+// accountProvider opens the Provider for an Account with its API token,
+// unsealed with the data key, and returns the token too.
+func accountProvider(ctx context.Context, s *store.Store, key *vault.Key, providers *provider.Opener, a dns.Account) (dnsprovider.Provider, string, error) {
 	sealed, err := s.AccountSecret(ctx, a.ID)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	if sealed == nil {
-		return nil, errors.New("this Account has no API token")
+		return nil, "", errors.New("this Account has no API token")
 	}
 
 	token, err := key.Open(sealed, secretLabel(a))
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
-	return provider.Open(ctx, reg, a.Provider, string(token))
+	p, err := providers.Open(ctx, a.Provider, string(token))
+
+	return p, string(token), err
 }
 
 // zoneRefreshed records a Refresh result and starts the next queued one.

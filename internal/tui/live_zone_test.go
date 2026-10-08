@@ -234,6 +234,28 @@ func nameserversCalls(f *fakeProvider) int {
 	return n
 }
 
+func TestTheAccountsNameserversAreAskedOncePerSession(t *testing.T) {
+	f := newFake().
+		AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1"}).
+		AddZone(dns.Zone{Name: "work.test", ProviderID: "zw2"})
+	f.SetNameservers(cruzDee...)
+
+	h, _ := addWorkAccount(t, f, &fakeResolver{ns: map[string][]string{"work.example": cruzDee}})
+
+	for range 2 {
+		h.press("shift+tab", "L")
+		h.assertShows("Re-listed cloudflare.work")
+		h.press("tab")
+	}
+
+	h.assertLive("work.example", true)
+
+	// Asking costs a request, such as Namecheap's, of a small budget.
+	if n := nameserversCalls(f); n != 1 {
+		t.Fatalf("Account calls = %d, want 1", n)
+	}
+}
+
 func TestAZoneListedWithoutNameserversExpectsTheOnesItsAccountsOtherZonesShare(t *testing.T) {
 	f := newFake().
 		AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1"}).

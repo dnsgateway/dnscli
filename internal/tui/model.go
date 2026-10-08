@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
+	"github.com/sergelogvinov/dnscli/internal/provider"
 	"github.com/sergelogvinov/dnscli/internal/vault"
 )
 
@@ -34,6 +35,10 @@ type Model struct {
 	deps       Deps
 	keys       keymap
 	profileErr error // the injected Shortcut Profile was invalid
+
+	// providers opens the Accounts' Providers from deps.Providers, and
+	// keeps what it asked them for the session.
+	providers *provider.Opener
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -141,6 +146,7 @@ func New(ctx context.Context, deps Deps) *Model {
 
 	return &Model{
 		deps:       deps,
+		providers:  provider.NewOpener(deps.Providers),
 		keys:       newKeymap(profile),
 		profileErr: profileErr,
 		ctx:        ctx,

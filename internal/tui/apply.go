@@ -256,10 +256,10 @@ func (m *Model) applyChanges() tea.Cmd {
 	m.applying[z.ID] = true
 	p.busy = true
 
-	ctx, s, key, reg := m.ctx, m.deps.Store, m.key, m.deps.Providers
+	ctx, s, key, providers := m.ctx, m.deps.Store, m.key, m.providers
 
 	return func() tea.Msg {
-		return apply(ctx, s, key, reg, a, cs)
+		return apply(ctx, s, key, providers, a, cs)
 	}
 }
 
@@ -270,10 +270,10 @@ func (m *Model) applyChanges() tea.Cmd {
 //
 // It stores the Zone's new serial when the Provider reports it. Else the
 // model polls the Zone's nameservers for it afterwards (serialPoll).
-func apply(ctx context.Context, s *store.Store, key *vault.Key, reg dnsprovider.Registry, a dns.Account, cs dns.Changeset) changesAppliedMsg {
+func apply(ctx context.Context, s *store.Store, key *vault.Key, providers *provider.Opener, a dns.Account, cs dns.Changeset) changesAppliedMsg {
 	msg := changesAppliedMsg{zoneID: cs.Zone.ID, sent: cs}
 
-	p, err := accountProvider(ctx, s, key, reg, a)
+	p, _, err := accountProvider(ctx, s, key, providers, a)
 	if err != nil {
 		msg.err = err
 
