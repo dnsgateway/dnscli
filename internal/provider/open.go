@@ -90,7 +90,9 @@ func (o *Opener) Open(ctx context.Context, typ string, fields map[string]string)
 
 // Verify builds the Provider of type typ from fields as they are, without
 // looking for a Tenant, and asks it for its Account, which proves the
-// credentials work. It is the check made before an Account is saved.
+// credentials work. It is the check made before an Account is saved. The
+// nameservers the Account expects are kept for the credentials, as
+// Nameservers would keep them.
 func (o *Opener) Verify(ctx context.Context, typ string, fields map[string]string) error {
 	f, ok := o.reg[typ]
 	if !ok || f.New == nil {
@@ -102,9 +104,14 @@ func (o *Opener) Verify(ctx context.Context, typ string, fields map[string]strin
 		return err
 	}
 
-	_, err = p.Account(ctx)
+	info, err := p.Account(ctx)
+	if err != nil {
+		return err
+	}
 
-	return err
+	o.nameservers.get(ctx, credentialsKey(typ, fields), func() ([]string, bool) { return info.Nameservers, true })
+
+	return nil
 }
 
 // Nameservers are the nameservers the Account of p, opened with typ and

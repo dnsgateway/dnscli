@@ -406,3 +406,28 @@ func TestVerifyAsksTheAccountWithTheFieldsAsTyped(t *testing.T) {
 		t.Errorf("Verify of a good token = %v", err)
 	}
 }
+
+func TestVerifiedCredentialsKeepTheirAccountsNameservers(t *testing.T) {
+	f := providertest.New()
+	f.SetAccount(dnsprovider.AccountInfo{Nameservers: []string{"ns1.example.net"}})
+
+	o := provider.NewOpener(dnsprovider.Registry{"fake": f.Factory()})
+	ctx := context.Background()
+
+	if err := o.Verify(ctx, "fake", creds("tok")); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+
+	p, err := o.Open(ctx, "fake", creds("tok"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	if ns, err := o.Nameservers(ctx, p, "fake", creds("tok")); err != nil || !slices.Equal(ns, []string{"ns1.example.net"}) {
+		t.Fatalf("Nameservers = %q, %v; want the Account's", ns, err)
+	}
+
+	if n := count(f, providertest.OpAccount); n != 1 {
+		t.Errorf("Account asked %d times, want once, to verify", n)
+	}
+}
