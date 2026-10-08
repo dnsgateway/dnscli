@@ -363,10 +363,17 @@ func (m *Model) updateAccount(old, a dns.Account, typed map[string]string) tea.C
 	}
 }
 
-// notAccepted reports credentials the Provider refused.
-func notAccepted(err error) error {
-	return fmt.Errorf("the Provider did not accept the credentials: %w", err)
+// notAcceptedError reports credentials the Provider refused when they
+// were verified.
+type notAcceptedError struct{ err error }
+
+func notAccepted(err error) error { return notAcceptedError{err} }
+
+func (e notAcceptedError) Error() string {
+	return "The Provider did not accept the credentials: " + e.err.Error()
 }
+
+func (e notAcceptedError) Unwrap() error { return e.err }
 
 // accountEdited reports an edit. A saved Account replaces the one this
 // session holds at once, not only when the cache reloads: its API token is
@@ -400,6 +407,10 @@ func (m *Model) accountSaveFailed(prefix string, a dns.Account, err error) {
 
 	f.busy = false
 	f.err = prefix + err.Error()
+
+	if errors.As(err, new(notAcceptedError)) {
+		f.err = err.Error()
+	}
 
 	if errors.Is(err, store.ErrAccountExists) {
 		f.err = a.Label() + " already exists."
