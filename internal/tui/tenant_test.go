@@ -333,3 +333,26 @@ func TestAClosedTenantPickerIsOpenedAgainOnTheNextUse(t *testing.T) {
 		t.Errorf("Tenants listed %d times, want once this session", n)
 	}
 }
+
+func TestEditingInATokenReachingSeveralTenantsAsksWhichAndKeepsTheName(t *testing.T) {
+	f := refreshZones()
+	f.SetTenants(twoTenants...)
+
+	h, s := newUpgradedHarness(t, f)
+	h.press("e")
+	h.unsealWith(passphrase)
+	h.assertShows("Edit Account cloudflare.old")
+
+	// A new API token, then Save.
+	h.press("down")
+	h.typeText("tok2")
+	h.press("down", "enter")
+
+	h.assertShows("Tenant", "Acme Ltd", "Side project")
+	h.press("enter")
+	h.assertShows("Saved cloudflare.old.")
+
+	if got, want := storedFields(t, s, accountLabeled(t, s, "cloudflare.old")), map[string]string{"token": "tok2", "account": acmeTenant}; !maps.Equal(got, want) {
+		t.Errorf("stored credentials = %v, want %v", got, want)
+	}
+}
