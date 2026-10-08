@@ -102,13 +102,26 @@ func TestTurningDNSSECOnAsksToConfirmThenCachesThePendingStatusTheProviderReturn
 	}
 }
 
+func TestZoneSettingsAreNotOfferedWithoutUnsealForAProviderTypeNotDeclaringThem(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	status := dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Off, HSTS: dnsprovider.Off}
+	withZoneStatus(t, s, "work.example", status)
+
+	h := newAccountHarness(t, s, settingsFake(status, false))
+
+	h.press("S")
+
+	h.assertShows("cloudflare.work cannot change Zone settings")
+	h.assertHides("Unseal", "Zone settings of work.example")
+}
+
 func TestZoneSettingsAreNotOfferedForAProviderThatCannotChangeThem(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
 	status := dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Off, HSTS: dnsprovider.Off}
 	withZoneStatus(t, s, "work.example", status)
 
 	f := settingsFake(status, false)
-	h := newAccountHarness(t, s, f)
+	h := newHarnessWith(t, s, tui.Deps{Providers: f.declaring(dnsprovider.CapZoneUpdater), UnsealMethod: fastPassphrase()})
 
 	h.press("S")
 	h.unsealWith(passphrase)
@@ -290,7 +303,7 @@ func TestAZoneSettingWrittenBeforeTheProviderFailsIsCachedWithTheError(t *testin
 
 	fake := workZones().Factory()
 	h := newHarnessWith(t, s, tui.Deps{
-		Providers: dnsprovider.Registry{"cloudflare": {Fields: fake.Fields, New: func(m map[string]string, opts ...dnsprovider.Option) (dnsprovider.Provider, error) {
+		Providers: dnsprovider.Registry{"cloudflare": {Fields: fake.Fields, Capabilities: []dnsprovider.Capability{dnsprovider.CapZoneUpdater}, New: func(m map[string]string, opts ...dnsprovider.Option) (dnsprovider.Provider, error) {
 			p, err := fake.New(m, opts...)
 
 			return partialUpdater{p}, err

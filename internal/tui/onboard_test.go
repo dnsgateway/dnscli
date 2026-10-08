@@ -10,6 +10,7 @@ import (
 	"github.com/dnsgateway/dnsprovider/providertest"
 
 	"github.com/sergelogvinov/dnscli/internal/store"
+	"github.com/sergelogvinov/dnscli/internal/tui"
 )
 
 // onboardFake is workZones as a ZoneCreator, whose new Zones are assigned
@@ -189,12 +190,25 @@ func TestOnboardingIsRefusedWithoutUnsealForAProviderTypeThatCannot(t *testing.T
 	h.assertHides("Unseal", "Onboard a zone at")
 }
 
-func TestOnboardingIsRefusedForAProviderThatCannot(t *testing.T) {
+func TestOnboardingIsRefusedWithoutUnsealForAProviderTypeNotDeclaringIt(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
 	f := onboardFake()
 	f.SetZoneCreator(false)
 
 	h := newAccountHarness(t, s, f)
+
+	h.press("i")
+
+	h.assertShows("cloudflare.work cannot Onboard a zone")
+	h.assertHides("Unseal", "Onboard a zone at")
+}
+
+func TestOnboardingIsRefusedForAProviderThatCannotThoughItsTypeDeclaresIt(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	f := onboardFake()
+	f.SetZoneCreator(false)
+
+	h := newHarnessWith(t, s, tui.Deps{Providers: f.declaring(dnsprovider.CapZoneCreator), UnsealMethod: fastPassphrase()})
 
 	h.press("i")
 	h.unsealWith(passphrase)

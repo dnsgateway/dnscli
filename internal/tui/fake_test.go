@@ -247,3 +247,15 @@ func (fb *fieldBuilds) last() map[string]string {
 
 	return maps.Clone(fb.built[len(fb.built)-1])
 }
+
+// declaring registers the fake as "cloudflare", its Factory declaring
+// caps whatever the fake implements: a Provider type that says it can,
+// whose Provider then cannot.
+func (f *fakeProvider) declaring(caps ...dnsprovider.Capability) dnsprovider.Registry {
+	r := f.registry()
+	c := r["cloudflare"]
+	c.Capabilities = caps
+	r["cloudflare"] = c
+
+	return r
+}

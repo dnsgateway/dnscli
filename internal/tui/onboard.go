@@ -76,7 +76,7 @@ func (m *Model) openOnboard() tea.Cmd {
 	// Whether the Provider can is known only once it is opened, which
 	// needs secrets; a Provider type that cannot is refused before asking
 	// for them.
-	if !onboardType(a.Provider) {
+	if !m.accountCan(a, dnsprovider.CapZoneCreator) {
 		m.notice = notice{text: cannotOnboard(a), err: true}
 
 		return nil
@@ -99,12 +99,11 @@ func (m *Model) onboardAccount() (dns.Account, bool) {
 	return dns.Account{}, false
 }
 
-// onboardType reports whether Provider type typ may Onboard a zone name.
-// The module says so only of a Provider built with credentials
-// (dnsprovider.CanCreateZone), not of its Factory: dnscli knows the types
-// that do, Cloudflare's alone, and still checks the Provider once open.
-func onboardType(typ string) bool {
-	return typ == "cloudflare"
+// accountCan reports whether the Factory of an Account's Provider type
+// declares the Zone write c, which is known before the Provider is
+// opened; the Provider, once open, is checked still.
+func (m *Model) accountCan(a dns.Account, c dnsprovider.Capability) bool {
+	return m.deps.Providers[a.Provider].Can(c)
 }
 
 // cannotOnboard is the notice for an Account whose Provider cannot

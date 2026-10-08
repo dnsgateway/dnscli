@@ -142,21 +142,13 @@ func (m *Model) openZoneSettings() tea.Cmd {
 	// Whether the Provider can is known only once it is opened, which
 	// needs secrets; a Provider type without Zone settings is refused
 	// before asking for them.
-	if a, ok := m.account(z.AccountID); ok && !zoneSettingsType(a.Provider) {
+	if a, ok := m.account(z.AccountID); ok && !m.accountCan(a, dnsprovider.CapZoneUpdater) {
 		m.notice = notice{text: cannotChangeZoneSettings(a), err: true}
 
 		return nil
 	}
 
 	return m.withSecrets(func() tea.Cmd { return m.openZoneSettingsOf(z.ID) })
-}
-
-// zoneSettingsType reports whether Provider type typ may change Zone
-// settings. The module says so only of a Provider built with credentials
-// (dnsprovider.CanUpdateZone), not of its Factory: dnscli knows the types
-// that do, Cloudflare's alone, and still checks the Provider once open.
-func zoneSettingsType(typ string) bool {
-	return typ == "cloudflare"
 }
 
 // cannotChangeZoneSettings is the notice for an Account whose Provider
