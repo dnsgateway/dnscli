@@ -394,7 +394,7 @@ func (m *Model) discoverZones(a dns.Account, relist bool) tea.Cmd {
 // does an empty list: an API token without zone read permission lists no
 // Zones, which must not drop the Account's cache.
 func discover(ctx context.Context, s *store.Store, key *vault.Key, providers *provider.Opener, a dns.Account) (int, store.ZoneSync, error) {
-	p, token, err := accountProvider(ctx, s, key, providers, a)
+	p, fields, err := accountProvider(ctx, s, key, providers, a)
 	if err != nil {
 		return 0, store.ZoneSync{}, err
 	}
@@ -407,7 +407,7 @@ func discover(ctx context.Context, s *store.Store, key *vault.Key, providers *pr
 	zones := provider.CacheZones(listed)
 
 	expectAccountNameservers(zones, func() ([]string, error) {
-		return providers.Nameservers(ctx, p, a.Provider, token)
+		return providers.Nameservers(ctx, p, a.Provider, fields)
 	})
 
 	sync, err := s.SyncAccountZones(ctx, a.ID, zones)

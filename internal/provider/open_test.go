@@ -61,7 +61,14 @@ func TestOldSingleTokensBuildWorkingProviders(t *testing.T) {
 			// Cloudflare lists the Tenants the token reaches while it is
 			// opened, and runs unscoped when it may not; the others are
 			// first called with Account.
-			p, err := provider.NewOpener(providers.Registry(), dnsprovider.WithBaseURL(base)).Open(context.Background(), tc.typ, tc.token)
+			o := provider.NewOpener(providers.Registry(), dnsprovider.WithBaseURL(base))
+
+			fields, err := o.Credentials(tc.typ, []byte(tc.token))
+			if err != nil {
+				t.Fatalf("Credentials: %v", err)
+			}
+
+			p, err := o.Open(context.Background(), tc.typ, fields)
 			if err == nil {
 				_, err = p.Account(context.Background())
 			}
@@ -89,7 +96,13 @@ func TestMalformedOldTokensAreRefusedWithTheirShape(t *testing.T) {
 		{"namecheap", "user:key:not-an-ip", "IPv4"},
 		{"cloudflare", "", "token"},
 	} {
-		_, err := provider.NewOpener(providers.Registry()).Open(context.Background(), tc.typ, tc.token)
+		o := provider.NewOpener(providers.Registry())
+
+		fields, err := o.Credentials(tc.typ, []byte(tc.token))
+		if err == nil {
+			_, err = o.Open(context.Background(), tc.typ, fields)
+		}
+
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("Open(%s, %q) error = %v, want one naming %s", tc.typ, tc.token, err, tc.want)
 		}
@@ -97,7 +110,7 @@ func TestMalformedOldTokensAreRefusedWithTheirShape(t *testing.T) {
 }
 
 func TestOpenRefusesAnUnknownProviderType(t *testing.T) {
-	if _, err := provider.NewOpener(providers.Registry()).Open(context.Background(), "route53", "tok"); err == nil {
+	if _, err := provider.NewOpener(providers.Registry()).Open(context.Background(), "route53", creds("tok")); err == nil {
 		t.Error("Open(route53) succeeded, want an error")
 	}
 }
@@ -158,10 +171,15 @@ func count(f *providertest.Provider, op providertest.Op) int {
 	return n
 }
 
+// creds is the field map of a Provider that takes one API token.
+func creds(token string) map[string]string {
+	return map[string]string{"token": token}
+}
+
 func open(t *testing.T, o *provider.Opener, token string) {
 	t.Helper()
 
-	if _, err := o.Open(context.Background(), "tenanted", token); err != nil {
+	if _, err := o.Open(context.Background(), "tenanted", creds(token)); err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 }
@@ -246,7 +264,7 @@ func TestConcurrentOpensListTheTenantsOnce(t *testing.T) {
 		go func() {
 			defer wg.Done()
 
-			if _, err := o.Open(context.Background(), "tenanted", "tok"); err != nil {
+			if _, err := o.Open(context.Background(), "tenanted", creds("tok")); err != nil {
 				t.Errorf("Open: %v", err)
 			}
 		}()
@@ -274,7 +292,7 @@ func TestAProviderWithoutTenantsIsBuiltAsIs(t *testing.T) {
 	f := providertest.New()
 
 	reg := dnsprovider.Registry{"fake": f.Factory()}
-	if _, err := provider.NewOpener(reg).Open(context.Background(), "fake", "tok"); err != nil {
+	if _, err := provider.NewOpener(reg).Open(context.Background(), "fake", creds("tok")); err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 
@@ -291,13 +309,13 @@ func TestTheAccountNameserversAreAskedOncePerToken(t *testing.T) {
 	o := provider.NewOpener(dnsprovider.Registry{"fake": f.Factory()})
 	ctx := context.Background()
 
-	p, err := o.Open(ctx, "fake", "tok")
+	p, err := o.Open(ctx, "fake", creds("tok"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 
 	for range 3 {
-		ns, err := o.Nameservers(ctx, p, "fake", "tok")
+		ns, err := o.Nameservers(ctx, p, "fake", creds("tok"))
 		if err != nil || !slices.Equal(ns, []string{"ns1.example.net", "ns2.example.net"}) {
 			t.Fatalf("Nameservers = %q, %v; want the Account's", ns, err)
 		}
@@ -316,18 +334,75 @@ func TestAFailedNameserverReadIsAskedAgain(t *testing.T) {
 	o := provider.NewOpener(dnsprovider.Registry{"fake": f.Factory()})
 	ctx := context.Background()
 
-	p, err := o.Open(ctx, "fake", "tok")
+	p, err := o.Open(ctx, "fake", creds("tok"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 
-	if _, err := o.Nameservers(ctx, p, "fake", "tok"); !errors.Is(err, dnsprovider.ErrRateLimited) {
+	if _, err := o.Nameservers(ctx, p, "fake", creds("tok")); !errors.Is(err, dnsprovider.ErrRateLimited) {
 		t.Fatalf("Nameservers: err = %v, want ErrRateLimited", err)
 	}
 
 	f.Fail(providertest.OpAccount, nil)
 
-	if ns, err := o.Nameservers(ctx, p, "fake", "tok"); err != nil || !slices.Equal(ns, []string{"ns1.example.net"}) {
+	if ns, err := o.Nameservers(ctx, p, "fake", creds("tok")); err != nil || !slices.Equal(ns, []string{"ns1.example.net"}) {
 		t.Errorf("Nameservers after the failure = %q, %v; want the Account's", ns, err)
+	}
+}
+
+func TestAStoredTenantScopesTheProviderWithoutListingTenants(t *testing.T) {
+	r := newTenanted(dnsprovider.Tenant{ID: tenantID}, dnsprovider.Tenant{ID: "b2"})
+
+	if _, err := provider.NewOpener(r.registry()).Open(context.Background(), "tenanted", map[string]string{"token": "tok", "scope": "b2"}); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	if b := r.builds(); !slices.Equal(b, []string{"b2"}) {
+		t.Errorf("built with Tenants %q, want the stored one only", b)
+	}
+
+	if n := count(r.fake, providertest.OpTenants); n != 0 {
+		t.Errorf("Tenants listed %d times, want none", n)
+	}
+}
+
+func TestOpenDoesNotChangeTheFieldMapItIsGiven(t *testing.T) {
+	r := newTenanted(dnsprovider.Tenant{ID: tenantID})
+	fields := creds("tok")
+
+	open := func() {
+		if _, err := provider.NewOpener(r.registry()).Open(context.Background(), "tenanted", fields); err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+	}
+
+	open()
+
+	if len(fields) != 1 {
+		t.Errorf("Open changed its field map to %v", fields)
+	}
+}
+
+func TestVerifyAsksTheAccountWithTheFieldsAsTyped(t *testing.T) {
+	r := newTenanted(dnsprovider.Tenant{ID: tenantID})
+	r.fake.Fail(providertest.OpAccount, dnsprovider.ErrUnauthorized)
+
+	err := provider.NewOpener(r.registry()).Verify(context.Background(), "tenanted", creds("bad"))
+	if !errors.Is(err, dnsprovider.ErrUnauthorized) {
+		t.Fatalf("Verify = %v, want ErrUnauthorized", err)
+	}
+
+	if b := r.builds(); !slices.Equal(b, []string{""}) {
+		t.Errorf("built with Tenants %q, want one build as typed", b)
+	}
+
+	if n := count(r.fake, providertest.OpTenants); n != 0 {
+		t.Errorf("Tenants listed %d times, want none", n)
+	}
+
+	r.fake.Fail(providertest.OpAccount, nil)
+
+	if err := provider.NewOpener(r.registry()).Verify(context.Background(), "tenanted", creds("good")); err != nil {
+		t.Errorf("Verify of a good token = %v", err)
 	}
 }

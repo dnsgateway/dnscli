@@ -312,26 +312,37 @@ func refresh(ctx context.Context, s *store.Store, key *vault.Key, providers *pro
 	return res
 }
 
-// accountProvider opens the Provider for an Account with its API token,
-// unsealed with the data key, and returns the token too.
-func accountProvider(ctx context.Context, s *store.Store, key *vault.Key, providers *provider.Opener, a dns.Account) (dnsprovider.Provider, string, error) {
+// accountProvider opens the Provider for an Account with its credentials,
+// unsealed with the data key, and returns them too.
+func accountProvider(ctx context.Context, s *store.Store, key *vault.Key, providers *provider.Opener, a dns.Account) (dnsprovider.Provider, map[string]string, error) {
+	fields, err := accountCredentials(ctx, s, key, providers, a)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if fields == nil {
+		return nil, nil, errors.New("this Account has no API token")
+	}
+
+	p, err := providers.Open(ctx, a.Provider, fields)
+
+	return p, fields, err
+}
+
+// accountCredentials are an Account's credentials, unsealed with the data
+// key and read into its Provider's field map; nil when it has none.
+func accountCredentials(ctx context.Context, s *store.Store, key *vault.Key, providers *provider.Opener, a dns.Account) (map[string]string, error) {
 	sealed, err := s.AccountSecret(ctx, a.ID)
+	if err != nil || sealed == nil {
+		return nil, err
+	}
+
+	plain, err := key.Open(sealed, secretLabel(a))
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 
-	if sealed == nil {
-		return nil, "", errors.New("this Account has no API token")
-	}
-
-	token, err := key.Open(sealed, secretLabel(a))
-	if err != nil {
-		return nil, "", err
-	}
-
-	p, err := providers.Open(ctx, a.Provider, string(token))
-
-	return p, string(token), err
+	return providers.Credentials(a.Provider, plain)
 }
 
 // zoneRefreshed records a Refresh result and starts the next queued one.

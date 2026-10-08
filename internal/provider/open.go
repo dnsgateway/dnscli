@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"sync"
 
@@ -12,9 +13,10 @@ import (
 )
 
 // Opener builds the Providers of Accounts from a Registry, and keeps, for
-// each API token, what it had to ask the Provider: the Tenant the token is
-// scoped to and the nameservers its Account expects. Each is asked once
-// per token for the Opener's life, however many Opens run at once.
+// each Account's credentials, what it had to ask the Provider: the Tenant
+// they are scoped to and the nameservers their Account expects. Each is
+// asked once per credentials for the Opener's life, however many Opens
+// run at once.
 type Opener struct {
 	reg  dnsprovider.Registry
 	opts []dnsprovider.Option
@@ -29,31 +31,29 @@ func NewOpener(reg dnsprovider.Registry, opts ...dnsprovider.Option) *Opener {
 	return &Opener{reg: reg, opts: opts}
 }
 
-// Open builds the Provider of type typ for an Account from its stored API
-// token, read into the Provider's fields as Fields reads it.
+// Open builds the Provider of type typ for an Account from its field
+// map, as Credentials reads it. It does not change fields.
 //
 // A Provider that lists Tenants and takes one in a field marked Tenant is
-// scoped to the only Tenant the token reaches. A token that reaches none
-// or several, or may not list them, leaves it unscoped, acting on every
-// Zone the token reaches, since dnscli stores no Tenant yet. The outcome
-// is kept for the token, so the Tenants are listed once.
-func (o *Opener) Open(ctx context.Context, typ, token string) (dnsprovider.Provider, error) {
+// scoped to the Tenant stored in that field. Without one, it is scoped to
+// the only Tenant the credentials reach; credentials that reach none or
+// several, or may not list them, leave it unscoped, acting on every Zone
+// they reach. The outcome is kept for the credentials, so the Tenants are
+// listed once.
+func (o *Opener) Open(ctx context.Context, typ string, fields map[string]string) (dnsprovider.Provider, error) {
 	f, ok := o.reg[typ]
 	if !ok || f.New == nil {
 		return nil, fmt.Errorf("Provider type %q is not available in this build", typ)
 	}
 
-	fields, err := oldTokenFields(typ, f.Fields, token)
-	if err != nil {
-		return nil, err
-	}
+	fields = maps.Clone(fields)
 
 	i := slices.IndexFunc(f.Fields, func(fd dnsprovider.Field) bool { return fd.Tenant })
-	if i < 0 {
+	if i < 0 || fields[f.Fields[i].Name] != "" {
 		return f.New(fields, o.opts...)
 	}
 
-	tenantField, key := f.Fields[i].Name, tokenKey(typ, token)
+	tenantField, key := f.Fields[i].Name, credentialsKey(typ, fields)
 
 	if id, ok := o.tenants.kept(key); ok {
 		if id != "" {
@@ -76,7 +76,7 @@ func (o *Opener) Open(ctx context.Context, typ, token string) (dnsprovider.Provi
 	id, _ := o.tenants.get(ctx, key, func() (string, bool) {
 		id := onlyTenant(ctx, lister)
 
-		// A cancelled list says nothing of the token.
+		// A cancelled list says nothing of the credentials.
 		return id, ctx.Err() == nil
 	})
 	if id == "" {
@@ -88,13 +88,32 @@ func (o *Opener) Open(ctx context.Context, typ, token string) (dnsprovider.Provi
 	return f.New(fields, o.opts...)
 }
 
+// Verify builds the Provider of type typ from fields as they are, without
+// looking for a Tenant, and asks it for its Account, which proves the
+// credentials work. It is the check made before an Account is saved.
+func (o *Opener) Verify(ctx context.Context, typ string, fields map[string]string) error {
+	f, ok := o.reg[typ]
+	if !ok || f.New == nil {
+		return fmt.Errorf("Provider type %q is not available in this build", typ)
+	}
+
+	p, err := f.New(maps.Clone(fields), o.opts...)
+	if err != nil {
+		return err
+	}
+
+	_, err = p.Account(ctx)
+
+	return err
+}
+
 // Nameservers are the nameservers the Account of p, opened with typ and
-// token, expects Delegation to name, from its Account call. They are
-// asked once per token: a failure is not kept, and is asked again.
-func (o *Opener) Nameservers(ctx context.Context, p dnsprovider.Provider, typ, token string) ([]string, error) {
+// fields, expects Delegation to name, from its Account call. They are
+// asked once per credentials: a failure is not kept, and is asked again.
+func (o *Opener) Nameservers(ctx context.Context, p dnsprovider.Provider, typ string, fields map[string]string) ([]string, error) {
 	var err error
 
-	ns, ok := o.nameservers.get(ctx, tokenKey(typ, token), func() ([]string, bool) {
+	ns, ok := o.nameservers.get(ctx, credentialsKey(typ, fields), func() ([]string, bool) {
 		var info dnsprovider.AccountInfo
 
 		info, err = p.Account(ctx)
@@ -111,14 +130,15 @@ func (o *Opener) Nameservers(ctx context.Context, p dnsprovider.Provider, typ, t
 	return slices.Clone(ns), err
 }
 
-// tokenKey keys what is kept for a token without holding the token itself.
-func tokenKey(typ, token string) string {
-	sum := sha256.Sum256([]byte(typ + "\x00" + token))
+// credentialsKey keys what is kept for an Account's credentials without
+// holding them.
+func credentialsKey(typ string, fields map[string]string) string {
+	sum := sha256.Sum256(append([]byte(typ+"\x00"), EncodeCredentials(fields)...))
 
 	return string(sum[:])
 }
 
-// onlyTenant is the one Tenant a token reaches; empty when it reaches
+// onlyTenant is the one Tenant credentials reach; empty when they reach
 // none or several, or may not list them.
 func onlyTenant(ctx context.Context, l dnsprovider.TenantLister) string {
 	list, err := l.Tenants(ctx)
