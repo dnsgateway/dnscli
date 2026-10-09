@@ -153,6 +153,10 @@ func (m *Model) forgetZones(ids []int64) {
 			m.zoneSettings = nil
 		}
 
+		if m.offboard != nil && m.offboard.zone.ID == id {
+			m.offboard = nil
+		}
+
 		if m.open != nil && m.open.ID == id {
 			m.open = nil
 			m.records = nil

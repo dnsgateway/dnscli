@@ -215,9 +215,11 @@ func TestRemovingAnAccountNeedsTheAccountsPane(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
 	h := newAccountHarness(t, s, newFake())
 
+	// Delete, in the Domains pane, Offboards the Zone, which this
+	// Provider cannot.
 	h.press("d")
 
-	h.assertShows("Accounts in the Accounts pane")
+	h.assertShows("cannot Offboard a Zone")
 	h.assertHides("Remove Account", "Passphrase")
 }
 

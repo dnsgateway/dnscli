@@ -1,0 +1,512 @@
+package tui
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"slices"
+	"strings"
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/dnsgateway/dnsprovider"
+
+	"github.com/sergelogvinov/dnscli/internal/dns"
+	"github.com/sergelogvinov/dnscli/internal/provider"
+	"github.com/sergelogvinov/dnscli/internal/store"
+)
+
+// offboardDialog is the dialog that Offboards the Zone highlighted in the
+// Domains pane, a Zone write that cannot be undone: the user confirms
+// that it stops DNS hosting of the Zone at its Account and drops its
+// Records there, leaving the domain's registration alone. The Live Zone
+// is never Offboarded: it is refused when the dialog would open, and
+// again, from a Delegation resolved anew and the Zone read anew from its
+// Provider, just before the delete is sent.
+type offboardDialog struct {
+	zone    dns.Zone
+	account dns.Account
+	// p is the Account's Provider, a dnsprovider.ZoneDeleter.
+	p    dnsprovider.Provider
+	busy bool // the Zone is being Offboarded
+	// cancel stops the Offboarding in flight; nil when none is.
+	cancel context.CancelFunc
+	err    string
+}
+
+// offboardOpenedMsg reports the Provider opened for the Offboard dialog;
+// p is nil when it failed.
+type offboardOpenedMsg struct {
+	zone    dns.Zone
+	account dns.Account
+	p       dnsprovider.Provider
+	err     error
+}
+
+// zoneOffboardedMsg reports an Offboarding.
+type zoneOffboardedMsg struct {
+	zone    dns.Zone
+	account dns.Account
+	// refused is why the Zone was not Offboarded after all: it is, or may
+	// be, the Live Zone. Nothing was sent.
+	refused error
+	// gone is set when the Provider no longer had the Zone: it was
+	// Offboarded, but not, as far as dnscli can tell, by this delete.
+	gone bool
+	// err is why the Offboarding failed.
+	err error
+	// sent is set when the delete was sent, so it may have been taken.
+	sent bool
+	// cancelled is set when the user cancelled it.
+	cancelled bool
+	// held is set when reading back a delete whose answer was lost found
+	// the Zone still at the Provider.
+	held bool
+	// readBack is why reading back a delete whose answer was lost failed.
+	readBack error
+	// saveErr is why the Zone could not be removed from the cache, after
+	// its Provider Offboarded it.
+	saveErr error
+}
+
+// openOffboard opens the Offboard dialog for the Zone highlighted in the
+// Domains pane. Offboarding is a Zone write: a sealed session Unseals
+// first, the Account's Provider must be able to Offboard, and the Zone
+// must be known not to be the Live Zone.
+func (m *Model) openOffboard() tea.Cmd {
+	if len(m.visible) == 0 {
+		m.notice = notice{text: "Highlight a Zone in the Domains pane first.", err: true}
+
+		return nil
+	}
+
+	z := m.visible[m.cursor[paneDomains]]
+
+	a, ok := m.account(z.AccountID)
+	if !ok {
+		return nil
+	}
+
+	// Whether the Provider can is known only once it is opened, which
+	// needs secrets; a Provider type that cannot is refused before asking
+	// for them.
+	if !m.accountCan(a, dnsprovider.CapZoneDeleter) {
+		m.notice = notice{text: cannotOffboard(a), err: true}
+
+		return nil
+	}
+
+	if err := m.offboardRefusal(z, a); err != nil {
+		m.notice = notice{text: err.Error(), err: true}
+
+		return nil
+	}
+
+	return m.withSecrets(func() tea.Cmd { return m.openOffboardOf(z.ID) })
+}
+
+// cannotOffboard is the notice for an Account whose Provider cannot
+// Offboard a Zone.
+func cannotOffboard(a dns.Account) string {
+	return a.Label() + " cannot Offboard a Zone: its Provider does not stop hosting a Zone apart from its domain's registration."
+}
+
+// offboardRefusal says why the session may not Offboard z, from what it
+// knows of z's Delegation: z is the Live Zone, may be, or whether it is
+// is unknown. nil when z is known not to be the Live Zone.
+func (m *Model) offboardRefusal(z dns.Zone, a dns.Account) error {
+	if m.deps.Resolver == nil {
+		return liveUnknownError(z.Name, "dnscli has no resolver to read its Delegation with")
+	}
+
+	d, ok := m.delegations[nameKey(z.Name)]
+
+	switch {
+	case !ok || d.state == lookupQueued || d.state == lookupResolving:
+		return liveUnknownError(z.Name, "its Delegation is not resolved yet")
+	case d.state == lookupFailed:
+		return liveUnknownError(z.Name, "its Delegation could not be resolved: "+d.err.Error())
+	}
+
+	return liveRefusal(z.Name, a, z.Nameservers, d.ns)
+}
+
+// liveRefusal says why a Zone of name at Account a, with nameservers ns,
+// may not be Offboarded while the Delegation names delegated, a nameSet:
+// its nameservers are the delegated ones, so it is the Live Zone; it
+// shares one with them, so its Provider may still answer for the name;
+// or they are not known, so whether it is the Live Zone is not. nil when
+// it may.
+func liveRefusal(name string, a dns.Account, ns, delegated []string) error {
+	if len(ns) == 0 {
+		return liveUnknownError(name, "the nameservers "+a.Label()+" assigned it are not known: re-list the Account")
+	}
+
+	ns = nameSet(ns)
+
+	if slices.Equal(ns, delegated) {
+		return fmt.Errorf("%s is the Live Zone of %s: its Delegation names the nameservers %s assigned it, "+
+			"so Offboarding it would stop the domain resolving. Move the Delegation first.", name, name, a.Label())
+	}
+
+	for _, n := range ns {
+		if slices.Contains(delegated, n) {
+			return fmt.Errorf("Offboarding is refused: the Delegation of %s names %s, which %s assigned it, "+
+				"so %s may still answer for %s.", name, n, a.Label(), a.Label(), name)
+		}
+	}
+
+	return nil
+}
+
+// liveUnknownError refuses Offboarding a Zone whose name's Live Zone is
+// not known, saying why.
+func liveUnknownError(name, why string) error {
+	return fmt.Errorf("Offboarding is refused while the Live Zone of %s is unknown: %s. "+
+		"The Live Zone is never Offboarded.", name, why)
+}
+
+// openOffboardOf opens the Provider of a Zone's Account, as it is now,
+// for the Offboard dialog.
+func (m *Model) openOffboardOf(zoneID int64) tea.Cmd {
+	z, ok := m.zoneByID[zoneID]
+	if !ok {
+		return nil
+	}
+
+	a, ok := m.account(z.AccountID)
+	if !ok {
+		return nil
+	}
+
+	ctx, s, key, providers := m.ctx, m.deps.Store, m.key, m.providers
+
+	return func() tea.Msg {
+		p, _, err := accountProvider(ctx, s, key, providers, a)
+
+		return offboardOpenedMsg{zone: z, account: a, p: p, err: err}
+	}
+}
+
+// tenantUse opens the Offboard dialog again, for the Zone as it is by
+// then.
+func (msg offboardOpenedMsg) tenantUse(m *Model) (int64, func() tea.Cmd, error) {
+	return msg.account.ID, func() tea.Cmd { return m.openOffboardOf(msg.zone.ID) }, msg.err
+}
+
+// offboardOpened opens the dialog, unless the Provider could not be
+// opened or cannot Offboard, the Zone left the cache or may be the Live
+// Zone by now, or another dialog opened meanwhile.
+func (m *Model) offboardOpened(msg offboardOpenedMsg) {
+	var choice *provider.TenantChoiceError
+
+	switch {
+	case errors.As(msg.err, &choice):
+		return // the Tenant picker asks, and opens the dialog again
+	case msg.err != nil:
+		m.notice = notice{text: "Could not open " + msg.account.Label() + ": " + msg.err.Error(), err: true}
+
+		return
+	case !dnsprovider.CanDeleteZone(msg.p):
+		m.notice = notice{text: cannotOffboard(msg.account), err: true}
+
+		return
+	case m.dialogOpen() || m.tenantPick != nil:
+		return
+	}
+
+	z, ok := m.zoneByID[msg.zone.ID]
+	if !ok {
+		return
+	}
+
+	if err := m.offboardRefusal(z, msg.account); err != nil {
+		m.notice = notice{text: err.Error(), err: true}
+
+		return
+	}
+
+	m.offboard = &offboardDialog{zone: z, account: msg.account, p: msg.p}
+}
+
+// offboardKey handles a key while the Offboard dialog is open: Enter
+// Offboards the Zone, Esc closes the dialog, or cancels an Offboarding in
+// flight, which is then read back as one whose answer was lost.
+func (m *Model) offboardKey(msg tea.KeyMsg) tea.Cmd {
+	d := m.offboard
+	a := m.keys.action(msg.String())
+
+	if quitsDialog(a, msg) {
+		return m.handle(ActionQuit)
+	}
+
+	if d.busy {
+		if a == ActionClose && d.cancel != nil {
+			d.cancel()
+		}
+
+		return nil
+	}
+
+	switch a {
+	case ActionClose:
+		m.offboard = nil
+	case ActionSelect:
+		// The session's view of the Delegation may have changed since
+		// the dialog opened.
+		if err := m.offboardRefusal(d.zone, d.account); err != nil {
+			m.offboard = nil
+			m.notice = notice{text: err.Error(), err: true}
+
+			return nil
+		}
+
+		d.busy, d.err = true, ""
+
+		return m.deleteZone(d)
+	}
+
+	return nil
+}
+
+// offboardTimeout bounds an Offboarding, its checks and the delete
+// together, and, apart, the read-back of a delete whose answer was lost.
+const offboardTimeout = time.Minute
+
+// deleteZone Offboards the Zone confirmed, and removes it from the cache
+// with its Records. Just before the delete it reads the Zone from its
+// Provider and resolves its Delegation anew, and refuses, sending
+// nothing, a Zone that is, or may be, the Live Zone by then: the session's
+// view of either may be minutes old. A Zone its Provider no longer has
+// is removed from the cache without a delete. A delete whose answer was
+// lost is read back: a Zone gone is Offboarded.
+func (m *Model) deleteZone(d *offboardDialog) tea.Cmd {
+	parent, s, r, p, a, z := m.ctx, m.deps.Store, m.deps.Resolver, d.p, d.account, d.zone
+
+	ctx, cancel := context.WithTimeout(parent, offboardTimeout)
+	d.cancel = cancel
+
+	return func() tea.Msg {
+		defer cancel()
+
+		msg := zoneOffboardedMsg{zone: z, account: a}
+
+		held, ok, err := heldZone(ctx, p, z)
+
+		switch {
+		case err != nil:
+			msg.err, msg.cancelled = err, errors.Is(err, context.Canceled)
+
+			return msg
+		case !ok:
+			msg.gone = true
+			msg.saveErr = uncache(parent, s, z)
+
+			return msg
+		}
+
+		if msg.refused = checkNotLive(ctx, r, a, z, held); msg.refused != nil {
+			return msg
+		}
+
+		msg.sent = true
+
+		err = p.(dnsprovider.ZoneDeleter).DeleteZone(ctx, held)
+		if err != nil {
+			if !deleteMayBeDone(err) {
+				msg.err = err
+
+				return msg
+			}
+
+			rctx, rcancel := context.WithTimeout(parent, offboardTimeout)
+			_, still, rerr := heldZone(rctx, p, z)
+
+			rcancel()
+
+			if rerr != nil || still {
+				msg.err, msg.cancelled, msg.readBack, msg.held = err, errors.Is(err, context.Canceled), rerr, still
+
+				return msg
+			}
+
+			// Gone: this delete, whose answer was lost, Offboarded it,
+			// unless the Provider said it had no such Zone to begin with.
+			msg.gone = errors.Is(err, dnsprovider.ErrNotFound)
+		}
+
+		msg.saveErr = uncache(parent, s, z)
+
+		return msg
+	}
+}
+
+// heldZone reads z from its Account's Provider, by its Provider zone ID
+// among the Zones of its name: ok is false when the Provider no longer
+// has it.
+func heldZone(ctx context.Context, p dnsprovider.Provider, z dns.Zone) (dnsprovider.Zone, bool, error) {
+	zones, err := p.Zones(ctx, dnsprovider.ZoneFilter{Contains: z.Name})
+	if err != nil {
+		return dnsprovider.Zone{}, false, err
+	}
+
+	for _, mz := range zones {
+		if mz.ID == z.ProviderID {
+			return mz, true, nil
+		}
+	}
+
+	return dnsprovider.Zone{}, false, nil
+}
+
+// checkNotLive resolves the Delegation of z's name anew and refuses z,
+// as its Provider has it now (held) and as cached, when either is, or
+// may be, the Live Zone.
+func checkNotLive(ctx context.Context, r Resolver, a dns.Account, z dns.Zone, held dnsprovider.Zone) error {
+	if r == nil {
+		return liveUnknownError(z.Name, "dnscli has no resolver to read its Delegation with")
+	}
+
+	ns, err := r.NS(ctx, nameKey(z.Name))
+	if err == nil && len(ns) == 0 {
+		err = errNoNameservers
+	}
+
+	if err != nil {
+		return liveUnknownError(z.Name, "its Delegation could not be resolved again: "+err.Error())
+	}
+
+	delegated := nameSet(ns)
+
+	if err := liveRefusal(z.Name, a, held.Nameservers, delegated); err != nil {
+		return err
+	}
+
+	if len(z.Nameservers) > 0 {
+		return liveRefusal(z.Name, a, z.Nameservers, delegated)
+	}
+
+	return nil
+}
+
+// deleteMayBeDone reports whether a failed delete may have Offboarded the
+// Zone all the same, or found it gone: a failure without the Provider's
+// answer, such as a lost connection, a timeout or a cancel, a server
+// error the module gave up retrying, or a not-found.
+func deleteMayBeDone(err error) bool {
+	if errors.Is(err, dnsprovider.ErrNotFound) {
+		return true
+	}
+
+	var apiErr *dnsprovider.APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.StatusCode >= http.StatusInternalServerError
+	}
+
+	return true
+}
+
+// uncache removes an Offboarded Zone from the cache; one the cache no
+// longer holds, as it was, is gone already.
+func uncache(ctx context.Context, s *store.Store, z dns.Zone) error {
+	if err := s.RemoveZone(ctx, z); err != nil && !errors.Is(err, store.ErrZoneNotCached) {
+		return err
+	}
+
+	return nil
+}
+
+// zoneOffboarded reports an Offboarding. One refused closes the dialog,
+// saying why; one the Provider failed leaves the dialog open with the
+// error and the cache as it was; one made closes it and drops the Zone
+// from the pane.
+func (m *Model) zoneOffboarded(msg zoneOffboardedMsg) tea.Cmd {
+	d := m.offboard
+	if d != nil && d.zone.ID != msg.zone.ID {
+		d = nil
+	}
+
+	switch {
+	case msg.refused != nil:
+		if d != nil {
+			m.offboard = nil
+		}
+
+		m.notice = notice{text: msg.refused.Error(), err: true}
+
+		return nil
+	case msg.err != nil:
+		if d != nil {
+			d.busy, d.cancel = false, nil
+			d.err = m.offboardError(msg)
+		}
+
+		return nil
+	}
+
+	if d != nil {
+		m.offboard = nil
+	}
+
+	m.forgetZones([]int64{msg.zone.ID})
+
+	switch {
+	case msg.saveErr != nil:
+		m.notice = notice{text: msg.zone.Name + " was Offboarded from " + msg.account.Label() + ", but could not be removed from the cache: " +
+			msg.saveErr.Error() + ". " + m.reList(), err: true}
+	case msg.gone:
+		m.notice = notice{text: msg.zone.Name + " is no longer at " + msg.account.Label() + ": it is dropped from the cache."}
+	default:
+		m.notice = notice{text: msg.zone.Name + " is Offboarded from " + msg.account.Label() + "."}
+	}
+
+	return m.loadCache
+}
+
+// offboardError says why an Offboarding failed. One whose answer was
+// lost says what the read-back found: that the Account still holds the
+// Zone, or, when the read failed, that it may be Offboarded all the same.
+func (m *Model) offboardError(msg zoneOffboardedMsg) string {
+	text := "Could not Offboard " + msg.zone.Name + ": " + strings.TrimSuffix(msg.err.Error(), ".") + "."
+	if msg.cancelled {
+		text = "Cancelled Offboarding " + msg.zone.Name + "."
+	}
+
+	switch {
+	case !msg.sent:
+		return text + " Nothing was sent to " + msg.account.Label() + "."
+	case msg.readBack != nil:
+		return text + " It may have been Offboarded all the same, as reading it back failed: " + msg.readBack.Error() + ". " + m.reList()
+	case msg.held:
+		return text + " " + msg.account.Label() + " still holds it."
+	}
+
+	return text
+}
+
+func (m *Model) offboardView() string {
+	d := m.offboard
+	z := d.zone
+
+	notes := wrapNote(lipgloss.NewStyle(), "Offboard "+z.Name+" from "+d.account.Label()+"?", noteWidth)
+	notes = append(notes, "")
+	notes = append(notes, wrapNote(errorStyle, "This stops DNS hosting of "+z.Name+" at "+d.account.Label()+
+		" and drops its Records there; it cannot be undone. It leaves the domain's registration untouched.", noteWidth)...)
+
+	if d.err != "" {
+		notes = append(notes, "")
+		notes = append(notes, wrapNote(errorStyle, d.err, noteWidth)...)
+	}
+
+	hint := m.keys.keysFor(ActionSelect) + " Offboard · " + m.keys.keysFor(ActionClose) + " close"
+	if d.busy {
+		hint = "offboarding… " + m.keys.keysFor(ActionClose) + " cancels"
+	}
+
+	notes = append(notes, "", hintStyle.Render(hint))
+
+	return dialogView("Offboard a Zone", nil, 0, false, notes)
+}

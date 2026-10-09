@@ -88,10 +88,12 @@ func (m *Model) paneBindings() []paneBinding {
 }
 
 // zoneWriteOffered reports whether the Domains pane offers Action a: any
-// Action but its Zone writes, Onboarding (insert) and the Zone settings,
-// which it offers only in an Unsealed session, Onboarding for the Account
-// it would Onboard in, the Zone settings for the highlighted Zone's, when
-// that Account's Provider type can. The keys still refuse otherwise.
+// Action but its Zone writes, Onboarding (insert), Offboarding (delete)
+// and the Zone settings, which it offers only in an Unsealed session,
+// Onboarding for the Account it would Onboard in, Offboarding and the
+// Zone settings for the highlighted Zone's, when that Account's Provider
+// type can, and Offboarding only for a Zone known not to be the Live
+// Zone. The keys still refuse otherwise.
 func (m *Model) zoneWriteOffered(a Action) bool {
 	switch a {
 	case ActionInsert:
@@ -106,6 +108,15 @@ func (m *Model) zoneWriteOffered(a Action) bool {
 		acc, ok := m.account(m.visible[m.cursor[paneDomains]].AccountID)
 
 		return ok && m.accountCan(acc, dnsprovider.CapZoneUpdater)
+	case ActionDelete:
+		if m.key == nil || len(m.visible) == 0 {
+			return false
+		}
+
+		z := m.visible[m.cursor[paneDomains]]
+		acc, ok := m.account(z.AccountID)
+
+		return ok && m.accountCan(acc, dnsprovider.CapZoneDeleter) && m.offboardRefusal(z, acc) == nil
 	}
 
 	return true

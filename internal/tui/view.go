@@ -102,6 +102,8 @@ func (m *Model) View() string {
 		view = overlay(view, m.zoneSettingsView(), m.width, m.height)
 	case m.onboard != nil:
 		view = overlay(view, m.onboardView(), m.width, m.height)
+	case m.offboard != nil:
+		view = overlay(view, m.offboardView(), m.width, m.height)
 	case m.recordForm != nil:
 		view = overlay(view, m.recordFormView(), m.width, m.height)
 		if m.recordForm.picker != nil {

@@ -138,6 +138,8 @@ type Model struct {
 	zoneSettings *zoneSettings
 	// onboard Onboards a zone name in an Account; nil when closed.
 	onboard *onboardDialog
+	// offboard Offboards a Zone; nil when closed.
+	offboard *offboardDialog
 	// editAfterPick is the ID of the Account whose edit dialog was asked
 	// for while the Tenant picker was open; zero when none was. It opens
 	// once the picker closes, rather than over it.
@@ -348,6 +350,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.onboardOpened(msg)
 	case zoneOnboardedMsg:
 		return m, m.zoneOnboarded(msg)
+	case offboardOpenedMsg:
+		m.offboardOpened(msg)
+	case zoneOffboardedMsg:
+		return m, m.zoneOffboarded(msg)
 	case recordsLoadedMsg:
 		if m.open == nil || m.open.ID != msg.zoneID {
 			return m, nil // the user has moved on to another Zone
@@ -392,6 +398,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.onboard != nil {
 			return m, m.onboardKey(msg)
+		}
+
+		if m.offboard != nil {
+			return m, m.offboardKey(msg)
 		}
 
 		if m.recordForm != nil {
@@ -515,6 +525,8 @@ func (m *Model) itemAction(a Action) tea.Cmd {
 		return m.recordAction(a)
 	case a == ActionInsert:
 		return m.openOnboard()
+	case a == ActionDelete:
+		return m.openOffboard()
 	}
 
 	m.notice = notice{text: fmt.Sprintf("Records are edited in the Records pane, Accounts in the Accounts pane (%s).", m.keys.keysFor(ActionNextPane)), err: true}

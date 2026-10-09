@@ -54,8 +54,10 @@ const (
 	// deletion or takes back its pending change; all three obey the write
 	// gate. In the Accounts pane, insert opens the add-Account dialog, edit
 	// the edit-Account dialog for the highlighted Account, and delete asks
-	// to remove it with its cached Zones, Records and secret. Without
-	// Accounts, insert adds one from any pane.
+	// to remove it with its cached Zones, Records and secret. In the
+	// Domains pane, insert Onboards a zone name and delete Offboards the
+	// highlighted Zone, once confirmed, never the Live Zone: Zone writes,
+	// after Unseal. Without Accounts, insert adds one from any pane.
 	ActionInsert
 	ActionEdit
 	ActionDelete
@@ -144,6 +146,7 @@ var paneHelp = map[pane][]paneBinding{
 	paneDomains: {
 		{ActionSelect, "show the Zone's Records"},
 		{ActionInsert, "Onboard a zone name in the Account shown (starts hosting, never registers)"},
+		{ActionDelete, "Offboard the Zone, not the Live Zone (stops hosting, never touches the registration)"},
 		{ActionZoneSettings, "turn the Zone's DNSSEC or HSTS on or off"},
 	},
 	paneRecords: {
