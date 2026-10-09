@@ -30,6 +30,13 @@ func (m *Model) relistAccount(a dns.Account) tea.Cmd {
 			return nil
 		}
 
+		// A listing taken before the delete would bring the Zone back.
+		if m.offboardingIn(a.ID) {
+			m.notice = notice{text: "A Zone of " + a.Label() + " is being Offboarded: re-list it once that is done.", err: true}
+
+			return nil
+		}
+
 		if m.relisting == nil {
 			m.relisting = map[int64]bool{}
 		}

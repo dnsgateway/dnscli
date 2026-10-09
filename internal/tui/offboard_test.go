@@ -707,3 +707,27 @@ func TestOffboardingIsRefusedWhileTheZoneHasAPendingChangeset(t *testing.T) {
 		t.Fatalf("DeleteZone calls = %q, want none", calls)
 	}
 }
+
+func TestOffboardingIsRefusedWhileItsAccountIsReListed(t *testing.T) {
+	// A listing taken before the delete, cached after it, would bring the
+	// Offboarded Zone back.
+	s := offboardStore(t)
+	f := offboardFake()
+	h := newOffboardHarness(t, s, f, offboardResolver())
+
+	h.press("j", "d")
+	h.unsealWith(passphrase)
+	h.press("esc", "shift+tab")
+
+	relist := h.pressHolding("L")
+	h.assertShows("Re-listing the Zones of cloudflare.work…")
+
+	h.press("tab", "d")
+	h.assertShows("Offboarding is refused while cloudflare.work is being re-listed")
+	h.assertHides("Offboard work.test from")
+
+	h.run(relist)
+
+	h.press("d")
+	h.assertShows("Offboard work.test from cloudflare.work?")
+}

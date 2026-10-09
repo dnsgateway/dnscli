@@ -148,6 +148,18 @@ func (m *Model) offboardRefusal(z dns.Zone, a dns.Account) error {
 	return hostingRefusal(z.Name, a, z.State)
 }
 
+// offboardingIn reports whether a Zone of the Account of that ID is being
+// Offboarded.
+func (m *Model) offboardingIn(accountID int64) bool {
+	for _, id := range m.offboarding {
+		if id == accountID {
+			return true
+		}
+	}
+
+	return false
+}
+
 // isOffboarding reports whether the Zone of that ID is being Offboarded.
 func (m *Model) isOffboarding(zoneID int64) bool {
 	_, ok := m.offboarding[zoneID]
@@ -161,7 +173,20 @@ func (m *Model) isOffboarding(zoneID int64) bool {
 // rather than being discarded: it is work the user has not applied, and
 // discarding it takes one key in the preview, whereas Offboarding cannot
 // be undone. nil when none is.
+// A re-listing of z's Account in flight refuses too: its listing, taken
+// before the delete and cached after it, would bring z back. The other
+// way round, no re-listing of an Account starts while one of its Zones
+// is Offboarded (see relistAccount).
 func (m *Model) offboardBusy(z dns.Zone) error {
+	if m.relisting[z.AccountID] {
+		label := "its Account"
+		if a, ok := m.account(z.AccountID); ok {
+			label = a.Label()
+		}
+
+		return fmt.Errorf("Offboarding is refused while %s is being re-listed: try again once it is.", label)
+	}
+
 	switch {
 	case m.applying[z.ID]:
 		return fmt.Errorf("Offboarding is refused while changes to %s are being applied.", z.Name)
