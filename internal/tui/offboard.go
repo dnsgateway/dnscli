@@ -67,10 +67,10 @@ type zoneOffboardedMsg struct {
 	sent bool
 	// cancelled is set when the user cancelled it.
 	cancelled bool
-	// held is set when reading back a delete whose answer was lost found
-	// the Zone still at the Provider.
+	// held is set when reading back a failed delete found the Zone still
+	// at the Provider.
 	held bool
-	// readBack is why reading back a delete whose answer was lost failed.
+	// readBack is why reading back a failed delete failed.
 	readBack error
 	// saveErr is why the Zone could not be removed from the cache, after
 	// its Provider Offboarded it.
@@ -309,8 +309,8 @@ const offboardTimeout = time.Minute
 // Provider and resolves its Delegation anew, and refuses, sending
 // nothing, a Zone that is, or may be, the Live Zone by then: the session's
 // view of either may be minutes old. A Zone its Provider no longer has
-// is removed from the cache without a delete. A delete whose answer was
-// lost is read back: a Zone gone is Offboarded.
+// is removed from the cache without a delete. A delete that failed is
+// read back, whatever the failure: a Zone gone is Offboarded.
 func (m *Model) deleteZone(d *offboardDialog) tea.Cmd {
 	parent, s, r, p, a, z := m.ctx, m.deps.Store, m.deps.Resolver, d.p, d.account, d.zone
 
@@ -355,12 +355,8 @@ func (m *Model) deleteZone(d *offboardDialog) tea.Cmd {
 
 		err = p.(dnsprovider.ZoneDeleter).DeleteZone(ctx, held)
 		if err != nil {
-			if !deleteMayBeDone(err) {
-				msg.err = err
-
-				return msg
-			}
-
+			// Whatever the failure, the delete was sent, and the
+			// module retries it: an earlier try may have taken it.
 			rctx, rcancel := context.WithTimeout(parent, offboardTimeout)
 			_, still, rerr := heldZone(rctx, p, z)
 
@@ -373,8 +369,9 @@ func (m *Model) deleteZone(d *offboardDialog) tea.Cmd {
 			}
 
 			// Gone: this delete, whose answer was lost, Offboarded it,
-			// unless the Provider said it had no such Zone to begin with.
-			msg.gone = errors.Is(err, dnsprovider.ErrNotFound)
+			// unless the Provider answered that it did not, as when it
+			// had no such Zone to begin with.
+			msg.gone = answered(err)
 		}
 
 		msg.saveErr = uncache(parent, s, z)
@@ -429,21 +426,21 @@ func checkNotLive(a dns.Account, z dns.Zone, held dnsprovider.Zone, ns []string,
 	return hostingRefusal(z.Name, a, held.State)
 }
 
-// deleteMayBeDone reports whether a failed delete may have Offboarded the
-// Zone all the same, or found it gone: a failure without the Provider's
-// answer, such as a lost connection, a timeout or a cancel, a server
-// error the module gave up retrying, or a not-found.
-func deleteMayBeDone(err error) bool {
+// answered reports whether a failed delete was the Provider's answer
+// that it did not act, such as a not-found or a refusal, rather than a
+// failure without one, such as a lost connection, a timeout, a cancel or
+// a server error the module gave up retrying.
+func answered(err error) bool {
 	if errors.Is(err, dnsprovider.ErrNotFound) {
 		return true
 	}
 
 	var apiErr *dnsprovider.APIError
 	if errors.As(err, &apiErr) {
-		return apiErr.StatusCode >= http.StatusInternalServerError
+		return apiErr.StatusCode < http.StatusInternalServerError
 	}
 
-	return true
+	return false
 }
 
 // uncache removes an Offboarded Zone from the cache; one the cache no
@@ -507,8 +504,8 @@ func (m *Model) zoneOffboarded(msg zoneOffboardedMsg) tea.Cmd {
 	return m.loadCache
 }
 
-// offboardError says why an Offboarding failed. One whose answer was
-// lost says what the read-back found: that the Account still holds the
+// offboardError says why an Offboarding failed. One whose delete was
+// sent says what the read-back found: that the Account still holds the
 // Zone, or, when the read failed, that it may be Offboarded all the same.
 func (m *Model) offboardError(msg zoneOffboardedMsg) string {
 	text := "Could not Offboard " + msg.zone.Name + ": " + strings.TrimSuffix(msg.err.Error(), ".") + "."

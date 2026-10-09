@@ -405,6 +405,8 @@ func TestAnOffboardingTheProviderFailsKeepsTheDialogOpenWithTheErrorAndTheCache(
 type lostDelete struct {
 	dnsprovider.Provider
 	take bool
+	// err, when set, is the failure instead of a lost connection.
+	err error
 	// ctx is the context the last delete was given.
 	ctx *context.Context
 }
@@ -422,6 +424,10 @@ func (l lostDelete) DeleteZone(ctx context.Context, z dnsprovider.Zone) error {
 
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+
+	if l.err != nil {
+		return l.err
 	}
 
 	return errConnectionReset
@@ -628,5 +634,26 @@ func TestAMovedZoneIsOffboarded(t *testing.T) {
 
 	if calls := deleteZoneCalls(f); !slices.Equal(calls, []string{"zw2"}) {
 		t.Fatalf("DeleteZone calls = %q, want zw2 once", calls)
+	}
+}
+
+func TestADeleteTheProviderRefusedIsReadBackAndAZoneGoneIsDroppedFromTheCache(t *testing.T) {
+	// Whatever the answer, once the delete was sent the Zone is read
+	// back: the module retries, and an earlier try may have taken it.
+	s := offboardStore(t)
+	f := offboardFake()
+	h := newLostDeleteHarness(t, s, f, lostDelete{take: true, err: &dnsprovider.APIError{
+		Provider: "cloudflare", StatusCode: 400, Messages: []string{"Bad request (code 1000)"},
+	}})
+
+	h.press("j", "d")
+	h.unsealWith(passphrase)
+	h.press("enter")
+
+	h.assertShows("work.test is no longer at cloudflare.work")
+	h.assertHides("Offboard work.test from")
+
+	if zoneCached(t, s, "work.test") {
+		t.Fatal("work.test is still cached")
 	}
 }
