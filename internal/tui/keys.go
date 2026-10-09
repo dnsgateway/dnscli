@@ -56,7 +56,8 @@ const (
 	// gate. In the Accounts pane, insert opens the add-Account dialog, edit
 	// the edit-Account dialog for the highlighted Account, and delete asks
 	// to remove it with its cached Zones, Records and secret. In the
-	// Domains pane, insert Onboards a zone name, edit opens the Edit Zone
+	// Domains pane, insert Onboards a zone name in an Account, and its
+	// Tenant, chosen in the dialog, edit opens the Edit Zone
 	// dialog, which shows the highlighted Zone's settings and Delegation,
 	// read-only, in any session, and changes its DNSSEC, HSTS or minimum
 	// TLS version when the Provider can, and delete Offboards the
@@ -143,7 +144,7 @@ type paneBinding struct {
 var paneHelp = map[pane][]paneBinding{
 	paneDomains: {
 		{ActionShow, "show the Zone's Records"},
-		{ActionInsert, "Onboard a zone name in the Account shown (starts hosting, never registers)"},
+		{ActionInsert, "Onboard a zone name in an Account (starts hosting, never registers)"},
 		{ActionEdit, "edit the Zone: its DNSSEC, HSTS or minimum TLS version, and its Delegation, read-only"},
 		{ActionDelete, "Offboard the Zone, not the Live Zone (stops hosting, never touches the registration)"},
 		{ActionRefresh, "re-list the Zones of the Account shown, or of every Account"},

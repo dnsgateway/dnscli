@@ -24,6 +24,9 @@ func onboardFake() *fakeProvider {
 	return f
 }
 
+// onboardDialog is the Onboard dialog's title, as its border shows it.
+const onboardDialog = "━ Onboard a zone ━"
+
 // createZoneCalls are the zone names the fake was asked to Onboard.
 func createZoneCalls(f *fakeProvider) []string {
 	var out []string
@@ -50,7 +53,7 @@ func TestOnboardingAZoneNameAsksToConfirmThenCachesItPendingWithItsNameservers(t
 	}
 
 	h.unsealWith(passphrase)
-	h.assertShows("Onboard a zone at cloudflare.work", "Zone name")
+	h.assertShows(onboardDialog, "Account", "cloudflare.work", "Zone name")
 
 	h.typeText("new.example")
 	h.press("enter")
@@ -77,7 +80,7 @@ func TestOnboardingAZoneNameAsksToConfirmThenCachesItPendingWithItsNameservers(t
 	}
 
 	h.press("esc")
-	h.assertHides("Onboard a zone at", "bob.ns.cloudflare.com")
+	h.assertHides(onboardDialog, "bob.ns.cloudflare.com")
 	h.assertShows("new.example · pending")
 }
 
@@ -104,7 +107,7 @@ func TestAZoneNameIsCheckedBeforeTheProviderIsAsked(t *testing.T) {
 			h.typeText(typed)
 			h.press("enter")
 
-			h.assertShows("Onboard a zone at cloudflare.work", want)
+			h.assertShows(onboardDialog, want)
 			h.assertHides("at cloudflare.work?")
 
 			if calls := createZoneCalls(f); len(calls) != 0 {
@@ -141,7 +144,7 @@ func TestAZoneNameTheProviderHoldsAlreadyKeepsTheDialogOpenWithTheErrorAndTheCac
 	h.typeText("taken.example")
 	h.press("enter", "enter")
 
-	h.assertShows("Onboard a zone at cloudflare.work", "Could not Onboard taken.example", "already exists",
+	h.assertShows(onboardDialog, "Could not Onboard taken.example", "already exists",
 		"holds no Zone", "another")
 	h.assertHides("is Onboarded")
 
@@ -167,31 +170,36 @@ func TestEscGoesBackFromConfirmingAnOnboardingThenClosesTheDialogOnboardingNothi
 	h.assertShows("Onboard new.example at cloudflare.work?")
 
 	h.press("esc")
-	h.assertShows("Onboard a zone at cloudflare.work", "new.example")
+	h.assertShows(onboardDialog, "new.example")
 	h.assertHides("at cloudflare.work?")
 
 	h.press("esc")
-	h.assertHides("Onboard a zone at")
+	h.assertHides(onboardDialog)
 
 	if calls := createZoneCalls(f); len(calls) != 0 {
 		t.Fatalf("CreateZone calls = %q, want none", calls)
 	}
 }
 
-func TestOnboardingIsRefusedWithoutUnsealForAProviderTypeThatCannot(t *testing.T) {
+func TestAnAccountWhoseProviderTypeCannotOnboardIsNotOffered(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
 	mustAccount(t, s, "namecheap", "home")
 
 	h := newAccountHarness(t, s, onboardFake())
 
-	// Show namecheap.home's Zones, then Onboard from the Domains pane.
+	// Show namecheap.home's Zones, then Onboard from the Domains pane: the
+	// only Account that can is chosen, and there is no other to choose.
 	h.press("shift+tab", "j", "space", "tab", "i")
+	h.unsealWith(passphrase)
 
-	h.assertShows("namecheap.home cannot Onboard a zone")
-	h.assertHides("Unseal", "Onboard a zone at")
+	h.assertShows(onboardDialog, "Account    cloudflare.work")
+
+	h.press("up", "right")
+	h.assertShows("Account    cloudflare.work")
+	h.assertHides("Account    namecheap.home", "‹ cloudflare.work ›")
 }
 
-func TestOnboardingIsRefusedWithoutUnsealForAProviderTypeNotDeclaringIt(t *testing.T) {
+func TestOnboardingIsRefusedWithoutUnsealWhenNoAccountsProviderTypeDeclaresIt(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
 	f := onboardFake()
 	f.SetZoneCreator(false)
@@ -200,8 +208,8 @@ func TestOnboardingIsRefusedWithoutUnsealForAProviderTypeNotDeclaringIt(t *testi
 
 	h.press("i")
 
-	h.assertShows("cloudflare.work cannot Onboard a zone")
-	h.assertHides("Unseal", "Onboard a zone at")
+	h.assertShows("No Account can Onboard a zone")
+	h.assertHides("Unseal", onboardDialog)
 }
 
 func TestOnboardingIsRefusedForAProviderThatCannotThoughItsTypeDeclaresIt(t *testing.T) {
@@ -213,28 +221,55 @@ func TestOnboardingIsRefusedForAProviderThatCannotThoughItsTypeDeclaresIt(t *tes
 
 	h.press("i")
 	h.unsealWith(passphrase)
+	h.assertShows(onboardDialog, "cloudflare.work cannot Onboard a zone")
 
-	h.assertShows("cloudflare.work cannot Onboard a zone")
-	h.assertHides("Onboard a zone at")
+	h.typeText("new.example")
+	h.press("enter")
+	h.assertHides("at cloudflare.work?")
 }
 
-func TestOnboardingWithSeveralAccountsActsOnTheAccountShown(t *testing.T) {
+func TestOnboardingWithSeveralAccountsChoosesTheOneShownOrHighlightedAndAnyOther(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
-	other := mustAccount(t, s, "cloudflare", "zother")
+	other := addOldAccount(t, s, "cloudflare", "zother", "tok")
 
 	f := onboardFake()
 	h := newAccountHarness(t, s, f)
 
-	// Zones of every Account are shown: which one is not known.
+	// Zones of every Account are shown: the one highlighted in the
+	// Accounts pane is chosen.
 	h.press("i")
-	h.assertShows("Show one Account's Zones first")
-	h.assertHides("Unseal", "Onboard a zone at")
-
-	// cloudflare.work's Zones shown, it is the one.
-	h.press("shift+tab", "space", "tab", "i")
 	h.unsealWith(passphrase)
-	h.assertShows("Onboard a zone at cloudflare.work")
-	h.assertHides("Onboard a zone at " + other.Label())
+	h.assertShows(onboardDialog, "Account    cloudflare.work")
+	h.press("esc")
+
+	// Highlighted, or shown, zother is.
+	h.press("shift+tab", "j", "tab", "i")
+	h.assertShows("Account    " + other.Label())
+	h.press("esc")
+
+	h.press("shift+tab", "k", "tab", "i")
+	h.assertShows("Account    cloudflare.work")
+
+	// Any other is chosen in the dialog, from its list.
+	h.press("up", "enter")
+	h.assertShows("━ Account ━", other.Label())
+	h.press("j", "enter")
+	h.assertShows("Account    ‹ " + other.Label() + " ›")
+
+	// Left and Right change it too.
+	h.press("left")
+	h.assertShows("‹ cloudflare.work ›")
+	h.press("right")
+
+	h.press("down")
+	h.typeText("new.example")
+	h.press("enter")
+	h.assertShows("Onboard new.example at " + other.Label() + "?")
+	h.press("enter")
+
+	if z := zoneNamed(t, s, "new.example"); z.AccountID != other.ID {
+		t.Fatalf("cached Zone = %+v, want it in %s", z, other.Label())
+	}
 }
 
 func TestOnboardingIsRefusedForAnAccountActingWithinNoTenant(t *testing.T) {
@@ -248,30 +283,60 @@ func TestOnboardingIsRefusedForAnAccountActingWithinNoTenant(t *testing.T) {
 	h.press("space", "tab", "i")
 	h.unsealWith(passphrase)
 
-	h.assertShows("cloudflare.old acts within no single Provider account")
-	h.assertHides("Onboard a zone at")
+	h.assertShows(onboardDialog, "cloudflare.old acts within no single Provider account")
+
+	h.typeText("new.example")
+	h.press("enter")
+	h.assertHides("at cloudflare.old?")
 
 	if calls := createZoneCalls(f); len(calls) != 0 {
 		t.Fatalf("CreateZone calls = %q, want none", calls)
 	}
 }
 
-func TestOnboardingInAnAccountReachingSeveralTenantsAsksForOneThenOpens(t *testing.T) {
+func TestOnboardingInAnAccountReachingSeveralTenantsChoosesOneInTheDialog(t *testing.T) {
 	f := refreshZones()
 	f.SetTenants(twoTenants...)
 	f.SetZoneCreator(true)
+	f.SetAccount(dnsprovider.AccountInfo{Tenant: twoTenants[1]})
 
-	h, _ := newUpgradedHarness(t, f)
+	h, s := newUpgradedHarness(t, f)
 
 	h.press("space", "tab", "i")
 	h.unsealWith(passphrase)
 
-	h.assertShows("Tenant of cloudflare.old")
-	h.assertHides("Onboard a zone at")
+	// The first Tenant is chosen, as the first Record type is.
+	h.assertShows(onboardDialog, "Account    cloudflare.old", "Tenant     Acme Ltd", "reach several Tenants")
 	onlyTenantsListed(t, f)
 
+	// Left and Right change it, and Enter lists every one.
+	h.press("up", "right")
+	h.assertShows("‹ Side project ›")
+	h.press("left")
+	h.assertShows("‹ Acme Ltd ›")
 	h.press("enter")
-	h.assertShows("Onboard a zone at cloudflare.old")
+	h.assertShows("Tenant of cloudflare.old", "Acme Ltd", "Side project")
+	h.press("j", "enter")
+	h.assertShows("‹ Side project ›")
+	h.assertHides("Tenant of cloudflare.old")
+	onlyTenantsListed(t, f)
+
+	// A name checked asks to confirm within the Tenant chosen, which is
+	// saved only once it is: backing out saves nothing.
+	h.press("down")
+	h.typeText("new.example")
+	h.press("enter")
+	h.assertShows("Onboard new.example at cloudflare.old (Side project)?", "Side project is saved as the Tenant")
+	h.press("esc")
+	onlyTenantsListed(t, f)
+
+	h.press("enter", "enter")
+
+	if got := storedFields(t, s, accountLabeled(t, s, "cloudflare.old"))["account"]; got != "b2" {
+		t.Fatalf("stored Tenant = %q, want b2", got)
+	}
+
+	h.assertShows("new.example is Onboarded at cloudflare.old")
 }
 
 func TestAMovedZonesNameIsOnboardedAgainInItsPlace(t *testing.T) {
@@ -353,7 +418,7 @@ func TestAZoneOnboardedButNotCachedClosesTheDialogNamingIt(t *testing.T) {
 	}
 
 	h.assertShows("new.example was Onboarded at cloudflare.work, but could not be cached")
-	h.assertHides("Onboard a zone at", "onboarding…")
+	h.assertHides(onboardDialog, "onboarding…")
 }
 
 func TestOnboardingIsRefusedForAnAccountTheFakeBuildsWithinNoTenant(t *testing.T) {
@@ -368,8 +433,10 @@ func TestOnboardingIsRefusedForAnAccountTheFakeBuildsWithinNoTenant(t *testing.T
 	h.press("i")
 	h.unsealWith(passphrase)
 
-	h.assertShows("cloudflare.work acts within no single Provider account")
-	h.assertHides("Onboard a zone at")
+	h.assertShows(onboardDialog, "cloudflare.work acts within no single Provider account")
+
+	h.typeText("new.example")
+	h.press("enter", "enter")
 
 	if calls := createZoneCalls(f); len(calls) != 0 {
 		t.Fatalf("CreateZone calls = %q, want none", calls)
@@ -555,10 +622,33 @@ func TestEscCancelsACreateInFlightWhichIsReadBack(t *testing.T) {
 	h.press("esc")
 	h.run(create)
 
-	h.assertShows("Onboard a zone at cloudflare.work", "Cancelled", "no Zone of that name", "nothing was Onboarded")
+	h.assertShows(onboardDialog, "Cancelled", "no Zone of that name", "nothing was Onboarded")
 	h.assertHides("is Onboarded", "onboarding…")
 
 	if got := zonesCached(t, s); got != before {
 		t.Fatalf("cached Zones = %d, want %d as before", got, before)
+	}
+}
+
+func TestATenantThatCannotBeSavedOnboardsNothingAndIsStillToChoose(t *testing.T) {
+	f := refreshZones()
+	f.SetTenants(twoTenants...)
+	f.SetZoneCreator(true)
+	// The credentials cannot be verified within the Tenant chosen.
+	f.Fail(providertest.OpAccount, &dnsprovider.APIError{Provider: "cloudflare", StatusCode: 403, Messages: []string{"forbidden"},
+		Kind: dnsprovider.ErrUnauthorized})
+
+	h, _ := newUpgradedHarness(t, f)
+
+	h.press("space", "tab", "i")
+	h.unsealWith(passphrase)
+	h.typeText("new.example")
+	h.press("enter", "enter")
+
+	h.assertShows(onboardDialog, "Could not save Acme Ltd as the Tenant of cloudflare.old", "was Onboarded.", "Tenant     Acme Ltd")
+	h.assertHides("at cloudflare.old?", "onboarding…")
+
+	if calls := createZoneCalls(f); len(calls) != 0 {
+		t.Fatalf("CreateZone calls = %q, want none", calls)
 	}
 }

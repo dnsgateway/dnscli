@@ -2,6 +2,7 @@ package tui
 
 import (
 	"cmp"
+	"context"
 	"errors"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
 	"github.com/sergelogvinov/dnscli/internal/provider"
+	"github.com/sergelogvinov/dnscli/internal/store"
+	"github.com/sergelogvinov/dnscli/internal/vault"
 )
 
 // tenantPick asks which Tenant an Account acts within, when its stored
@@ -40,7 +43,8 @@ type tenantUse interface {
 
 // askTenant opens the Tenant picker when msg reports a use that failed for
 // want of a Tenant: every use of an Account's Provider is reported by a
-// tenantUse, so each one asks here. A use failing so while the picker is
+// tenantUse, so each one asks here, but the Onboard dialog's, which asks
+// in the dialog. A use failing so while the picker is
 // open for its Account runs again with the others once the Tenant is
 // saved. A picker open for another Account, or another dialog, is left
 // alone: the next use asks again.
@@ -151,28 +155,35 @@ func (m *Model) pinTenant(a dns.Account, tp *tenantPick) tea.Cmd {
 	field := provider.TenantField(m.deps.Providers[a.Provider])
 
 	return func() tea.Msg {
-		sealed, fields, err := sealedCredentials(ctx, s, key, providers, a)
-		if err == nil && fields == nil {
-			err = errors.New("this Account has no credentials")
-		}
-
-		if err != nil {
-			return tenantPinnedMsg{account: a, pick: tp, err: err}
-		}
-
-		fields[field] = tp.picked.ID
-
-		if fields, _, err = verifyCredentials(ctx, providers, a.Provider, fields); err != nil {
-			return tenantPinnedMsg{account: a, pick: tp, err: err}
-		}
-
-		replaced, err := replaceCredentials(ctx, s, key, a, sealed, fields)
-		if err == nil && !replaced {
-			err = errors.New("its credentials were saved meanwhile")
-		}
-
-		return tenantPinnedMsg{account: a, pick: tp, err: err}
+		return tenantPinnedMsg{account: a, pick: tp, err: saveTenant(ctx, s, key, providers, a, field, tp.picked.ID)}
 	}
+}
+
+// saveTenant saves the Tenant of ID id, in field, with the credentials of
+// a, the Account as it is now, once verified within it, unless they were
+// saved again meanwhile.
+func saveTenant(ctx context.Context, s *store.Store, key *vault.Key, providers *provider.Opener, a dns.Account, field, id string) error {
+	sealed, fields, err := sealedCredentials(ctx, s, key, providers, a)
+	if err == nil && fields == nil {
+		err = errors.New("this Account has no credentials")
+	}
+
+	if err != nil {
+		return err
+	}
+
+	fields[field] = id
+
+	if fields, _, err = verifyCredentials(ctx, providers, a.Provider, fields); err != nil {
+		return err
+	}
+
+	replaced, err := replaceCredentials(ctx, s, key, a, sealed, fields)
+	if err == nil && !replaced {
+		err = errors.New("its credentials were saved meanwhile")
+	}
+
+	return err
 }
 
 // tenantPinned reports a saved Tenant, and runs again every use that

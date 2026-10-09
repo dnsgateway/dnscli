@@ -350,7 +350,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case zoneSettingsSavedMsg:
 		m.zoneSettingsSaved(msg)
 	case onboardOpenedMsg:
-		m.onboardOpened(msg)
+		return m, m.onboardOpened(msg)
+	case onboardTenantNamedMsg:
+		m.onboardTenantNamed(msg)
 	case zoneOnboardedMsg:
 		return m, m.zoneOnboarded(msg)
 	case offboardOpenedMsg:

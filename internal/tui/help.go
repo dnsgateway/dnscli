@@ -169,18 +169,18 @@ func (m *Model) paneBindings() []paneBinding {
 
 // zoneWriteOffered reports whether the Domains pane offers Action a: any
 // Action but its Zone writes, Onboarding (insert) and Offboarding
-// (delete), which it offers only in an Unsealed session, Onboarding for
-// the Account it would Onboard in, Offboarding for the highlighted Zone's,
-// when that Account's Provider type can, and Offboarding only for a Zone
+// (delete), which it offers only in an Unsealed session, Onboarding when
+// an Account's Provider type can, Offboarding when the highlighted Zone's
+// can, and Offboarding only for a Zone
 // known not to be the Live Zone. The keys still refuse otherwise. The
 // Edit Zone dialog is offered for every Zone: it shows the Delegation in
 // any session, its settings read-only when they cannot be changed.
 func (m *Model) zoneWriteOffered(a Action) bool {
 	switch a {
 	case ActionInsert:
-		acc, ok := m.onboardAccount()
+		accounts, _ := m.onboardAccounts()
 
-		return m.key != nil && ok && m.accountCan(acc, dnsprovider.CapZoneCreator)
+		return m.key != nil && len(accounts) > 0
 	case ActionDelete:
 		if m.key == nil || len(m.visible) == 0 {
 			return false

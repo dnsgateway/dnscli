@@ -108,6 +108,10 @@ func (m *Model) View() string {
 		}
 	case m.onboard != nil:
 		view = overlay(view, m.onboardView(), m.width, m.height)
+
+		if m.onboard.picker != nil {
+			view = overlay(view, m.onboard.picker.view(m.height), m.width, m.height)
+		}
 	case m.offboard != nil:
 		view = overlay(view, m.offboardView(), m.width, m.height)
 	case m.recordForm != nil:
@@ -605,10 +609,14 @@ func box(title string, lines []string, w, h int, focused bool) string {
 			line = lines[i]
 		}
 
-		sb.WriteString("\n" + style.Render(b.Left) + fit(line, innerW) + style.Render(b.Right))
+		sb.WriteString("\n")
+		sb.WriteString(style.Render(b.Left))
+		sb.WriteString(fit(line, innerW))
+		sb.WriteString(style.Render(b.Right))
 	}
 
-	sb.WriteString("\n" + style.Render(b.BottomLeft+strings.Repeat(b.Bottom, innerW)+b.BottomRight))
+	sb.WriteString("\n")
+	sb.WriteString(style.Render(b.BottomLeft + strings.Repeat(b.Bottom, innerW) + b.BottomRight))
 
 	return sb.String()
 }
