@@ -142,18 +142,31 @@ func (m *Model) startDelegations() tea.Cmd {
 func (m *Model) delegationResolved(msg delegationMsg) tea.Cmd {
 	m.lookups.running--
 
-	if d, ok := m.delegations[msg.name]; ok {
-		switch {
-		case msg.err != nil:
-			*d = delegation{state: lookupFailed, err: msg.err}
-		case len(msg.ns) == 0:
-			*d = delegation{state: lookupFailed, err: errNoNameservers}
-		default:
-			*d = delegation{state: lookupDone, ns: nameSet(msg.ns), at: m.deps.now()}
-		}
-	}
+	m.recordDelegation(msg.name, msg.ns, msg.err)
 
 	return m.startDelegations()
+}
+
+// recordDelegation records what the resolver answered for a zone name,
+// by nameKey, whoever asked it: a lookup, or a check just before a Zone
+// write such as an Offboarding. A name this session does not track, as
+// it left the cache, is not recorded.
+func (m *Model) recordDelegation(name string, ns []string, err error) {
+	d, ok := m.delegations[name]
+	if !ok {
+		return
+	}
+
+	// A lookup queued or in flight still runs; what it answers then
+	// replaces this.
+	switch {
+	case err != nil:
+		*d = delegation{state: lookupFailed, err: err}
+	case len(ns) == 0:
+		*d = delegation{state: lookupFailed, err: errNoNameservers}
+	default:
+		*d = delegation{state: lookupDone, ns: nameSet(ns), at: m.deps.now()}
+	}
 }
 
 // nameSet normalises DNS names with nameKey, sorted and without
@@ -184,11 +197,21 @@ const (
 // resolved, or when the Zone's expected nameservers are not cached.
 func (m *Model) liveness(z dns.Zone) liveness {
 	d, ok := m.delegations[nameKey(z.Name)]
-	if !ok || d.state != lookupDone || len(z.Nameservers) == 0 {
+	if !ok || d.state != lookupDone {
 		return liveUnknown
 	}
 
-	if slices.Equal(z.Nameservers, d.ns) {
+	return livenessOf(z.Nameservers, d.ns)
+}
+
+// livenessOf is the Live Zone rule: a Zone whose expected nameservers ns
+// are exactly the delegated ones, a nameSet, compared as sets, is the
+// Live Zone; it is unknown without ns.
+func livenessOf(ns, delegated []string) liveness {
+	switch {
+	case len(ns) == 0:
+		return liveUnknown
+	case slices.Equal(nameSet(ns), delegated):
 		return liveYes
 	}
 

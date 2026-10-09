@@ -53,6 +53,11 @@ type zoneOffboardedMsg struct {
 	// refused is why the Zone was not Offboarded after all: it is, or may
 	// be, the Live Zone. Nothing was sent.
 	refused error
+	// resolved is set when the Delegation was resolved anew, to delegated
+	// or, failing, resolveErr, which the session then records as its own.
+	resolved   bool
+	delegated  []string
+	resolveErr error
 	// gone is set when the Provider no longer had the Zone: it was
 	// Offboarded, but not, as far as dnscli can tell, by this delete.
 	gone bool
@@ -165,18 +170,17 @@ func hostingRefusal(name string, a dns.Account, state dnsprovider.HostingState) 
 // or they are not known, so whether it is the Live Zone is not. nil when
 // it may.
 func liveRefusal(name string, a dns.Account, ns, delegated []string) error {
-	if len(ns) == 0 {
+	switch livenessOf(ns, delegated) {
+	case liveUnknown:
 		return liveUnknownError(name, "the nameservers "+a.Label()+" assigned it are not known: re-list the Account")
-	}
-
-	ns = nameSet(ns)
-
-	if slices.Equal(ns, delegated) {
+	case liveYes:
 		return fmt.Errorf("%s is the Live Zone of %s: its Delegation names the nameservers %s assigned it, "+
 			"so Offboarding it would stop the domain resolving. Move the Delegation first.", name, name, a.Label())
 	}
 
-	for _, n := range ns {
+	// Not the Live Zone by the rule, but its Provider may still answer
+	// for the name through a nameserver they share.
+	for _, n := range nameSet(ns) {
 		if slices.Contains(delegated, n) {
 			return fmt.Errorf("Offboarding is refused: the Delegation of %s names %s, which %s assigned it, "+
 				"so %s may still answer for %s.", name, n, a.Label(), a.Label(), name)
@@ -332,7 +336,18 @@ func (m *Model) deleteZone(d *offboardDialog) tea.Cmd {
 			return msg
 		}
 
-		if msg.refused = checkNotLive(ctx, r, a, z, held); msg.refused != nil {
+		if r == nil {
+			msg.refused = liveUnknownError(z.Name, "dnscli has no resolver to read its Delegation with")
+
+			return msg
+		}
+
+		ns, rerr := r.NS(ctx, nameKey(z.Name))
+		if ctx.Err() == nil {
+			msg.resolved, msg.delegated, msg.resolveErr = true, ns, rerr
+		}
+
+		if msg.refused = checkNotLive(a, z, held, ns, rerr); msg.refused != nil {
 			return msg
 		}
 
@@ -386,16 +401,11 @@ func heldZone(ctx context.Context, p dnsprovider.Provider, z dns.Zone) (dnsprovi
 	return dnsprovider.Zone{}, false, nil
 }
 
-// checkNotLive resolves the Delegation of z's name anew and refuses z,
-// as its Provider has it now (held) and as cached, when either is, or
-// may be, the Live Zone, or when its Provider serves it now, or does not
-// say whether it does.
-func checkNotLive(ctx context.Context, r Resolver, a dns.Account, z dns.Zone, held dnsprovider.Zone) error {
-	if r == nil {
-		return liveUnknownError(z.Name, "dnscli has no resolver to read its Delegation with")
-	}
-
-	ns, err := r.NS(ctx, nameKey(z.Name))
+// checkNotLive refuses z, as its Provider has it now (held) and as
+// cached, when either is, or may be, the Live Zone of the Delegation the
+// resolver gave just now (ns, or the error resolving it), or when its
+// Provider serves it now, or does not say whether it does.
+func checkNotLive(a dns.Account, z dns.Zone, held dnsprovider.Zone, ns []string, err error) error {
 	if err == nil && len(ns) == 0 {
 		err = errNoNameservers
 	}
@@ -451,6 +461,10 @@ func uncache(ctx context.Context, s *store.Store, z dns.Zone) error {
 // error and the cache as it was; one made closes it and drops the Zone
 // from the pane.
 func (m *Model) zoneOffboarded(msg zoneOffboardedMsg) tea.Cmd {
+	if msg.resolved {
+		m.recordDelegation(nameKey(msg.zone.Name), msg.delegated, msg.resolveErr)
+	}
+
 	d := m.offboard
 	if d != nil && d.zone.ID != msg.zone.ID {
 		d = nil

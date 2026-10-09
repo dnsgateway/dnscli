@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/dnsgateway/dnsprovider"
@@ -231,6 +232,16 @@ func TestAZoneTheDelegationCameToNameSinceTheDialogOpenedIsNotOffboarded(t *test
 	if calls := deleteZoneCalls(f); len(calls) != 0 || !zoneCached(t, s, "work.test") {
 		t.Fatalf("DeleteZone calls = %q, want none and work.test cached", calls)
 	}
+
+	// The Delegation resolved anew is the session's: the pane marks the
+	// Live Zone by it, and the next Offboarding is refused at once.
+	if row := h.domainRow("work.test"); !strings.Contains(row, "●") {
+		t.Errorf("work.test row = %q, want it marked the Live Zone", row)
+	}
+
+	h.press("d")
+	h.assertShows("work.test is the Live Zone")
+	h.assertHides("Offboard work.test from")
 }
 
 func TestAZoneWhoseDelegationCannotBeResolvedAgainIsNotOffboarded(t *testing.T) {
