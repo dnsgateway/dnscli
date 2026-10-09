@@ -688,3 +688,89 @@ func TestVerifyOfCredentialsWithoutTenantsReturnsThemAsTheyAre(t *testing.T) {
 		t.Errorf("Verify = %v, %+v, %v; want the credentials as they are, no Tenant", scoped, tenant, err)
 	}
 }
+
+// everyTenant opens fields as OpenScoped does, then the Provider acting
+// on every Tenant they reach.
+func everyTenant(t *testing.T, o *provider.Opener, typ string, fields map[string]string) dnsprovider.Provider {
+	t.Helper()
+
+	_, scopedFields, err := o.OpenScoped(context.Background(), typ, fields)
+	if err != nil {
+		t.Fatalf("OpenScoped: %v", err)
+	}
+
+	every, err := o.EveryTenant(context.Background(), typ, scopedFields)
+	if err != nil {
+		t.Fatalf("EveryTenant: %v", err)
+	}
+
+	return every
+}
+
+func TestCredentialsReachingSeveralTenantsListZonesOfEveryOneUnscopedBuiltOnce(t *testing.T) {
+	r := newTenanted(dnsprovider.Tenant{ID: tenantID}, dnsprovider.Tenant{ID: "b2"})
+	o := provider.NewOpener(r.registry())
+
+	every := everyTenant(t, o, "tenanted", map[string]string{"token": "tok", "scope": "b2"})
+	everyTenant(t, o, "tenanted", map[string]string{"token": "tok", "scope": "b2"})
+
+	if s, ok := every.(scoped); !ok || s.scope != "" {
+		t.Errorf("every-Tenant Provider = %#v, want one built unscoped", every)
+	}
+
+	// The unscoped build that listed the Tenants is the one kept.
+	if b := r.builds(); !slices.Equal(b, []string{"b2", "", "b2"}) {
+		t.Errorf("built with Tenants %q, want the stored one each time, and unscoped once", b)
+	}
+
+	if n := count(r.fake, providertest.OpTenants); n != 1 {
+		t.Errorf("Tenants listed %d times, want once", n)
+	}
+}
+
+func TestCredentialsReachingOneTenantListZonesWithTheProviderOpened(t *testing.T) {
+	r := newTenanted(dnsprovider.Tenant{ID: tenantID})
+
+	if every := everyTenant(t, provider.NewOpener(r.registry()), "tenanted", creds("tok")); every != nil {
+		t.Errorf("every-Tenant Provider = %#v, want none: the one opened lists every Zone", every)
+	}
+}
+
+func TestAProviderWithoutTenantsListsZonesWithTheProviderOpened(t *testing.T) {
+	f := providertest.New()
+	reg := dnsprovider.Registry{"plain": f.Factory()}
+
+	if every := everyTenant(t, provider.NewOpener(reg), "plain", creds("tok")); every != nil {
+		t.Errorf("every-Tenant Provider = %#v, want none", every)
+	}
+
+	if n := count(f, providertest.OpTenants); n != 0 {
+		t.Errorf("Tenants listed %d times, want none", n)
+	}
+}
+
+func TestATenantListThatFailsLeavesWhetherThereAreSeveralUnknown(t *testing.T) {
+	r := newTenanted(dnsprovider.Tenant{ID: tenantID}, dnsprovider.Tenant{ID: "b2"})
+	r.fake.Fail(providertest.OpTenants, errors.New("rate limited"))
+
+	every, err := provider.NewOpener(r.registry()).EveryTenant(context.Background(), "tenanted", map[string]string{"token": "tok", "scope": "b2"})
+	if every != nil || err == nil {
+		t.Errorf("EveryTenant = %#v, %v; want no Provider and the listing's error", every, err)
+	}
+}
+
+func TestATenantFieldStoredEmptySharesTheTenantList(t *testing.T) {
+	r := newTenanted(dnsprovider.Tenant{ID: tenantID}, dnsprovider.Tenant{ID: "b2"})
+	o := provider.NewOpener(r.registry())
+
+	// Stored empty, the Tenants are listed to choose one.
+	if _, _, err := o.OpenScoped(context.Background(), "tenanted", map[string]string{"token": "tok", "scope": ""}); err == nil {
+		t.Fatal("OpenScoped of credentials reaching several Tenants, none chosen: no error")
+	}
+
+	everyTenant(t, o, "tenanted", map[string]string{"token": "tok", "scope": "b2"})
+
+	if n := count(r.fake, providertest.OpTenants); n != 1 {
+		t.Errorf("Tenants listed %d times, want once", n)
+	}
+}

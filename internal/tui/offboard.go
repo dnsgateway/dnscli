@@ -29,20 +29,22 @@ import (
 type offboardDialog struct {
 	zone    dns.Zone
 	account dns.Account
-	// p is the Account's Provider, a dnsprovider.ZoneDeleter.
-	p    dnsprovider.Provider
-	busy bool // the Zone is being Offboarded
+	// reach is the Account's Provider, a dnsprovider.ZoneDeleter, within
+	// its own Tenant, which the Zone is Offboarded within, and the one the
+	// Zone is found with among those of every Tenant it reaches.
+	reach accountReach
+	busy  bool // the Zone is being Offboarded
 	// cancel stops the Offboarding in flight; nil when none is.
 	cancel context.CancelFunc
 	err    string
 }
 
-// offboardOpenedMsg reports the Provider opened for the Offboard dialog;
-// p is nil when it failed.
+// offboardOpenedMsg reports the Providers opened for the Offboard
+// dialog; reach.own is nil when it failed.
 type offboardOpenedMsg struct {
 	zone    dns.Zone
 	account dns.Account
-	p       dnsprovider.Provider
+	reach   accountReach
 	err     error
 }
 
@@ -51,7 +53,8 @@ type zoneOffboardedMsg struct {
 	zone    dns.Zone
 	account dns.Account
 	// refused is why the Zone was not Offboarded after all: it is, or may
-	// be, the Live Zone. Nothing was sent.
+	// be, the Live Zone, or is not, or may not be, of the Account's own
+	// Tenant. Nothing was sent.
 	refused error
 	// resolved is set when the Delegation was resolved anew, to delegated
 	// or, failing, resolveErr, which the session then records as its own.
@@ -270,9 +273,9 @@ func (m *Model) openOffboardOf(zoneID int64) tea.Cmd {
 	ctx, s, key, providers := m.ctx, m.deps.Store, m.key, m.providers
 
 	return func() tea.Msg {
-		p, _, err := accountProvider(ctx, s, key, providers, a)
+		reach, err := openReach(ctx, s, key, providers, a)
 
-		return offboardOpenedMsg{zone: z, account: a, p: p, err: err}
+		return offboardOpenedMsg{zone: z, account: a, reach: reach, err: err}
 	}
 }
 
@@ -295,7 +298,7 @@ func (m *Model) offboardOpened(msg offboardOpenedMsg) {
 		m.notice = notice{text: "Could not open " + msg.account.Label() + ": " + msg.err.Error(), err: true}
 
 		return
-	case !dnsprovider.CanDeleteZone(msg.p):
+	case !dnsprovider.CanDeleteZone(msg.reach.own):
 		m.notice = notice{text: cannotOffboard(msg.account), err: true}
 
 		return
@@ -314,7 +317,7 @@ func (m *Model) offboardOpened(msg offboardOpenedMsg) {
 		return
 	}
 
-	m.offboard = &offboardDialog{zone: z, account: msg.account, p: msg.p}
+	m.offboard = &offboardDialog{zone: z, account: msg.account, reach: msg.reach}
 }
 
 // offboardKey handles a key while the Offboard dialog is open: Enter
@@ -375,7 +378,8 @@ const offboardTimeout = time.Minute
 // is removed from the cache without a delete. A delete that failed is
 // read back, whatever the failure: a Zone gone is Offboarded.
 func (m *Model) deleteZone(d *offboardDialog) tea.Cmd {
-	parent, s, r, p, a, z := m.ctx, m.deps.Store, m.deps.Resolver, d.p, d.account, d.zone
+	parent, s, r, reach, a, z := m.ctx, m.deps.Store, m.deps.Resolver, d.reach, d.account, d.zone
+	p, lister := reach.own, reach.lister()
 
 	ctx, cancel := context.WithTimeout(parent, offboardTimeout)
 	d.cancel = cancel
@@ -385,11 +389,17 @@ func (m *Model) deleteZone(d *offboardDialog) tea.Cmd {
 
 		msg := zoneOffboardedMsg{zone: z, account: a}
 
-		held, ok, err := heldZone(ctx, p, z)
+		held, ok, err := heldZone(ctx, lister, z)
 
 		switch {
 		case err != nil:
 			msg.err, msg.cancelled = err, errors.Is(err, context.Canceled)
+
+			return msg
+		case !ok && reach.everyErr != nil:
+			// It may be of another Tenant, which could not be listed.
+			msg.refused = fmt.Errorf("Offboarding is refused: %s is not among the Zones of the Tenant %s acts within, "+
+				"and the other Tenants it reaches could not be listed: %w.", z.Name, a.Label(), reach.everyErr)
 
 			return msg
 		case !ok:
@@ -397,6 +407,22 @@ func (m *Model) deleteZone(d *offboardDialog) tea.Cmd {
 			msg.saveErr = uncache(parent, s, z)
 
 			return msg
+		}
+
+		if reach.every != nil {
+			_, own, err := heldZone(ctx, p, z)
+
+			switch {
+			case err != nil:
+				msg.err, msg.cancelled = err, errors.Is(err, context.Canceled)
+
+				return msg
+			case !own:
+				msg.refused = fmt.Errorf("Offboarding is refused: %s is of another Tenant than the one %s acts within. "+
+					"Offboard it from an Account acting within that Tenant.", z.Name, a.Label())
+
+				return msg
+			}
 		}
 
 		if r == nil {
@@ -421,7 +447,7 @@ func (m *Model) deleteZone(d *offboardDialog) tea.Cmd {
 			// Whatever the failure, the delete was sent, and the
 			// module retries it: an earlier try may have taken it.
 			rctx, rcancel := context.WithTimeout(parent, offboardTimeout)
-			_, still, rerr := heldZone(rctx, p, z)
+			_, still, rerr := heldZone(rctx, lister, z)
 
 			rcancel()
 

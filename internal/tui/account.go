@@ -892,14 +892,43 @@ func (m *Model) discoverZones(a dns.Account, relist bool) tea.Cmd {
 // does an empty list: an API token without zone read permission lists no
 // Zones, which must not drop the Account's cache.
 func discover(ctx context.Context, s *store.Store, key *vault.Key, providers *provider.Opener, a dns.Account) (int, store.ZoneSync, error) {
-	p, fields, err := accountProvider(ctx, s, key, providers, a)
+	reach, err := openReach(ctx, s, key, providers, a)
 	if err != nil {
 		return 0, store.ZoneSync{}, err
 	}
 
-	listed, err := p.Zones(ctx, dnsprovider.ZoneFilter{})
-	if err != nil || len(listed) == 0 {
+	if reach.everyErr != nil {
+		// Its own Tenant's Zones alone would drop the others' from the
+		// cache.
+		return 0, store.ZoneSync{}, fmt.Errorf("listing the Tenants its credentials reach: %w", reach.everyErr)
+	}
+
+	listed, err := reach.own.Zones(ctx, dnsprovider.ZoneFilter{})
+	if err != nil {
 		return 0, store.ZoneSync{}, err
+	}
+
+	own := provider.CacheZones(listed)
+
+	expectAccountNameservers(own, func() ([]string, error) {
+		return providers.Nameservers(ctx, reach.own, a.Provider, reach.fields)
+	})
+
+	zones := own
+
+	if reach.every != nil {
+		// The Account's Zones are those of every Tenant it reaches, its
+		// own Tenant's copy of a zone name kept over another's.
+		listed, err = reach.every.Zones(ctx, dnsprovider.ZoneFilter{})
+		if err != nil {
+			return 0, store.ZoneSync{}, err
+		}
+
+		zones = append(zones, othersZones(own, provider.CacheZones(listed))...)
+	}
+
+	if len(zones) == 0 {
+		return 0, store.ZoneSync{}, nil
 	}
 
 	cached, err := cachedZoneIDs(ctx, s, a.ID)
@@ -907,11 +936,7 @@ func discover(ctx context.Context, s *store.Store, key *vault.Key, providers *pr
 		return 0, store.ZoneSync{}, err
 	}
 
-	zones := servedZones(provider.CacheZones(listed), cached)
-
-	expectAccountNameservers(zones, func() ([]string, error) {
-		return providers.Nameservers(ctx, p, a.Provider, fields)
-	})
+	zones = servedZones(zones, cached)
 
 	sync, err := s.SyncAccountZones(ctx, a.ID, zones)
 	if err != nil {
@@ -919,6 +944,17 @@ func discover(ctx context.Context, s *store.Store, key *vault.Key, providers *pr
 	}
 
 	return len(zones), sync, nil
+}
+
+// othersZones are the Zones listed of every Tenant whose names own, the
+// Zones of the Account's own Tenant, do not have.
+func othersZones(own, every []dns.Zone) []dns.Zone {
+	names := map[string]bool{}
+	for _, z := range own {
+		names[nameKey(z.Name)] = true
+	}
+
+	return slices.DeleteFunc(every, func(z dns.Zone) bool { return names[nameKey(z.Name)] })
 }
 
 // servedZones keeps one Zone per zone name, as the cache holds them, in

@@ -23,6 +23,9 @@ type Opener struct {
 
 	tenants     memo[[]dnsprovider.Tenant]
 	nameservers memo[[]string]
+	// every keeps the unscoped Provider of credentials reaching several
+	// Tenants, which lists the Zones of every one.
+	every memo[dnsprovider.Provider]
 }
 
 // NewOpener returns an Opener of the Providers in reg, each built with
@@ -91,18 +94,39 @@ func (e *TenantChoiceError) Error() string {
 // Provider it built to list the Tenants when that one is unscoped as the
 // fields are: it is opened already. Otherwise the Provider is nil.
 func (o *Opener) scope(ctx context.Context, typ string, fields map[string]string) (map[string]string, dnsprovider.Provider, error) {
-	f, err := o.factory(typ)
+	tenantField, err := o.tenantField(typ)
 	if err != nil {
-		return nil, nil, &InvalidCredentialsError{Err: err}
+		return nil, nil, err
 	}
 
 	fields = maps.Clone(fields)
 
-	tenantField := TenantField(f)
 	if tenantField == "" || fields[tenantField] != "" {
 		return fields, nil, nil
 	}
 
+	tenants, built, err := o.listTenants(ctx, typ, fields)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	switch len(tenants) {
+	case 0:
+		return fields, built, nil
+	case 1:
+		fields[tenantField] = tenants[0].ID
+
+		return fields, nil, nil
+	}
+
+	return nil, nil, &TenantChoiceError{Tenants: slices.Clone(tenants)}
+}
+
+// listTenants lists the Tenants credentials reach, given as fields
+// without a Tenant, once per credentials, and returns the Provider built
+// to list them when it was built now; nil when they were listed before.
+// Credentials that may not list them reach none.
+func (o *Opener) listTenants(ctx context.Context, typ string, fields map[string]string) ([]dnsprovider.Tenant, dnsprovider.Provider, error) {
 	var built dnsprovider.Provider
 
 	tenants, err := o.tenants.get(ctx, credentialsKey(typ, fields), func() ([]dnsprovider.Tenant, error) {
@@ -125,20 +149,49 @@ func (o *Opener) scope(ctx context.Context, typ string, fields map[string]string
 
 		return list, err
 	})
+
+	return tenants, built, err
+}
+
+// tenantField is the field Provider type typ takes its Tenant in; empty
+// when it takes none.
+func (o *Opener) tenantField(typ string) (string, error) {
+	f, err := o.factory(typ)
 	if err != nil {
-		return nil, nil, err
+		return "", &InvalidCredentialsError{Err: err}
 	}
 
-	switch len(tenants) {
-	case 0:
-		return fields, built, nil
-	case 1:
-		fields[tenantField] = tenants[0].ID
+	return TenantField(f), nil
+}
 
-		return fields, nil, nil
+// EveryTenant is the Provider of type typ acting on the Zones of every
+// Tenant an Account's credentials reach, given as the field map
+// OpenScoped returned: built unscoped when they reach several, and kept
+// for them; nil when the Provider OpenScoped built does, as they reach
+// one Tenant, or none. An Account's Zones are those of every Tenant it
+// reaches; its own Tenant is the one it Onboards in. err is why the
+// Tenants could not be listed: whether they are several is then unknown.
+func (o *Opener) EveryTenant(ctx context.Context, typ string, fields map[string]string) (dnsprovider.Provider, error) {
+	tenantField, err := o.tenantField(typ)
+	if err != nil || tenantField == "" || fields[tenantField] == "" {
+		return nil, err
 	}
 
-	return nil, nil, &TenantChoiceError{Tenants: slices.Clone(tenants)}
+	unscoped := maps.Clone(fields)
+	delete(unscoped, tenantField)
+
+	tenants, built, err := o.listTenants(ctx, typ, unscoped)
+	if err != nil || len(tenants) < 2 {
+		return nil, err
+	}
+
+	return o.every.get(ctx, credentialsKey(typ, unscoped), func() (dnsprovider.Provider, error) {
+		if built != nil {
+			return built, nil
+		}
+
+		return o.build(typ, unscoped)
+	})
 }
 
 // namedTenant is the Tenant verified credentials act within, as their
@@ -236,6 +289,11 @@ func (o *Opener) Nameservers(ctx context.Context, p dnsprovider.Provider, typ st
 // credentialsKey keys what is kept for an Account's credentials without
 // holding them.
 func credentialsKey(typ string, fields map[string]string) string {
+	// A field set empty is one left out: a Tenant field stored empty
+	// keys as one missing.
+	fields = maps.Clone(fields)
+	maps.DeleteFunc(fields, func(_, v string) bool { return v == "" })
+
 	sum := sha256.Sum256(append([]byte(typ+"\x00"), EncodeCredentials(fields)...))
 
 	return string(sum[:])

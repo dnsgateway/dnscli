@@ -356,6 +356,43 @@ func accountProvider(ctx context.Context, s *store.Store, key *vault.Key, provid
 	return p, scoped, nil
 }
 
+// accountReach is an Account's Provider, within its own Tenant, and the
+// one acting on the Zones of every Tenant its credentials reach: an
+// Account's Zones are those of every one, but it Onboards, and Offboards,
+// only within its own.
+type accountReach struct {
+	own    dnsprovider.Provider
+	fields map[string]string
+	// every lists the Zones of every Tenant; nil when own does, as the
+	// credentials reach one Tenant, or none.
+	every dnsprovider.Provider
+	// everyErr is why the Tenants could not be listed: whether own lists
+	// every Zone is then unknown.
+	everyErr error
+}
+
+// lister is the Provider listing the Account's Zones as far as known.
+func (r accountReach) lister() dnsprovider.Provider {
+	if r.every != nil {
+		return r.every
+	}
+
+	return r.own
+}
+
+// openReach opens an Account's Provider, as accountProvider does, and the
+// one acting on every Tenant its credentials reach.
+func openReach(ctx context.Context, s *store.Store, key *vault.Key, providers *provider.Opener, a dns.Account) (accountReach, error) {
+	p, fields, err := accountProvider(ctx, s, key, providers, a)
+	if err != nil {
+		return accountReach{}, err
+	}
+
+	every, err := providers.EveryTenant(ctx, a.Provider, fields)
+
+	return accountReach{own: p, fields: fields, every: every, everyErr: err}, nil
+}
+
 // replaceCredentials seals fields as an Account's credentials in place of
 // sealed, the ones read, unless they were saved again meanwhile. It
 // reports whether they were replaced.

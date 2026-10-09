@@ -12,6 +12,7 @@ import (
 	"github.com/dnsgateway/dnsprovider/providertest"
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
+	"github.com/sergelogvinov/dnscli/internal/tui"
 )
 
 func TestRelistingAddsNewZonesAndDropsGoneOnesKeepingTheCacheOfTheRest(t *testing.T) {
@@ -413,5 +414,35 @@ func TestAScopedAccountCachesTheOnboardedAgainCopyOfAMovedZone(t *testing.T) {
 
 	if z := zoneNamed(t, s, "work.example"); z.ProviderID != "zw9" || z.State != dnsprovider.HostingPending {
 		t.Errorf("work.example = %+v, want zw9 pending", z)
+	}
+}
+
+func TestRelistingAnAccountReachingSeveralTenantsListsTheZonesOfEveryOne(t *testing.T) {
+	f := refreshZones()
+	f.SetTenants(twoTenants...)
+
+	s, _ := enrollFirstAccount(t)
+	old := addOldAccount(t, s, "cloudflare", "old", `{"token":"tok","account":"b2"}`)
+
+	tb := &tenantBuilds{}
+	h := newHarnessWith(t, s, tui.Deps{Providers: f.tenantRegistry(tb), UnsealMethod: fastPassphrase()})
+
+	h.press("shift+tab", "L")
+	h.unsealWith(passphrase)
+	h.assertShows("Re-listed cloudflare.old")
+
+	// Opened within its Tenant, then built unscoped, as Cloudflare lists
+	// the Zones of every account a token reaches, to list its Zones.
+	tb.mu.Lock()
+	builds := slices.Clone(tb.tenants)
+	tb.mu.Unlock()
+
+	if !slices.Equal(builds, []string{"b2", ""}) {
+		t.Fatalf("built with Tenants %q, want b2, then unscoped", builds)
+	}
+
+	// Its own Tenant stays the one it Onboards in.
+	if got := storedFields(t, s, old)["account"]; got != "b2" {
+		t.Fatalf("stored Tenant = %q, want b2 kept", got)
 	}
 }
