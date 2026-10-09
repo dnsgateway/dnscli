@@ -516,10 +516,11 @@ func uncache(ctx context.Context, s *store.Store, z dns.Zone) error {
 	return nil
 }
 
-// zoneOffboarded reports an Offboarding. One refused closes the dialog,
-// saying why; one the Provider failed leaves the dialog open with the
-// error and the cache as it was; one made closes it and drops the Zone
-// from the pane.
+// zoneOffboarded reports an Offboarding, in the status bar whether or
+// not its dialog is still open. One refused closes the dialog, saying
+// why; one the Provider failed leaves the dialog open with the error and
+// the cache as it was; one made closes it and drops the Zone from the
+// pane.
 func (m *Model) zoneOffboarded(msg zoneOffboardedMsg) tea.Cmd {
 	delete(m.offboarding, msg.zone.ID)
 
@@ -546,6 +547,10 @@ func (m *Model) zoneOffboarded(msg zoneOffboardedMsg) tea.Cmd {
 			d.busy, d.cancel = false, nil
 			d.err = m.offboardError(msg)
 		}
+
+		// The status bar says it too, so it is seen once the dialog is
+		// closed, or when it was closed meanwhile.
+		m.notice = notice{text: m.offboardNotice(msg), err: true}
 
 		return nil
 	}
@@ -588,6 +593,17 @@ func (m *Model) offboardError(msg zoneOffboardedMsg) string {
 	}
 
 	return text
+}
+
+// offboardNotice is the status bar's word on a failed Offboarding: what
+// may have happened first, as the bar is one line.
+func (m *Model) offboardNotice(msg zoneOffboardedMsg) string {
+	if msg.sent && msg.readBack != nil {
+		return msg.zone.Name + " may have been Offboarded from " + msg.account.Label() + ": the delete failed (" +
+			strings.TrimSuffix(msg.err.Error(), ".") + ") and reading it back failed (" + msg.readBack.Error() + "). " + m.reList()
+	}
+
+	return m.offboardError(msg)
 }
 
 func (m *Model) offboardView() string {

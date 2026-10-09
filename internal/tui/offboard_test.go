@@ -407,6 +407,8 @@ type lostDelete struct {
 	take bool
 	// err, when set, is the failure instead of a lost connection.
 	err error
+	// then, when set, runs once the delete is sent.
+	then func()
 	// ctx is the context the last delete was given.
 	ctx *context.Context
 }
@@ -414,6 +416,10 @@ type lostDelete struct {
 func (l lostDelete) DeleteZone(ctx context.Context, z dnsprovider.Zone) error {
 	if l.ctx != nil {
 		*l.ctx = ctx
+	}
+
+	if l.then != nil {
+		l.then()
 	}
 
 	if l.take {
@@ -730,4 +736,23 @@ func TestOffboardingIsRefusedWhileItsAccountIsReListed(t *testing.T) {
 
 	h.press("d")
 	h.assertShows("Offboard work.test from cloudflare.work?")
+}
+
+func TestTheOutcomeOfAnOffboardingStaysInTheStatusBarOnceTheDialogIsClosed(t *testing.T) {
+	// The delete's answer is lost and reading it back fails: it may have
+	// been Offboarded, which the user must not miss.
+	s := offboardStore(t)
+	f := offboardFake()
+	h := newLostDeleteHarness(t, s, f, lostDelete{take: true, then: func() {
+		f.Fail(providertest.OpZones, errConnectionReset)
+	}})
+
+	h.press("j", "d")
+	h.unsealWith(passphrase)
+	h.press("enter")
+	h.assertShows("Offboard work.test from cloudflare.work?", "may have been Offboarded")
+
+	h.press("esc")
+	h.assertHides("Offboard work.test from")
+	h.assertShows("work.test may have been Offboarded from cloudflare.work")
 }
