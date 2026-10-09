@@ -120,54 +120,6 @@ func TestAmongZonesSharingAZoneNameOnlyTheOneMatchingTheDelegationIsLive(t *test
 	}
 }
 
-func TestTheDelegationViewShowsTheDelegatedAndTheExpectedNameservers(t *testing.T) {
-	s, _ := openStore(t)
-	seedSharedName(t, s)
-
-	h := newHarnessWith(t, s, tui.Deps{Resolver: &fakeResolver{ns: map[string][]string{
-		"example.com": {"cruz.ns.cloudflare.com.", "dee.ns.cloudflare.com."},
-	}}})
-	h.send(tea.WindowSizeMsg{Width: 160, Height: 30})
-
-	// The highlighted Zone is example.com in cloudflare.personal.
-	h.press("N")
-	h.assertShows(
-		"Delegation of example.com",
-		"cruz.ns.cloudflare.com, dee.ns.cloudflare.com",
-		"cloudflare.personal",
-		"ada.ns.cloudflare.com, bob.ns.cloudflare.com",
-		"not the Live Zone",
-		"Live Zone",
-		"read-only",
-	)
-
-	// It changes nothing: Delegation is read-only (ADR-0004).
-	h.press("enter", "d", "e")
-	h.assertShows("Delegation of example.com")
-
-	h.press("esc")
-	h.assertHides("Delegation of example.com")
-}
-
-func TestTheDelegationViewSaysWhyTheLiveZoneIsUnknown(t *testing.T) {
-	s, _ := openStore(t)
-	seedCache(t, s)
-	expectNameservers(t, s, "cloudflare.personal", "example.com", "ada.ns.cloudflare.com", "bob.ns.cloudflare.com")
-
-	h := newHarnessWith(t, s, tui.Deps{Resolver: &fakeResolver{
-		ns:     map[string][]string{"example.org": {"ada.ns.cloudflare.com", "bob.ns.cloudflare.com"}},
-		nsErrs: map[string]error{"example.com": errors.New("i/o timeout")},
-	}})
-
-	h.press("N")
-	h.assertShows("Delegation lookup failed: i/o timeout", "ada.ns.cloudflare.com, bob.ns.cloudflare.com", "Live Zone unknown")
-	h.press("esc")
-
-	// example.org's expected nameservers were never cached.
-	h.press("j", "N")
-	h.assertShows("Delegation of example.org", "not cached", "Live Zone unknown")
-}
-
 // addWorkAccount adds cloudflare.work, backed by f, in a session that asks r.
 func addWorkAccount(t *testing.T, f *fakeProvider, r tui.Resolver) (*harness, *store.Store) {
 	t.Helper()
@@ -281,12 +233,13 @@ func TestAZoneListedWithoutNameserversInAnAccountWithSeveralSetsHasNoneExpected(
 		AddZone(dns.Zone{Name: "work.net", ProviderID: "zw3", Nameservers: adaBob})
 	f.SetNameservers(append(adaBob, cruzDee...)...)
 
-	h, _ := addWorkAccount(t, f, &fakeResolver{ns: map[string][]string{"work.example": cruzDee}})
+	h, s := addWorkAccount(t, f, &fakeResolver{ns: map[string][]string{"work.example": cruzDee}})
 
 	h.assertLive("work.example", false)
 
-	h.press("N")
-	h.assertShows("Delegation of work.example", "not cached", "Live Zone unknown")
+	if ns := zoneNamed(t, s, "work.example").Nameservers; len(ns) != 0 {
+		t.Fatalf("work.example expects %v, want none cached", ns)
+	}
 
 	if n := nameserversCalls(f); n != 1 {
 		t.Fatalf("Account calls = %d, want 1, to verify the token", n)
@@ -312,8 +265,9 @@ func TestAFailureToReadTheAccountsNameserversStillCachesItsZones(t *testing.T) {
 	h.press("tab")
 	h.assertLive("work.example", false)
 
-	h.press("N")
-	h.assertShows("not cached", "Live Zone unknown")
+	if ns := zoneNamed(t, s, "work.example").Nameservers; len(ns) != 0 {
+		t.Fatalf("work.example expects %v, want none cached", ns)
+	}
 }
 
 // runOnce runs cmd and the commands it batches, without feeding their

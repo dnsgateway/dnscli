@@ -149,8 +149,8 @@ func (m *Model) forgetZones(ids []int64) {
 			m.templateForm = nil
 		}
 
-		if m.zoneSettings != nil && m.zoneSettings.zone.ID == id {
-			m.zoneSettings = nil
+		if m.zoneEdit != nil && m.zoneEdit.zone.ID == id {
+			m.zoneEdit = nil
 		}
 
 		if m.offboard != nil && m.offboard.zone.ID == id {

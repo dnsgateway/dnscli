@@ -71,6 +71,10 @@ var migrations = []string{
 	`
 	ALTER TABLE zones ADD COLUMN hosting_state TEXT NOT NULL DEFAULT ''; -- 'active', 'pending' or 'moved'; '' = unknown until the next listing
 	`,
+	// 6: the minimum TLS version of the cached Zone Status.
+	`
+	ALTER TABLE zones ADD COLUMN min_tls TEXT NOT NULL DEFAULT ''; -- dnsprovider.TLSVersion, e.g. '1.2'; '' = unknown
+	`,
 }
 
 // migrate applies pending migrations in one write transaction. BEGIN IMMEDIATE

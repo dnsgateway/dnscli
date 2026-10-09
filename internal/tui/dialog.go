@@ -29,7 +29,10 @@ type dialogField struct {
 	masked bool // a secret: shown as dots
 	choice bool // picked from a list of values instead of typed
 	fixed  bool // shown but not typed into nor changed
-	caret  int  // where the caret is while the field is typed into, in runes back from the end
+	// more are further values of a fixed field, each shown on a row of
+	// its own below value, such as nameservers.
+	more  []string
+	caret int // where the caret is while the field is typed into, in runes back from the end
 }
 
 // dialogView renders a dialog box: its fields, with the focused one marked,
@@ -82,12 +85,22 @@ func sizedDialogView(title string, fields []dialogField, focus int, typing bool,
 		}
 
 		lines = append(lines, marker+helpKeyStyle.Render(f.label)+strings.Repeat(" ", labelW-lipgloss.Width(f.label))+"  "+v)
+
+		for _, more := range f.more {
+			if w := lipgloss.Width(more); w > maxValueWidth {
+				more = "…" + ansi.TruncateLeft(more, w-maxValueWidth+1, "")
+			}
+
+			lines = append(lines, strings.Repeat(" ", 2+labelW+2)+more)
+		}
 	}
 
 	lines = append(lines, "")
 	lines = append(lines, notes...)
 
-	if len(footer) > 0 {
+	// One blank line parts the fields from the notes, and the notes from
+	// the footer.
+	if len(footer) > 0 && len(notes) > 0 {
 		lines = append(lines, "")
 	}
 

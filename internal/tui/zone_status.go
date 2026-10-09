@@ -46,8 +46,7 @@ func (m *Model) zoneStatusItems(z dns.Zone) []string {
 
 	items = append(items, settingBadge("DNSSEC", z.Status.DNSSEC))
 
-	// HSTS is a Cloudflare zone setting; other Providers have none.
-	if a, ok := m.account(z.AccountID); ok && a.Provider == "cloudflare" {
+	if a, ok := m.account(z.AccountID); ok && hasWebSettings(a) {
 		items = append(items, settingBadge("HSTS", z.Status.HSTS))
 	}
 
@@ -84,6 +83,13 @@ func settingBadge(name string, s dnsprovider.Setting) string {
 	}
 
 	return badgeAbsentStyle.Render(name + " ?")
+}
+
+// hasWebSettings reports whether an Account's Provider has the web
+// settings of a Zone, HSTS and the minimum TLS version: Cloudflare, which
+// serves HTTPS for its Zones; other Providers have none.
+func hasWebSettings(a dns.Account) bool {
+	return a.Provider == "cloudflare"
 }
 
 // mailBadges shows each kind of mail record a Zone may have, colored by

@@ -91,10 +91,11 @@ func putZone(ctx context.Context, db execQueryRower, z dns.Zone, listing bool) (
 			nameservers      = IIF(excluded.nameservers = '' AND excluded.provider_zone_id = provider_zone_id, nameservers, excluded.nameservers),
 			dnssec           = IIF(excluded.provider_zone_id = provider_zone_id, dnssec, 0),
 			hsts             = IIF(excluded.provider_zone_id = provider_zone_id, hsts, 0),
+			min_tls          = IIF(excluded.provider_zone_id = provider_zone_id, min_tls, ''),
 			status_at        = IIF(excluded.provider_zone_id = provider_zone_id, status_at, 0)
-		RETURNING id, soa_serial, refreshed_at, dnssec, hsts, status_at, nameservers, hosting_state`,
+		RETURNING id, soa_serial, refreshed_at, dnssec, hsts, min_tls, status_at, nameservers, hosting_state`,
 		z.AccountID, z.Name, z.ProviderID, z.Serial, unixOrZero(z.RefreshedAt), joinNames(z.Nameservers), hostingWord(z.State), listing,
-	).Scan(&z.ID, &z.Serial, &refreshed, &z.Status.DNSSEC, &z.Status.HSTS, &statusAt, &ns, &state)
+	).Scan(&z.ID, &z.Serial, &refreshed, &z.Status.DNSSEC, &z.Status.HSTS, &z.Status.MinTLS, &statusAt, &ns, &state)
 	if err != nil {
 		return dns.Zone{}, false, fmt.Errorf("put zone %s: %w", z.Name, err)
 	}
@@ -241,7 +242,7 @@ func accountZones(ctx context.Context, conn *sql.Conn, accountID int64) (map[str
 func (s *Store) Zones(ctx context.Context) ([]dns.Zone, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT z.id, z.account_id, z.name, z.provider_zone_id, z.soa_serial, z.refreshed_at,
-			z.dnssec, z.hsts, z.status_at, z.nameservers, z.hosting_state
+			z.dnssec, z.hsts, z.min_tls, z.status_at, z.nameservers, z.hosting_state
 		FROM zones z JOIN accounts a ON a.id = z.account_id
 		ORDER BY z.name, a.provider, a.name`)
 	if err != nil {
@@ -259,7 +260,7 @@ func (s *Store) Zones(ctx context.Context) ([]dns.Zone, error) {
 		)
 
 		if err := rows.Scan(&z.ID, &z.AccountID, &z.Name, &z.ProviderID, &z.Serial, &refreshed,
-			&z.Status.DNSSEC, &z.Status.HSTS, &statusAt, &ns, &state); err != nil {
+			&z.Status.DNSSEC, &z.Status.HSTS, &z.Status.MinTLS, &statusAt, &ns, &state); err != nil {
 			return nil, fmt.Errorf("list zones: %w", err)
 		}
 
@@ -322,12 +323,13 @@ func (s *Store) SaveRefresh(ctx context.Context, z dns.Zone, records []dns.Recor
 			refreshed_at = ?2,
 			dnssec       = IIF(?7 = 0 OR status_at >= ?7, dnssec, ?8),
 			hsts         = IIF(?7 = 0 OR status_at >= ?7, hsts, ?9),
+			min_tls      = IIF(?7 = 0 OR status_at >= ?7, min_tls, ?10),
 			status_at    = IIF(?7 = 0 OR status_at >= ?7, status_at, ?2)
 		WHERE id = ?3 AND account_id = ?4 AND name = ?5 AND provider_zone_id = ?6
-		RETURNING soa_serial, refreshed_at, dnssec, hsts, status_at`,
+		RETURNING soa_serial, refreshed_at, dnssec, hsts, min_tls, status_at`,
 		serial, unixOrZero(at), z.ID, z.AccountID, z.Name, z.ProviderID,
-		unixOrZero(z.StatusAt), z.Status.DNSSEC, z.Status.HSTS,
-	).Scan(&z.Serial, &refreshed, &z.Status.DNSSEC, &z.Status.HSTS, &statusAt)
+		unixOrZero(z.StatusAt), z.Status.DNSSEC, z.Status.HSTS, z.Status.MinTLS,
+	).Scan(&z.Serial, &refreshed, &z.Status.DNSSEC, &z.Status.HSTS, &z.Status.MinTLS, &statusAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrZoneNotCached
 	}
@@ -370,12 +372,13 @@ func (s *Store) SaveZoneStatus(ctx context.Context, z dns.Zone, u dnsprovider.Zo
 		UPDATE zones SET
 			dnssec    = IIF(?1, ?2, dnssec),
 			hsts      = IIF(?3, ?4, hsts),
+			min_tls   = IIF(?10, ?11, min_tls),
 			status_at = MAX(status_at, ?5)
 		WHERE id = ?6 AND account_id = ?7 AND name = ?8 AND provider_zone_id = ?9
-		RETURNING soa_serial, refreshed_at, dnssec, hsts, status_at, nameservers, hosting_state`,
+		RETURNING soa_serial, refreshed_at, dnssec, hsts, min_tls, status_at, nameservers, hosting_state`,
 		u.DNSSEC != nil, status.DNSSEC, u.HSTS != nil, status.HSTS, unixOrZero(at),
-		z.ID, z.AccountID, z.Name, z.ProviderID,
-	).Scan(&z.Serial, &refreshed, &z.Status.DNSSEC, &z.Status.HSTS, &statusAt, &ns, &state)
+		z.ID, z.AccountID, z.Name, z.ProviderID, u.MinTLS != nil, status.MinTLS,
+	).Scan(&z.Serial, &refreshed, &z.Status.DNSSEC, &z.Status.HSTS, &z.Status.MinTLS, &statusAt, &ns, &state)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrZoneNotCached
 	}

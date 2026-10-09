@@ -98,8 +98,12 @@ func (m *Model) View() string {
 		view = overlay(view, m.keychainView(), m.width, m.height)
 	case m.remove != nil:
 		view = overlay(view, m.removeAccountView(), m.width, m.height)
-	case m.zoneSettings != nil:
-		view = overlay(view, m.zoneSettingsView(), m.width, m.height)
+	case m.zoneEdit != nil:
+		view = overlay(view, m.zoneEditView(), m.width, m.height)
+
+		if m.zoneEdit.picker != nil {
+			view = overlay(view, m.zoneEdit.picker.view(m.height), m.width, m.height)
+		}
 	case m.onboard != nil:
 		view = overlay(view, m.onboardView(), m.width, m.height)
 	case m.offboard != nil:
@@ -116,8 +120,6 @@ func (m *Model) View() string {
 		}
 	case m.preview != nil:
 		view = overlay(view, m.previewView(), m.width, m.height)
-	case m.delegationOf != "":
-		view = overlay(view, m.delegationView(), m.width, m.height)
 	case m.tenantPick != nil:
 		view = overlay(view, m.tenantPick.picker.view(m.height), m.width, m.height)
 	}
@@ -397,7 +399,7 @@ func (m *Model) zoneStatusRow() string {
 func (m *Model) statusLineRow() string {
 	left, right := m.statusLine(), hintStyle.Render(m.keyHints()+" ")
 
-	form := m.recordForm != nil || m.templateForm != nil || m.addForm != nil
+	form := m.recordForm != nil || m.templateForm != nil || m.addForm != nil || m.zoneEdit != nil
 
 	switch {
 	case !form && lipgloss.Width(left)+1+lipgloss.Width(right) > m.width:
@@ -416,6 +418,10 @@ func (m *Model) keyHints() string {
 	if m.addForm != nil {
 		// An edited Account's Provider has no values to change or list.
 		return m.formKeysHint(m.addForm.editing == nil)
+	}
+
+	if m.zoneEdit != nil {
+		return m.zoneEditKeys()
 	}
 
 	if m.recordForm != nil || m.templateForm != nil {

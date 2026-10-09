@@ -6,7 +6,6 @@ package tui
 
 import (
 	"context"
-	"fmt"
 	"slices"
 	"time"
 
@@ -95,9 +94,6 @@ type Model struct {
 	delegations map[string]*delegation
 	// lookups schedules the Delegation lookups, by nameKey.
 	lookups workQueue[string]
-	// delegationOf is the zone name whose Delegation view is shown; empty
-	// when closed.
-	delegationOf string
 
 	// addForm is the add-Account dialog; nil when closed.
 	addForm *addAccountForm
@@ -133,9 +129,10 @@ type Model struct {
 	// tenantPick asks which Tenant an Account acts within; nil when
 	// closed.
 	tenantPick *tenantPick
-	// zoneSettings turns a Zone's DNSSEC or HSTS on or off; nil when
+	// zoneEdit is the Edit Zone dialog, which changes a Zone's DNSSEC,
+	// HSTS or minimum TLS version and shows its Delegation; nil when
 	// closed.
-	zoneSettings *zoneSettings
+	zoneEdit *zoneEditForm
 	// onboard Onboards a zone name in an Account; nil when closed.
 	onboard *onboardDialog
 	// offboard Offboards a Zone; nil when closed.
@@ -346,8 +343,8 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.changesApplied(msg)
 	case tenantPinnedMsg:
 		return m, m.tenantPinned(msg)
-	case zoneSettingsOpenedMsg:
-		m.zoneSettingsOpened(msg)
+	case zoneEditOpenedMsg:
+		m.zoneEditOpened(msg)
 	case zoneSettingsSavedMsg:
 		m.zoneSettingsSaved(msg)
 	case onboardOpenedMsg:
@@ -396,8 +393,8 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.removeAccountKey(msg)
 		}
 
-		if m.zoneSettings != nil {
-			return m, m.zoneSettingsKey(msg)
+		if m.zoneEdit != nil {
+			return m, m.zoneEditKey(msg)
 		}
 
 		if m.onboard != nil {
@@ -450,16 +447,6 @@ func (m *Model) handle(a Action) tea.Cmd {
 		return nil
 	}
 
-	if m.delegationOf != "" {
-		// The Delegation view is read-only: every other Action is ignored.
-		switch a {
-		case ActionDelegation, ActionClose:
-			m.delegationOf = ""
-		}
-
-		return nil
-	}
-
 	switch a {
 	case ActionNone, ActionUp, ActionDown, ActionPageUp, ActionPageDown:
 	default:
@@ -501,25 +488,19 @@ func (m *Model) handle(a Action) tea.Cmd {
 		return m.relistZones()
 	case ActionRefresh:
 		return m.retryRefresh()
-	case ActionDelegation:
-		if len(m.visible) > 0 {
-			m.delegationOf = m.visible[m.cursor[paneDomains]].Name
-		}
 	case ActionInsert, ActionEdit, ActionDelete:
 		return m.itemAction(a)
 	case ActionPreviewChanges:
 		return m.previewChanges()
 	case ActionApplyTemplate:
 		return m.openTemplateForm()
-	case ActionZoneSettings:
-		return m.openZoneSettings()
 	}
 
 	return nil
 }
 
 // itemAction runs an insert, edit or delete Action on the focused pane's
-// items: Records or Accounts. Without Accounts, insert adds one from any
+// items: Records, Accounts or Zones. Without Accounts, insert adds one from any
 // pane, as there is nothing else to insert into.
 func (m *Model) itemAction(a Action) tea.Cmd {
 	switch {
@@ -533,9 +514,7 @@ func (m *Model) itemAction(a Action) tea.Cmd {
 		return m.openOffboard()
 	}
 
-	m.notice = notice{text: fmt.Sprintf("Records are edited in the Records pane, Accounts in the Accounts pane (%s).", m.keys.keysFor(ActionNextPane)), err: true}
-
-	return nil
+	return m.editZone()
 }
 
 // step moves the focused pane's cursor one item. Down past the last Zone

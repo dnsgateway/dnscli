@@ -1095,15 +1095,10 @@ func (msg zonesDiscoveredMsg) tenantUse(m *Model) (int64, func() tea.Cmd, error)
 func (m *Model) addAccountView() string {
 	f := m.addForm
 
-	notes := []string{saveRow(f.field == f.saveField())}
+	var notes []string
 
 	if f.err != "" {
-		notes = append(notes, "")
-		notes = append(notes, wrapNote(errorStyle, f.err, noteWidth)...)
-	}
-
-	if f.busy {
-		notes = append(notes, f.busyLines()...)
+		notes = wrapNote(errorStyle, f.err, noteWidth)
 	}
 
 	fields := f.dialogFields(f.name, f.values)
@@ -1111,7 +1106,21 @@ func (m *Model) addAccountView() string {
 		fields[f.field].caret = f.caret
 	}
 
-	return sizedDialogView(f.title(), fields, f.field, !f.busy, notes, m.accountFormHints(f.field), f.size)
+	return sizedDialogView(f.title(), fields, f.field, !f.busy, notes, m.accountFormFooter(f.field, f.busy), f.size)
+}
+
+// accountFormFooter is the bottom of the dialog with field focused,
+// centered: its hints, then the Save button, and while busy says the
+// Account is being saved.
+func (m *Model) accountFormFooter(field int, busy bool) []string {
+	f := m.addForm
+
+	footer := append(m.accountFormHints(field), "", saveRow(field == f.saveField()))
+	if busy {
+		footer = append(footer, f.busyLines()...)
+	}
+
+	return footer
 }
 
 // busyLines are the dialog's lines while the Account is being saved.
@@ -1224,12 +1233,8 @@ func (m *Model) measureAccountForm() dialogSize {
 	var size dialogSize
 
 	for field := range f.saveField() + 1 {
-		notes := []string{saveRow(field == f.saveField())}
-		if field == f.saveField() {
-			notes = append(notes, f.busyLines()...)
-		}
-
-		size = size.grow(sizedDialogView(f.title(), fields, field, true, notes, m.accountFormHints(field), dialogSize{}))
+		footer := m.accountFormFooter(field, field == f.saveField())
+		size = size.grow(sizedDialogView(f.title(), fields, field, true, nil, footer, dialogSize{}))
 	}
 
 	return size

@@ -55,15 +55,15 @@ func TestTheZoneStatusAndNameserversRoundTrip(t *testing.T) {
 	z := putZone(t, s, dns.Zone{Name: "example.com", ProviderID: "z1", Nameservers: ns})
 
 	at := time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC)
-	z.Status, z.StatusAt = dnsprovider.ZoneStatus{DNSSEC: dnsprovider.On, HSTS: dnsprovider.Off}, at
+	z.Status, z.StatusAt = dnsprovider.ZoneStatus{DNSSEC: dnsprovider.On, HSTS: dnsprovider.Off, MinTLS: dnsprovider.TLS12}, at
 
 	if _, err := s.SaveRefresh(ctx, z, nil, 2026100701, at); err != nil {
 		t.Fatalf("save refresh: %v", err)
 	}
 
 	got := onlyZone(t, s)
-	if got.Status != (dnsprovider.ZoneStatus{DNSSEC: dnsprovider.On, HSTS: dnsprovider.Off}) || !got.StatusAt.Equal(at) || !slices.Equal(got.Nameservers, ns) {
-		t.Fatalf("zone = %+v, want DNSSEC on, HSTS off, read at %v, nameservers %v", got, at, ns)
+	if got.Status != (dnsprovider.ZoneStatus{DNSSEC: dnsprovider.On, HSTS: dnsprovider.Off, MinTLS: dnsprovider.TLS12}) || !got.StatusAt.Equal(at) || !slices.Equal(got.Nameservers, ns) {
+		t.Fatalf("zone = %+v, want DNSSEC on, HSTS off, TLS 1.2, read at %v, nameservers %v", got, at, ns)
 	}
 
 	// A relist that lists no nameservers keeps the cached ones and the status.
@@ -83,7 +83,7 @@ func TestAZoneRelistedWithAnotherProviderIDForgetsItsStatusAndSerial(t *testing.
 	z := putZone(t, s, dns.Zone{Name: "example.com", ProviderID: "z1"})
 
 	at := time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC)
-	z.Status, z.StatusAt = dnsprovider.ZoneStatus{DNSSEC: dnsprovider.On, HSTS: dnsprovider.On}, at
+	z.Status, z.StatusAt = dnsprovider.ZoneStatus{DNSSEC: dnsprovider.On, HSTS: dnsprovider.On, MinTLS: dnsprovider.TLS13}, at
 
 	if _, err := s.SaveRefresh(ctx, z, nil, 2026100701, at); err != nil {
 		t.Fatalf("save refresh: %v", err)
@@ -219,23 +219,25 @@ func TestSaveZoneStatusStoresTheSettingsTheUpdateSetsAndReturnsTheZone(t *testin
 	refreshed := time.Date(2026, 10, 7, 8, 0, 0, 0, time.UTC)
 	z := putZone(t, s, dns.Zone{Name: "example.com", ProviderID: "z1", Serial: 2026100701, RefreshedAt: refreshed})
 
-	z.Status, z.StatusAt = dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Off, HSTS: dnsprovider.On}, refreshed
+	z.Status, z.StatusAt = dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Off, HSTS: dnsprovider.On, MinTLS: dnsprovider.TLS10}, refreshed
 
 	z, err := s.SaveRefresh(ctx, z, nil, 0, refreshed)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// The Provider could not read HSTS again after turning DNSSEC on.
+	// The Provider could not read HSTS again after turning DNSSEC on and
+	// setting TLS 1.2.
 	at := time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC)
+	tls12 := dnsprovider.TLS12
 
-	saved, err := s.SaveZoneStatus(ctx, z, dnsprovider.ZoneUpdate{DNSSEC: &on},
-		dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Pending, HSTS: dnsprovider.Unknown}, at)
+	saved, err := s.SaveZoneStatus(ctx, z, dnsprovider.ZoneUpdate{DNSSEC: &on, MinTLS: &tls12},
+		dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Pending, HSTS: dnsprovider.Unknown, MinTLS: dnsprovider.TLS12}, at)
 	if err != nil {
 		t.Fatalf("save zone status: %v", err)
 	}
 
-	want := dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Pending, HSTS: dnsprovider.On}
+	want := dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Pending, HSTS: dnsprovider.On, MinTLS: dnsprovider.TLS12}
 	if saved.ID != z.ID || saved.Status != want || !saved.StatusAt.Equal(at) || saved.Serial != 2026100701 || !saved.RefreshedAt.Equal(refreshed) {
 		t.Fatalf("saved = %+v, want the Zone with DNSSEC pending, HSTS kept, written at %v", saved, at)
 	}

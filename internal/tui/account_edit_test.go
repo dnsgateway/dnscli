@@ -109,12 +109,7 @@ func TestTheAccountsPaneInsertsAnAccountWithTheRecordKeys(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
 	h := newAccountHarness(t, s, newFake())
 
-	// Outside the Accounts and Records panes, edit says where it acts;
-	// insert and delete, in the Domains pane, Onboard and Offboard.
-	h.press("e")
-	h.assertShows("Accounts in the Accounts pane")
-	h.assertHides("Add Account", "Edit Account", "Remove Account", "Unseal")
-
+	// In the Domains pane, insert, edit and delete act on Zones.
 	h.press("d")
 	h.assertShows("cannot Offboard a Zone")
 	h.assertHides("Add Account", "Edit Account", "Remove Account", "Unseal")

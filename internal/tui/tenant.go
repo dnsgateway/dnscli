@@ -82,8 +82,8 @@ func (m *Model) askTenant(msg tea.Msg) {
 
 // dialogOpen reports whether a dialog or prompt is open over the panes.
 func (m *Model) dialogOpen() bool {
-	return m.help || m.unseal != nil || m.addForm != nil || m.keychain != nil || m.remove != nil || m.zoneSettings != nil || m.onboard != nil || m.offboard != nil ||
-		m.recordForm != nil || m.templateForm != nil || m.preview != nil || m.delegationOf != ""
+	return m.help || m.unseal != nil || m.addForm != nil || m.keychain != nil || m.remove != nil || m.zoneEdit != nil || m.onboard != nil || m.offboard != nil ||
+		m.recordForm != nil || m.templateForm != nil || m.preview != nil
 }
 
 // tenantPickKey handles a key while the Tenant picker is open: Enter

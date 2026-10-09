@@ -339,11 +339,10 @@ func (m *Model) recordFormView() string {
 		fields[f.field].caret = f.caret
 	}
 
-	notes := []string{saveRow(f.field == len(fields))}
+	var notes []string
 
 	if f.err != "" {
-		notes = append(notes, "")
-		notes = append(notes, wrapNote(errorStyle, f.err, noteWidth)...)
+		notes = wrapNote(errorStyle, f.err, noteWidth)
 	}
 
 	hint := "Zone " + f.zone.Name + ": a name is relative to it, or absolute with a trailing dot; @ is the apex."
@@ -351,5 +350,8 @@ func (m *Model) recordFormView() string {
 		hint += " TTL 1 is automatic."
 	}
 
-	return sizedDialogView(title, fields, f.field, true, notes, wrapNote(hintStyle, hint, noteWidth), dialogSize{})
+	// The hint and the Save button are centered at the bottom.
+	footer := append(wrapNote(hintStyle, hint, noteWidth), "", saveRow(f.field == len(fields)))
+
+	return sizedDialogView(title, fields, f.field, true, notes, footer, dialogSize{})
 }

@@ -322,8 +322,8 @@ func TestHelpDoesNotOfferOnboardingForAnAccountThatCannot(t *testing.T) {
 
 	h := newAccountHarness(t, s, f)
 
-	// Unseal through the Zone settings, which it can change.
-	h.press("S")
+	// Unseal through the Edit Zone dialog, as it can change Zone settings.
+	h.press("e", "enter")
 	h.unsealWith(passphrase)
 	h.press("esc", "?")
 

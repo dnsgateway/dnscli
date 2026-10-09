@@ -44,9 +44,6 @@ const (
 	// ActionRefresh Refreshes the open Zone again, such as to retry a
 	// failed Refresh.
 	ActionRefresh
-	// ActionDelegation shows the highlighted Zone's Delegation next to the
-	// nameservers its Account expects, read-only (ADR-0004).
-	ActionDelegation
 	// ActionInsert, ActionEdit and ActionDelete act on the focused pane's
 	// items. In the Records pane, insert opens the Record form to add a
 	// Record to the open Zone's pending Changeset, edit opens it prefilled
@@ -55,9 +52,13 @@ const (
 	// gate. In the Accounts pane, insert opens the add-Account dialog, edit
 	// the edit-Account dialog for the highlighted Account, and delete asks
 	// to remove it with its cached Zones, Records and secret. In the
-	// Domains pane, insert Onboards a zone name and delete Offboards the
-	// highlighted Zone, once confirmed, never the Live Zone: Zone writes,
-	// after Unseal. Without Accounts, insert adds one from any pane.
+	// Domains pane, insert Onboards a zone name, edit opens the Edit Zone
+	// dialog, which shows the highlighted Zone's settings and Delegation,
+	// read-only, in any session, and changes its DNSSEC, HSTS or minimum
+	// TLS version when the Provider can, and delete Offboards the
+	// highlighted Zone, never the Live Zone; Onboarding, Offboarding and
+	// the settings are Zone writes, each once confirmed, after Unseal.
+	// Without Accounts, insert adds one from any pane.
 	ActionInsert
 	ActionEdit
 	ActionDelete
@@ -74,11 +75,6 @@ const (
 	// built-in Template's Records into the open Zone's pending Changeset.
 	// Like editing, it obeys the write gate.
 	ActionApplyTemplate
-	// ActionZoneSettings, in the Domains pane, opens the Zone settings
-	// dialog, which turns the highlighted Zone's DNSSEC or HSTS on or off
-	// once confirmed: a Zone write, after Unseal, offered only by a
-	// Provider that can change them.
-	ActionZoneSettings
 )
 
 // Binding maps one Action to its keys.
@@ -115,7 +111,6 @@ func DefaultShortcutProfile() ShortcutProfile {
 			{Action: ActionSearch, Keys: []string{"/"}, Help: "search"},
 			{Action: ActionAllAccounts, Keys: []string{"*"}, Help: "Zones of all Accounts"},
 			{Action: ActionRefresh, Keys: []string{"r"}, Help: "Refresh the open Zone (retry)"},
-			{Action: ActionDelegation, Keys: []string{"N"}, Help: "Delegation (nameservers), read-only"},
 			{Action: ActionInsert, Keys: []string{"i", "insert"}},
 			{Action: ActionEdit, Keys: []string{"e"}},
 			{Action: ActionDelete, Keys: []string{"d", "delete"}},
@@ -124,7 +119,6 @@ func DefaultShortcutProfile() ShortcutProfile {
 			{Action: ActionDiscardChanges, Keys: []string{"D"}, Help: "discard the pending changes (in the preview)"},
 			{Action: ActionApplyOver, Keys: []string{"O"}, Help: "apply over the current values (in the preview, after a conflict)"},
 			{Action: ActionRelistZones, Keys: []string{"L"}},
-			{Action: ActionZoneSettings, Keys: []string{"S"}},
 			{Action: ActionEnrollKeychain, Keys: []string{"K"}, Help: "enroll the Keychain (Touch ID)"},
 			{Action: ActionHelp, Keys: []string{"?"}, Help: "toggle help"},
 			{Action: ActionClose, Keys: []string{"esc"}, Help: "close"},
@@ -146,8 +140,8 @@ var paneHelp = map[pane][]paneBinding{
 	paneDomains: {
 		{ActionSelect, "show the Zone's Records"},
 		{ActionInsert, "Onboard a zone name in the Account shown (starts hosting, never registers)"},
+		{ActionEdit, "edit the Zone: its DNSSEC, HSTS or minimum TLS version, and its Delegation, read-only"},
 		{ActionDelete, "Offboard the Zone, not the Live Zone (stops hosting, never touches the registration)"},
-		{ActionZoneSettings, "turn the Zone's DNSSEC or HSTS on or off"},
 	},
 	paneRecords: {
 		{ActionInsert, "insert a new Record"},
