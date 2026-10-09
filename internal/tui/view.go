@@ -147,11 +147,11 @@ func (m *Model) domainLines(w, h int) []string {
 	start, end := window(len(m.visible), m.cursor[paneDomains], h)
 
 	for i := start; i < end; i++ {
-		// Stale Zones are dimmed. The markers show the Live Zone, then the
-		// Refresh, else the Serial Check hint.
+		// Stale Zones are dimmed. The markers show a pending Changeset,
+		// the Live Zone, then the Refresh, else the Serial Check hint.
 		z := m.visible[i]
-		lines = append(lines, m.row(paneDomains, i, " "+markedLabel(m.zoneLabel(z), hostingMark(z.State), w-4), w-3, m.zoneStyle(z.ID))+
-			" "+m.liveMarker(z)+m.zoneMarker(z))
+		lines = append(lines, m.row(paneDomains, i, " "+markedLabel(m.zoneLabel(z), hostingMark(z.State), w-5), w-4, m.zoneStyle(z.ID))+
+			" "+m.pendingMarker(z)+m.liveMarker(z)+m.zoneMarker(z))
 	}
 
 	if len(m.visible) == 0 && len(m.zones) > 0 {
@@ -159,6 +159,17 @@ func (m *Model) domainLines(w, h int) []string {
 	}
 
 	return lines
+}
+
+// pendingMarker is the one-column marker drawn after a Zone with a
+// pending Changeset: changes staged in the Records pane that are not yet
+// applied to its Provider.
+func (m *Model) pendingMarker(z dns.Zone) string {
+	if m.pendingOf(z.ID) != nil {
+		return modifiedStyle.Render("±")
+	}
+
+	return " "
 }
 
 // zoneStyle dims a Stale Zone and its Records; a Validated Zone is drawn plain.
@@ -295,12 +306,14 @@ func (m *Model) recordLines(w, h int) []string {
 		return []string{"", hintStyle.Render("  loading…")}
 	case m.recordsErr != nil:
 		return []string{"", errorStyle.Render("  Could not read Records for " + m.open.Name + ".")}
+	case len(m.rows) == 0 && m.refreshOf(m.open.ID).notServed && !m.refreshOf(m.open.ID).pending:
+		return []string{"", "  " + m.open.Name + " is " + registrationOnly + ": its Provider serves no DNS Records for " + m.open.Name + "."}
 	case len(m.rows) == 0:
 		return []string{"", "  No cached Records for " + m.open.Name + "."}
 	}
 
-	cols := recordColumns(w)
-	header := headerStyle.Render(cols.format(" ", "Name", "Type", "Content", "TTL"))
+	cols := recordColumns(w, m.rows)
+	header := headerStyle.Render(cols.format(" ", "Name", "Type", "Content", "TTL", cols.labels()...))
 
 	lines := append(m.searchLines(paneRecords, w), header)
 
@@ -314,7 +327,7 @@ func (m *Model) recordLines(w, h int) []string {
 			style = changeStyle(k)
 		}
 
-		lines = append(lines, m.row(paneRecords, i, cols.format(changeMark(records[i].kind), r.Name, r.Type, r.Value, strconv.FormatUint(uint64(r.TTL), 10)), w, style))
+		lines = append(lines, m.row(paneRecords, i, cols.format(changeMark(records[i].kind), r.Name, r.Type, r.Value, strconv.FormatUint(uint64(r.TTL), 10), cols.texts(r)...), w, style))
 	}
 
 	if len(records) == 0 {
@@ -346,21 +359,71 @@ func fit(s string, w int) string {
 	return s + strings.Repeat(" ", max(w-lipgloss.Width(s), 0))
 }
 
-type columns struct{ name, typ, ttl, content int }
+type columns struct {
+	name, typ, ttl, content int
+	// extras are the extra columns after TTL, and extraW their widths.
+	extras []extraColumn
+	extraW []int
+}
 
-func recordColumns(w int) columns {
+// minRecordText is the fewest columns Name and Content keep between them:
+// an extra column that would leave them fewer is left out, as are the
+// ones after it.
+const minRecordText = 30
+
+// recordColumns lays out the Records pane in w columns, with the extra
+// columns rows have that fit.
+func recordColumns(w int, rows []recordRow) columns {
 	c := columns{typ: 6, ttl: 6}
-	rest := max(w-3-c.typ-c.ttl-3, 10)
+	used := 3 + c.typ + c.ttl + 3
+
+	extras, widths := shownExtraColumns(rows)
+	for i, e := range extras {
+		if w-used-1-widths[i] < minRecordText {
+			break
+		}
+
+		used += 1 + widths[i]
+		c.extras, c.extraW = append(c.extras, e), append(c.extraW, widths[i])
+	}
+
+	rest := max(w-used, 10)
 	c.name = rest * 2 / 5
 	c.content = rest - c.name
 
 	return c
 }
 
+// labels head the extra columns.
+func (c columns) labels() []string {
+	out := make([]string, len(c.extras))
+	for i, e := range c.extras {
+		out[i] = e.label
+	}
+
+	return out
+}
+
+// texts are a Record's values in the extra columns.
+func (c columns) texts(r dns.Record) []string {
+	out := make([]string, len(c.extras))
+	for i, e := range c.extras {
+		out[i] = e.text(r)
+	}
+
+	return out
+}
+
 // format lays out a Records pane row. mark is the one-column mark of a
-// pending change.
-func (c columns) format(mark, name, typ, content, ttl string) string {
-	return " " + mark + " " + fit(name, c.name) + " " + fit(typ, c.typ) + " " + fit(content, c.content) + " " + fit(ttl, c.ttl)
+// pending change; extras are the values of the extra columns.
+func (c columns) format(mark, name, typ, content, ttl string, extras ...string) string {
+	s := " " + mark + " " + fit(name, c.name) + " " + fit(typ, c.typ) + " " + fit(content, c.content) + " " + fit(ttl, c.ttl)
+
+	for i, w := range c.extraW {
+		s += " " + fit(extras[i], w)
+	}
+
+	return s
 }
 
 // window returns the range [start, end) of n list items that fits in h rows

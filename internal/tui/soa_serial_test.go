@@ -98,7 +98,7 @@ func TestARefreshDoesNotAskTheDelegatedNameserversOfAZoneNameInSeveralAccounts(t
 	// Another Account has work.example too: the Delegation may name its
 	// nameservers, which serve another copy of the zone.
 	h.fillAddAccount("lab", "lab-token")
-	h.assertShows("work.example · cloudfla")
+	h.assertShows("work.example · cloudfl")
 
 	h.press("tab", "enter") // back from the Accounts pane to the Domains pane
 	h.assertShows("validated this session")

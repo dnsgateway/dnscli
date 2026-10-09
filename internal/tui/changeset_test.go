@@ -391,3 +391,66 @@ func TestEnterDeleteAndInsertInTheRecordsPaneEditDeleteAndAddRecords(t *testing.
 	h.press("insert")
 	h.assertShows("Add Record")
 }
+
+// pendingMarker is drawn in the Domains pane after a Zone with a pending
+// Changeset.
+const pendingMarker = "±"
+
+func (h *harness) assertPendingMarker(zone string, pending bool) {
+	h.t.Helper()
+
+	if row := h.domainRow(zone); strings.Contains(row, pendingMarker) != pending {
+		h.t.Fatalf("%s row = %q, want pending marker: %v", zone, row, pending)
+	}
+}
+
+func TestAZoneWithPendingChangesIsMarkedInTheDomainsPane(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		stage func(h *harness)
+	}{
+		{"addition", func(h *harness) { h.addRecord("TXT", "@", "hello", "300") }},
+		{"modification", func(h *harness) {
+			h.press("e", "tab", "tab")
+			h.clearText(len("20"))
+			h.typeText("99")
+			h.saveForm()
+		}},
+		{"deletion", func(h *harness) { h.press("j", "d") }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := openValidated(t, refreshZones())
+			h.assertPendingMarker("work.example", false)
+
+			tc.stage(h)
+
+			h.assertShows("1 pending change")
+			h.assertPendingMarker("work.example", true)
+			// The Refresh marker still ends the row.
+			h.assertMarker("work.example", "✓")
+
+			h.press("p", "D")
+			h.assertPendingMarker("work.example", false)
+		})
+	}
+}
+
+func TestTheDomainsPaneMarkStaysUntilTheChangesAreApplied(t *testing.T) {
+	f := refreshZones()
+	h := openValidated(t, f)
+	h.press("j", "d")
+
+	// Taking the only change back leaves nothing pending.
+	h.press("d")
+	h.assertPendingMarker("work.example", false)
+
+	h.press("d")
+	f.Fail(providertest.OpApply, errors.New("not implemented"))
+	h.press("p", "enter", "esc")
+	h.assertPendingMarker("work.example", true)
+
+	f.Fail(providertest.OpApply, nil)
+	h.press("p", "enter")
+	h.assertShows("Applied 1 change to work.example.")
+	h.assertPendingMarker("work.example", false)
+}

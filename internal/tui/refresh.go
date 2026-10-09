@@ -30,6 +30,12 @@ type zoneRefresh struct {
 	validated bool
 	// err is why the latest Refresh failed.
 	err error
+	// notServed is true when the latest Refresh found that the Zone's
+	// Provider serves no DNS Records for it, such as for a domain its
+	// Account only registers while the Delegation names other
+	// nameservers. The Zone is then registration only: edits made here
+	// would not apply.
+	notServed bool
 	// retryAt is when the Provider asked to be called again, after it
 	// rate-limited the Refresh or its Zone Status read; zero when it did
 	// not say.
@@ -405,7 +411,7 @@ func (m *Model) zoneRefreshed(msg zoneRefreshedMsg) tea.Cmd {
 	}
 
 	if msg.err != nil {
-		*r = zoneRefresh{err: msg.err, retryAt: m.retryAt(msg.err)}
+		*r = zoneRefresh{err: msg.err, retryAt: m.retryAt(msg.err), notServed: errors.Is(msg.err, dnsprovider.ErrNotServed)}
 
 		return m.startRefreshes()
 	}
@@ -481,6 +487,9 @@ func (r zoneRefresh) describe(retry string) string {
 		return "refreshing…"
 	case r.validated:
 		return "validated this session"
+	case r.notServed:
+		return fmt.Sprintf("%s: its Provider serves no DNS Records for it, so changes made here would not apply (%s Refreshes)",
+			registrationOnly, retry)
 	case r.err != nil && !r.retryAt.IsZero():
 		return fmt.Sprintf("Refresh failed, retry at %s (%s): %v", r.retryAt.Local().Format(time.TimeOnly), retry, r.err)
 	case r.err != nil:
@@ -490,6 +499,9 @@ func (r zoneRefresh) describe(retry string) string {
 	return ""
 }
 
+// registrationOnly says a Zone its Provider serves no DNS Records for.
+const registrationOnly = "registration only"
+
 // marker is the one-column Refresh marker drawn after a Zone; empty when
 // the Serial Check marker applies.
 func (r zoneRefresh) marker() string {
@@ -498,6 +510,8 @@ func (r zoneRefresh) marker() string {
 		return checkingStyle.Render("↻")
 	case r.validated:
 		return hintCurrentStyle.Render("✓")
+	case r.notServed:
+		return hintStaleStyle.Render("⌀")
 	case r.err != nil:
 		return errorStyle.Render("✗")
 	}

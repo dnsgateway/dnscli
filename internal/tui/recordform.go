@@ -339,6 +339,13 @@ func (m *Model) recordFormView() string {
 		fields[f.field].caret = f.caret
 	}
 
+	// The notes on the Record follow the fields the form edits, so Save
+	// comes after those.
+	edited := len(fields)
+	if f.edit != nil {
+		fields = append(fields, noteFields(f.edit.rec)...)
+	}
+
 	var notes []string
 
 	if f.err != "" {
@@ -351,7 +358,13 @@ func (m *Model) recordFormView() string {
 	}
 
 	// The hint and the Save button are centered at the bottom.
-	footer := append(wrapNote(hintStyle, hint, noteWidth), "", saveRow(f.field == len(fields)))
+	footer := append(wrapNote(hintStyle, hint, noteWidth), "", saveRow(f.field == edited))
 
-	return sizedDialogView(title, fields, f.field, true, notes, footer, dialogSize{})
+	// On Save, no field is focused: the first note sits at its index.
+	focus := f.field
+	if f.field == edited {
+		focus = -1
+	}
+
+	return sizedDialogView(title, fields, focus, true, notes, footer, dialogSize{})
 }

@@ -114,6 +114,15 @@ func (m *Model) writeGate() (dns.Zone, tea.Cmd, bool) {
 		m.notice = notice{text: "The pending changes for " + z.Name + " are being applied…", err: true}
 
 		return z, nil, false
+	case m.refreshOf(z.ID).pending:
+		m.notice = notice{text: z.Name + " is being Refreshed: it can be edited once the Refresh validates it.", err: true}
+
+		return z, nil, false
+	case m.refreshOf(z.ID).notServed:
+		m.notice = notice{text: fmt.Sprintf("%s is %s: its Provider serves no DNS Records for it, so changes made here would not apply.",
+			z.Name, registrationOnly), err: true}
+
+		return z, nil, false
 	case !m.validatedZone(z.ID):
 		m.notice = notice{text: fmt.Sprintf("%s is a Stale Zone: it can be edited once a Refresh validates it (%s Refreshes).",
 			z.Name, m.keys.keysFor(ActionRefresh)), err: true}

@@ -94,7 +94,7 @@ func TestTheHostingStateMarkFollowsTheAccountOfASharedZoneName(t *testing.T) {
 	h := newWideHarness(t, s)
 
 	// The label is cut short to keep the mark in view.
-	if row := h.domainRow("example.com · cloudflar…"); !strings.HasSuffix(strings.TrimRight(row, " "), "cloudflar… · pending") {
+	if row := h.domainRow("example.com · cloudfla…"); !strings.HasSuffix(strings.TrimRight(row, " "), "cloudfla… · pending") {
 		t.Errorf("work row = %q, want its label cut short and marked pending", row)
 	}
 
@@ -142,7 +142,7 @@ func TestTheHostingStateMarkIsShownWholeOrNotAtAllAtAnyWidth(t *testing.T) {
 	}
 
 	// The label is cut, never the mark: on the cursor row and off it.
-	for width, want := range map[int][2]string{36: {" e… · pending", "›t… · pending"}, 40: {" exa… · pending", "›two… · pending"}} {
+	for width, want := range map[int][2]string{38: {" e… · pending", "›t… · pending"}, 42: {" exa… · pending", "›two… · pending"}} {
 		h.send(tea.WindowSizeMsg{Width: width, Height: 30})
 
 		if cells := h.domainCells("· pending"); len(cells) != 2 || !strings.HasPrefix(cells[0], want[0]) || !strings.HasPrefix(cells[1], want[1]) {
@@ -152,7 +152,7 @@ func TestTheHostingStateMarkIsShownWholeOrNotAtAllAtAnyWidth(t *testing.T) {
 
 	// Too narrow for the mark and two columns of label: the label alone,
 	// cut as usual.
-	for width, want := range map[int][2]string{26: {" exampl…", "›two.tv"}, 32: {" example.o…", "›two.tv"}} {
+	for width, want := range map[int][2]string{28: {" exampl…", "›two.tv"}, 34: {" example.o…", "›two.tv"}} {
 		h.send(tea.WindowSizeMsg{Width: width, Height: 30})
 
 		if cells := h.domainCells("·"); len(cells) != 0 {
