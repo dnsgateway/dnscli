@@ -191,6 +191,30 @@ func (s *Store) SyncAccountZones(ctx context.Context, accountID int64, zones []d
 	return res, nil
 }
 
+// RemoveZone deletes a Zone from the cache with its Records, after its
+// Provider Offboarded it. Like SaveRefresh, it returns ErrZoneNotCached,
+// and removes nothing, unless the cache still has that very Zone: the
+// same ID, Account, zone name and Provider zone ID.
+func (s *Store) RemoveZone(ctx context.Context, z dns.Zone) error {
+	// The schema cascades the delete to the Zone's Records.
+	res, err := s.db.ExecContext(ctx, `
+		DELETE FROM zones WHERE id = ? AND account_id = ? AND name = ? AND provider_zone_id = ?`,
+		z.ID, z.AccountID, z.Name, z.ProviderID)
+	if err != nil {
+		return fmt.Errorf("remove zone %s: %w", z.Name, err)
+	}
+
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		if err == nil {
+			err = ErrZoneNotCached
+		}
+
+		return fmt.Errorf("remove zone %s: %w", z.Name, err)
+	}
+
+	return nil
+}
+
 // accountZones returns an Account's cached Zones by zone name.
 func accountZones(ctx context.Context, conn *sql.Conn, accountID int64) (map[string]dns.Zone, error) {
 	rows, err := conn.QueryContext(ctx, `SELECT id, name, provider_zone_id FROM zones WHERE account_id = ?`, accountID)
