@@ -30,7 +30,7 @@ func openValidatedShowing(t *testing.T, f *fakeProvider, text string) *harness {
 	t.Helper()
 
 	h, _, _ := newRefreshHarness(t, f)
-	h.press("enter", "tab")
+	h.press("space", "tab")
 	h.assertShows("validated this session", text)
 
 	return h
@@ -41,7 +41,7 @@ func TestTheWriteGateRefusesEditsOnAStaleZone(t *testing.T) {
 	h, _, _ := newRefreshHarness(t, f)
 
 	f.Fail(providertest.OpRecords, errors.New("connection reset by peer"))
-	h.press("enter", "tab")
+	h.press("space", "tab")
 	h.assertShows("Refresh failed")
 
 	for _, key := range []string{"i", "e", "d"} {
@@ -51,7 +51,7 @@ func TestTheWriteGateRefusesEditsOnAStaleZone(t *testing.T) {
 		h.assertHides("Add Record", "Edit Record")
 	}
 
-	h.press("p")
+	h.press("P")
 	h.assertShows("No pending changes for work.example.")
 }
 
@@ -61,7 +61,7 @@ func TestTheWriteGateRefusesEditsInASealedSessionAndOffersUnseal(t *testing.T) {
 	h := newAccountHarness(t, s, f)
 
 	// Opening the Zone asks to Unseal for its Refresh; the user declines.
-	h.press("enter")
+	h.press("space")
 	h.assertShows("Unseal", "Passphrase")
 	h.press("esc", "tab")
 
@@ -269,7 +269,7 @@ func TestThePreviewShowsEveryChangeAndDiscardingDropsThem(t *testing.T) {
 	h := openValidated(t, f)
 	h.buildChangeset()
 
-	h.press("p")
+	h.press("P")
 
 	h.assertShows("Changes to work.example", "Applying sends 3 pending changes",
 		"+ _verify TXT token-123 TTL 3600",
@@ -281,7 +281,7 @@ func TestThePreviewShowsEveryChangeAndDiscardingDropsThem(t *testing.T) {
 	h.assertHides("Changes to work.example")
 	h.assertShows("3 pending changes")
 
-	h.press("p", "D")
+	h.press("P", "D")
 
 	h.assertHides("Changes to work.example", "token-123", "203.0.113.99", "(p preview)", "+ ", "~ ")
 	h.assertShows("Discarded 3 pending changes for work.example.", "203.0.113.20", "10 mail.work.example")
@@ -296,7 +296,7 @@ func TestApplyingSendsTheChangesetAndCachesTheProvidersRecords(t *testing.T) {
 	h := openValidated(t, f)
 	h.buildChangeset()
 
-	h.press("p", "enter")
+	h.press("P", "enter")
 
 	calls := applyCalls(f)
 	if len(calls) != 1 {
@@ -349,7 +349,7 @@ func TestAFailedApplyKeepsTheChangesPendingAndTheCacheAsItWas(t *testing.T) {
 	h.buildChangeset()
 
 	f.Fail(providertest.OpApply, errors.New("not implemented"))
-	h.press("p", "enter")
+	h.press("P", "enter")
 
 	h.assertShows("Changes to work.example", "Could not apply the changes to work.example: not implemented")
 
@@ -429,7 +429,7 @@ func TestAZoneWithPendingChangesIsMarkedInTheDomainsPane(t *testing.T) {
 			// The Refresh marker still ends the row.
 			h.assertMarker("work.example", "✓")
 
-			h.press("p", "D")
+			h.press("P", "D")
 			h.assertPendingMarker("work.example", false)
 		})
 	}
@@ -446,11 +446,11 @@ func TestTheDomainsPaneMarkStaysUntilTheChangesAreApplied(t *testing.T) {
 
 	h.press("d")
 	f.Fail(providertest.OpApply, errors.New("not implemented"))
-	h.press("p", "enter", "esc")
+	h.press("P", "enter", "esc")
 	h.assertPendingMarker("work.example", true)
 
 	f.Fail(providertest.OpApply, nil)
-	h.press("p", "enter")
+	h.press("P", "enter")
 	h.assertShows("Applied 1 change to work.example.")
 	h.assertPendingMarker("work.example", false)
 }

@@ -85,7 +85,7 @@ type zoneOnboardedMsg struct {
 func (m *Model) openOnboard() tea.Cmd {
 	a, ok := m.onboardAccount()
 	if !ok {
-		m.notice = notice{text: "Show one Account's Zones first (" + m.keys.keysFor(ActionSelect) +
+		m.notice = notice{text: "Show one Account's Zones first (" + m.keys.keysFor(ActionShow) +
 			" on it in the Accounts pane): a zone name is Onboarded in that Account.", err: true}
 
 		return nil

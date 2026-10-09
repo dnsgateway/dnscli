@@ -25,8 +25,13 @@ func (m *Model) helpView() string {
 	}
 
 	for _, b := range m.paneBindings() {
-		if k := m.keys.keysFor(b.Action); k != "" {
-			local = append(local, row{k, b.Help})
+		keys := m.keys.keysFor(b.Action)
+		if same, ok := sameAs[b.Action]; ok {
+			keys = strings.Trim(keys+"/"+m.keys.keysFor(same), "/")
+		}
+
+		if keys != "" {
+			local = append(local, row{keys, b.Help})
 		}
 	}
 
@@ -52,16 +57,91 @@ func (m *Model) helpView() string {
 		width = max(width, lipgloss.Width(l))
 	}
 
+	// The icon legend shows only when the overlay, borders included, has
+	// room for it: the keys come first.
+	var legend []string
+	if m.focus == paneDomains {
+		legend = m.iconLegend(keyW)
+
+		rows := len(lines) + len(legend) + 5 // a blank row and the rule above it, a blank row below, and the borders
+		if len(pane) > 0 {
+			rows += len(pane) + 2
+		}
+
+		if rows > m.height {
+			legend = nil
+		}
+	}
+
+	for _, l := range legend {
+		width = max(width, lipgloss.Width(l))
+	}
+
 	if len(pane) > 0 {
-		title := " " + paneNames[m.focus] + " "
-		rule := " ──" + title + strings.Repeat("─", max(width-4-lipgloss.Width(title), 0)) + " "
-		lines = append(lines, "", hintStyle.Render(rule))
+		lines = append(lines, "", helpRule(paneNames[m.focus], width))
 		lines = append(lines, pane...)
+	}
+
+	if len(legend) > 0 {
+		lines = append(lines, "", helpRule("Domains icons", width))
+		lines = append(lines, legend...)
 	}
 
 	lines = append(lines, "")
 
 	return box("Help", lines, max(width+2, 24), len(lines)+2, true)
+}
+
+// helpRule is the help overlay's rule above a section, titled.
+func helpRule(title string, width int) string {
+	title = " " + title + " "
+
+	return hintStyle.Render(" ──" + title + strings.Repeat("─", max(width-4-lipgloss.Width(title), 0)) + " ")
+}
+
+// iconLegend says what the marks after a Zone in the Domains pane mean,
+// drawn as the pane draws them, in two columns, with the marks in a column
+// keyW wide like the keys'.
+func (m *Model) iconLegend(keyW int) []string {
+	icons := []struct{ icon, help string }{
+		{modifiedStyle.Render("±"), "pending changes"},
+		{liveStyle.Render("●"), "the Live Zone"},
+		{checkingStyle.Render("↻"), "refreshing"},
+		{hintCurrentStyle.Render("✓"), "validated: may be edited"},
+		{hintStaleStyle.Render("⌀"), "registration only"},
+		{errorStyle.Render("✗"), "the Refresh failed"},
+		{checkingStyle.Render("…"), "checking the serial"},
+		{hintCurrentStyle.Render("≈"), "serial matches (a hint)"},
+		{hintStaleStyle.Render("!"), "serial differs: maybe stale"},
+		{errorStyle.Render("?"), "the serial check failed"},
+		{"· pending", "awaiting its Delegation"},
+		{"· moved", "Delegation left: not served"},
+		{staleStyle.Render("dimmed"), "a Stale Zone, not validated"},
+	}
+
+	cells := make([]string, len(icons))
+	for i, ic := range icons {
+		cells[i] = "  " + ic.icon + strings.Repeat(" ", max(keyW-lipgloss.Width(ic.icon), 0)) + "   " + ic.help
+	}
+
+	half := (len(cells) + 1) / 2
+
+	leftW := 0
+	for _, c := range cells[:half] {
+		leftW = max(leftW, lipgloss.Width(c))
+	}
+
+	lines := make([]string, 0, half)
+	for i, c := range cells[:half] {
+		line := c
+		if i+half < len(cells) {
+			line += strings.Repeat(" ", leftW-lipgloss.Width(c)) + cells[i+half]
+		}
+
+		lines = append(lines, line+"  ")
+	}
+
+	return lines
 }
 
 // paneBindings are the focused pane's Actions for the help overlay.

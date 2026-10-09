@@ -142,7 +142,7 @@ func TestTheHostingStateMarkIsShownWholeOrNotAtAllAtAnyWidth(t *testing.T) {
 	}
 
 	// The label is cut, never the mark: on the cursor row and off it.
-	for width, want := range map[int][2]string{38: {" e… · pending", "›t… · pending"}, 42: {" exa… · pending", "›two… · pending"}} {
+	for width, want := range map[int][2]string{42: {" e… · pending", "›t… · pending"}, 45: {" ex… · pending", "›tw… · pending"}} {
 		h.send(tea.WindowSizeMsg{Width: width, Height: 30})
 
 		if cells := h.domainCells("· pending"); len(cells) != 2 || !strings.HasPrefix(cells[0], want[0]) || !strings.HasPrefix(cells[1], want[1]) {
@@ -152,7 +152,7 @@ func TestTheHostingStateMarkIsShownWholeOrNotAtAllAtAnyWidth(t *testing.T) {
 
 	// Too narrow for the mark and two columns of label: the label alone,
 	// cut as usual.
-	for width, want := range map[int][2]string{28: {" exampl…", "›two.tv"}, 34: {" example.o…", "›two.tv"}} {
+	for width, want := range map[int][2]string{32: {" exampl…", "›two.tv"}, 38: {" example.o…", "›two.tv"}} {
 		h.send(tea.WindowSizeMsg{Width: width, Height: 30})
 
 		if cells := h.domainCells("·"); len(cells) != 0 {

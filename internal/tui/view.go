@@ -39,7 +39,9 @@ type layout struct {
 // layout sizes the panes to the terminal. Panes keep their minimum sizes
 // while the terminal has room for them, and shrink to fit it when it does not.
 func (m *Model) layout() layout {
-	leftW := max(m.width/4, 24)
+	// The Domains pane's markers take two columns more than the label's
+	// gap: the left panes are that much wider than a quarter.
+	leftW := max(m.width/4+2, 26)
 	if m.width < leftW+20 {
 		leftW = m.width / 2
 	}
@@ -148,10 +150,11 @@ func (m *Model) domainLines(w, h int) []string {
 
 	for i := start; i < end; i++ {
 		// Stale Zones are dimmed. The markers show a pending Changeset,
-		// the Live Zone, then the Refresh, else the Serial Check hint.
+		// the Live Zone, then the Refresh, else the Serial Check hint,
+		// a column apart so they read as separate icons.
 		z := m.visible[i]
-		lines = append(lines, m.row(paneDomains, i, " "+markedLabel(m.zoneLabel(z), hostingMark(z.State), w-5), w-4, m.zoneStyle(z.ID))+
-			" "+m.pendingMarker(z)+m.liveMarker(z)+m.zoneMarker(z))
+		lines = append(lines, m.row(paneDomains, i, " "+markedLabel(m.zoneLabel(z), hostingMark(z.State), w-7), w-6, m.zoneStyle(z.ID))+
+			" "+m.pendingMarker(z)+" "+m.liveMarker(z)+" "+m.zoneMarker(z))
 	}
 
 	if len(m.visible) == 0 && len(m.zones) > 0 {
@@ -301,7 +304,7 @@ func (m *Model) recordLines(w, h int) []string {
 			hintStyle.Render("  dnscli keeps Accounts in its local database; it is not a disposable cache."),
 		}
 	case m.open == nil:
-		return []string{"", fmt.Sprintf("  Press %s on a Zone to see its cached Records.", m.keys.keysFor(ActionSelect))}
+		return []string{"", fmt.Sprintf("  Press %s on a Zone to see its cached Records.", m.keys.keysFor(ActionShow))}
 	case m.recordsLoading:
 		return []string{"", hintStyle.Render("  loading…")}
 	case m.recordsErr != nil:
@@ -537,7 +540,7 @@ func (m *Model) zoneStatus(z dns.Zone) string {
 	}
 
 	// A Refresh outranks the Serial Check hint, which is never shown next to it.
-	if refresh := m.refreshOf(z.ID).describe(m.keys.keysFor(ActionRefresh)); refresh != "" {
+	if refresh := m.refreshOf(z.ID).describe(m.recordsKeys(ActionRefresh)); refresh != "" {
 		parts = append(parts, refresh)
 	} else if !m.serialCheckApplies(z) {
 		parts = append(parts, noSerialCheck)
@@ -550,7 +553,7 @@ func (m *Model) zoneStatus(z dns.Zone) string {
 	}
 
 	if cs := m.pendingOf(z.ID); cs != nil {
-		parts = append(parts, fmt.Sprintf("%s (%s preview)", plural(len(cs.Changes), "pending change"), m.keys.keysFor(ActionPreviewChanges)))
+		parts = append(parts, fmt.Sprintf("%s (%s preview)", plural(len(cs.Changes), "pending change"), m.recordsKeys(ActionPreviewChanges)))
 	}
 
 	if z.RefreshedAt.IsZero() {

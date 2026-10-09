@@ -38,7 +38,7 @@ func TestARefreshTakesTheSerialTheProviderReportsWithoutAskingTheNameservers(t *
 	r := &fakeResolver{soaAt: map[string]uint32{"work.example": 7}}
 	h, s, _ := newRefreshHarnessWith(t, refreshZones(), tui.Deps{Resolver: r})
 
-	h.press("enter")
+	h.press("space")
 	h.assertShows("validated this session")
 
 	if z := cachedZone(t, s, "work.example"); z.Serial != liveSerial {
@@ -54,7 +54,7 @@ func TestARefreshAsksTheZonesNameserversForTheSerialTheProviderDoesNotReport(t *
 	r := &fakeResolver{soaAt: map[string]uint32{"work.example": 2026100799}}
 	h, s, _ := newRefreshHarnessWith(t, serialZones(zoneNS), tui.Deps{Resolver: r})
 
-	h.press("enter")
+	h.press("space")
 	h.assertShows("validated this session")
 
 	if z := cachedZone(t, s, "work.example"); z.Serial != 2026100799 {
@@ -75,7 +75,7 @@ func TestARefreshFallsBackToTheDelegatedNameserversForTheSerial(t *testing.T) {
 	}
 	h, s, _ := newRefreshHarnessWith(t, serialZones(nil), tui.Deps{Resolver: r})
 
-	h.press("enter")
+	h.press("space")
 	h.assertShows("validated this session")
 
 	if z := cachedZone(t, s, "work.example"); z.Serial != 2026100799 {
@@ -100,7 +100,7 @@ func TestARefreshDoesNotAskTheDelegatedNameserversOfAZoneNameInSeveralAccounts(t
 	h.fillAddAccount("lab", "lab-token")
 	h.assertShows("work.example · cloudfl")
 
-	h.press("tab", "enter") // back from the Accounts pane to the Domains pane
+	h.press("tab", "space") // back from the Accounts pane to the Domains pane
 	h.assertShows("validated this session")
 
 	if q := r.soaAtQueries(); len(q) != 0 {
@@ -113,7 +113,7 @@ func TestARefreshWhoseSerialQueryFailsKeepsTheCachedSerial(t *testing.T) {
 	h, s, _ := newRefreshHarnessWith(t, serialZones(zoneNS), tui.Deps{Resolver: r})
 	cacheSerial(t, h, 2026100700)
 
-	h.press("enter")
+	h.press("space")
 	h.assertShows("validated this session")
 
 	if z := cachedZone(t, s, "work.example"); z.Serial != 2026100700 {
@@ -137,11 +137,11 @@ func TestAnApplyStoresTheNameserversSerialOnlyWhenItIsNewer(t *testing.T) {
 			r := &fakeResolver{soaAt: map[string]uint32{"work.example": c.cached}}
 			f := serialZones(zoneNS)
 			h, s, _ := newRefreshHarnessWith(t, f, tui.Deps{Resolver: r})
-			h.press("enter", "tab")
+			h.press("space", "tab")
 			h.buildChangeset()
 
 			r.setSOAAt("work.example", c.queried)
-			h.press("p", "enter")
+			h.press("P", "enter")
 			h.assertShows("Applied 3 changes to work.example.")
 
 			if z := cachedZone(t, s, "work.example"); z.Serial != c.want {
@@ -155,14 +155,14 @@ func TestAnApplyWhoseSerialQueryFailsKeepsTheCachedSerial(t *testing.T) {
 	r := &fakeResolver{soaAt: map[string]uint32{"work.example": 2026100700}}
 	f := serialZones(zoneNS)
 	h, s, _ := newRefreshHarnessWith(t, f, tui.Deps{Resolver: r})
-	h.press("enter", "tab")
+	h.press("space", "tab")
 	h.buildChangeset()
 
 	r.mu.Lock()
 	r.soaAtErrs = map[string]error{"work.example": errors.New("i/o timeout")}
 	r.mu.Unlock()
 
-	h.press("p", "enter")
+	h.press("P", "enter")
 	h.assertShows("Applied 3 changes to work.example.")
 
 	if z := cachedZone(t, s, "work.example"); z.Serial != 2026100700 {

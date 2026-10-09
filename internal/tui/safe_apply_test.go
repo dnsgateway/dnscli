@@ -15,7 +15,7 @@ func TestApplyReChecksTheAffectedRecordsBeforeSending(t *testing.T) {
 	h := openValidated(t, f)
 	h.buildChangeset()
 
-	h.press("p", "enter")
+	h.press("P", "enter")
 
 	calls := f.Calls()
 	last := len(calls) - 1
@@ -33,7 +33,7 @@ func TestAnApplyOfOnlyAdditionsDoesNotReCheckTheZone(t *testing.T) {
 	h.addRecord("TXT", "_verify", "token-123", "3600")
 	before := recordsCalls(f, "zw1")
 
-	h.press("p", "enter")
+	h.press("P", "enter")
 
 	h.assertShows("Applied 1 change to work.example.")
 
@@ -70,7 +70,7 @@ func TestAnApplyWhoseRecordsChangedAtTheProviderIsNotSentAndRefreshesTheZone(t *
 			f.SetRecords("zw1", c.live...)
 			before := recordsCalls(f, "zw1")
 
-			h.press("p", "enter")
+			h.press("P", "enter")
 
 			if calls := applyCalls(f); len(calls) != 0 {
 				t.Fatalf("a conflicting Changeset was sent: %+v", calls)
@@ -105,7 +105,7 @@ func TestAfterAConflictTheChangesApplyOverTheCurrentValuesOnlyWhenConfirmed(t *t
 
 	// The A Record changes and the MX Record goes, outside dnscli.
 	f.SetRecords("zw1", changed)
-	h.press("p", "enter")
+	h.press("P", "enter")
 	h.assertShows("Nothing was applied", "O apply over the current values")
 
 	// Without the confirmation, the changes are as they were: they
@@ -147,7 +147,7 @@ func TestApplyingOverTheCurrentValuesAddsAModifiedRecordThatIsGone(t *testing.T)
 
 	// The A Record goes, outside dnscli.
 	f.SetRecords("zw1", liveRecords[1])
-	h.press("p", "enter")
+	h.press("P", "enter")
 	h.assertShows("@ A 203.0.113.20 TTL 300 no longer exists")
 
 	h.press("O")
@@ -179,7 +179,7 @@ func TestAPartialApplyShowsTheOutcomeOfEachChange(t *testing.T) {
 
 		return nil
 	})
-	h.press("p", "enter")
+	h.press("P", "enter")
 
 	h.assertShows("The Provider applied 2 of 3 changes:",
 		"✓ + _verify TXT token-123 TTL 3600",
@@ -189,7 +189,7 @@ func TestAPartialApplyShowsTheOutcomeOfEachChange(t *testing.T) {
 		"Applying sends 1 pending change to the Provider:")
 
 	// The outcomes belong to that Apply: reopening the preview drops them.
-	h.press("esc", "p")
+	h.press("esc", "P")
 	h.assertShows("Applying sends 1 pending change")
 	h.assertHides("The Provider applied", "✓ +", "✗ -")
 }
@@ -199,7 +199,7 @@ func TestAnApplyStoresTheSerialTheProviderReports(t *testing.T) {
 	h := openValidated(t, f)
 	h.buildChangeset()
 
-	h.press("p", "enter")
+	h.press("P", "enter")
 
 	// The fake Provider bumps the serial once per Apply.
 	if z := cachedZone(t, h.store, "work.example"); z.Serial != liveSerial+1 {
@@ -213,7 +213,7 @@ func TestAnApplyWhoseReCheckFailsIsNotSent(t *testing.T) {
 	h.buildChangeset()
 
 	f.Fail(providertest.OpRecords, errors.New("connection reset by peer"))
-	h.press("p", "enter")
+	h.press("P", "enter")
 
 	if calls := applyCalls(f); len(calls) != 0 {
 		t.Fatalf("a Changeset that could not be re-checked was sent: %+v", calls)

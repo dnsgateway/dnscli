@@ -185,7 +185,7 @@ func TestOnboardingIsRefusedWithoutUnsealForAProviderTypeThatCannot(t *testing.T
 	h := newAccountHarness(t, s, onboardFake())
 
 	// Show namecheap.home's Zones, then Onboard from the Domains pane.
-	h.press("shift+tab", "j", "enter", "tab", "i")
+	h.press("shift+tab", "j", "space", "tab", "i")
 
 	h.assertShows("namecheap.home cannot Onboard a zone")
 	h.assertHides("Unseal", "Onboard a zone at")
@@ -231,7 +231,7 @@ func TestOnboardingWithSeveralAccountsActsOnTheAccountShown(t *testing.T) {
 	h.assertHides("Unseal", "Onboard a zone at")
 
 	// cloudflare.work's Zones shown, it is the one.
-	h.press("shift+tab", "enter", "tab", "i")
+	h.press("shift+tab", "space", "tab", "i")
 	h.unsealWith(passphrase)
 	h.assertShows("Onboard a zone at cloudflare.work")
 	h.assertHides("Onboard a zone at " + other.Label())
@@ -245,7 +245,7 @@ func TestOnboardingIsRefusedForAnAccountActingWithinNoTenant(t *testing.T) {
 	h, _ := newUpgradedHarness(t, f)
 
 	// Show cloudflare.old's Zones, and Onboard in it.
-	h.press("enter", "tab", "i")
+	h.press("space", "tab", "i")
 	h.unsealWith(passphrase)
 
 	h.assertShows("cloudflare.old acts within no single Provider account")
@@ -263,7 +263,7 @@ func TestOnboardingInAnAccountReachingSeveralTenantsAsksForOneThenOpens(t *testi
 
 	h, _ := newUpgradedHarness(t, f)
 
-	h.press("enter", "tab", "i")
+	h.press("space", "tab", "i")
 	h.unsealWith(passphrase)
 
 	h.assertShows("Tenant of cloudflare.old")

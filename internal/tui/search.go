@@ -50,10 +50,29 @@ func (m *Model) clearSearch() {
 }
 
 // typeIntoSearch sends a typed key to the focused pane's search input, and
-// reports whether it did. See typeInto for which keys are typed.
+// reports whether it did. See typeInto for which keys are typed. In the
+// Domains pane, Select only leaves the search, keeping its filter, rather
+// than open the match's Edit Zone dialog; and as zone names hold no
+// spaces, Space bound to Show is never typed: it leaves the search and
+// opens the match.
 func (m *Model) typeIntoSearch(msg tea.KeyMsg) bool {
 	s := &m.search[m.focus]
-	if m.help || !s.typing || !m.keys.typeInto(&s.query, &s.caret, msg) {
+	if m.help || !s.typing {
+		return false
+	}
+
+	if m.focus == paneDomains && !msg.Alt {
+		switch a := m.keys.action(msg.String()); {
+		case a == ActionSelect:
+			s.typing, s.caret = false, 0
+
+			return true
+		case a == ActionShow && msg.Type == tea.KeySpace:
+			return false
+		}
+	}
+
+	if !m.keys.typeInto(&s.query, &s.caret, msg) {
 		return false
 	}
 

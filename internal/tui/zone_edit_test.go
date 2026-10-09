@@ -60,6 +60,17 @@ var (
 	saveFromMinTLS = []string{"up", "up", "up", "up", "enter"}
 )
 
+func TestEnterOnAZoneOpensItsSettings(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	status := dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Off, HSTS: dnsprovider.On}
+	withZoneStatus(t, s, "work.example", status)
+
+	h := newAccountHarness(t, s, settingsFake(status, true))
+	h.press("enter")
+
+	h.assertShows("Edit Zone work.example", "The session is sealed")
+}
+
 func TestTurningDNSSECOnAsksToConfirmThenCachesThePendingStatusTheProviderReturns(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
 	status := dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Off, HSTS: dnsprovider.On}
@@ -264,7 +275,7 @@ func TestZoneSettingsOfAnUpgradedAccountReachingSeveralTenantsAskForOneThenOpen(
 	h.run(h.model.Init())
 
 	// Show cloudflare.old's Zones, and ask for old.example's settings.
-	h.press("enter", "tab", "e", "enter")
+	h.press("space", "tab", "e", "enter")
 	h.unsealWith(passphrase)
 
 	h.assertShows("Tenant of cloudflare.old")

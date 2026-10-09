@@ -193,8 +193,8 @@ func (m *Model) offboardBusy(z dns.Zone) error {
 	case m.refreshes[z.ID] != nil && m.refreshes[z.ID].pending:
 		return fmt.Errorf("Offboarding is refused while %s is being Refreshed: try again once it is.", z.Name)
 	case m.pendingOf(z.ID) != nil:
-		return fmt.Errorf("Offboarding is refused: %s has a pending Changeset. Apply or discard it first (%s preview).",
-			z.Name, m.keys.keysFor(ActionPreviewChanges))
+		return fmt.Errorf("Offboarding is refused: %s has a pending Changeset. Apply or discard it first: open it (%s), then preview it (%s in the Records pane).",
+			z.Name, m.keys.keysFor(ActionShow), m.keys.keysFor(ActionPreviewChanges))
 	}
 
 	return nil

@@ -24,10 +24,10 @@ func discoverRefreshAndApply(t *testing.T, f *fakeProvider, tb *tenantBuilds) *h
 	t.Helper()
 
 	h, _, _ := newRefreshHarnessWith(t, f, tui.Deps{Providers: f.tenantRegistry(tb)})
-	h.press("enter", "tab")
+	h.press("space", "tab")
 	h.assertShows("validated this session")
 	h.buildChangeset()
-	h.press("p", "enter")
+	h.press("P", "enter")
 	h.assertShows("Applied 3 changes to work.example.")
 
 	return h
@@ -348,7 +348,7 @@ func TestARefreshOfAnUpgradedAccountReachingSeveralTenantsAsksForOne(t *testing.
 	h.run(h.model.Init())
 
 	// Show cloudflare.old's Zones, and open old.example, which Refreshes it.
-	h.press("enter", "tab", "enter")
+	h.press("space", "tab", "space")
 	h.unsealWith(passphrase)
 
 	h.assertShows("Tenant of cloudflare.old")
@@ -506,7 +506,7 @@ func TestAnApplyThatNeedsATenantAsksForOneAndIsConfirmedAgain(t *testing.T) {
 	f.SetTenants(dnsprovider.Tenant{ID: acmeTenant, Name: "Acme Ltd"})
 
 	h, s, _ := newRefreshHarnessWith(t, f, tui.Deps{Providers: f.tenantRegistry(&tenantBuilds{})})
-	h.press("enter", "tab")
+	h.press("space", "tab")
 	h.assertShows("validated this session")
 	h.buildChangeset()
 
@@ -519,7 +519,7 @@ func TestAnApplyThatNeedsATenantAsksForOneAndIsConfirmedAgain(t *testing.T) {
 			f.count(providertest.OpUpdateRecord) + f.count(providertest.OpDeleteRecord)
 	}
 
-	h.press("p", "enter")
+	h.press("P", "enter")
 	h.assertShows("Tenant of cloudflare.work", "Acme Ltd", "Side project")
 
 	if n := writes(); n != 0 {
@@ -559,10 +559,10 @@ func TestEveryRefreshThatAskedForTheTenantRunsAgainOnceItIsPicked(t *testing.T) 
 	h.press("esc")
 
 	// Open old.example, holding its Refresh back, then old.test.
-	h.press("enter", "tab")
-	m, refreshA := h.model.Update(h.pressHolding("enter")())
+	h.press("space", "tab")
+	m, refreshA := h.model.Update(h.pressHolding("space")())
 	h.model = m
-	h.press("j", "enter")
+	h.press("j", "space")
 
 	h.assertShows("Tenant of cloudflare.old")
 	h.run(refreshA)

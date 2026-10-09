@@ -96,7 +96,7 @@ func TestARefreshShowsTheZoneStatusInTheStatusBar(t *testing.T) {
 	f.SetZoneStatus("zw1", dnsprovider.ZoneStatus{DNSSEC: dnsprovider.On, HSTS: dnsprovider.Off})
 	h, _, _ := newRefreshHarness(t, f)
 
-	h.press("enter")
+	h.press("space")
 
 	h.assertBadges(map[string]string{"MX": green, "SPF": gray, "DNSSEC": green, "HSTS": red})
 }
@@ -106,7 +106,7 @@ func TestTheZoneStatusBarIsAtTheTopAndTheStatusLineAtTheBottom(t *testing.T) {
 	f.SetZoneStatus("zw1", dnsprovider.ZoneStatus{DNSSEC: dnsprovider.On, HSTS: dnsprovider.Off})
 	h, _, _ := newRefreshHarness(t, f)
 
-	h.press("enter")
+	h.press("space")
 
 	h.assertStatusBarShows("MX SPF DMARC DKIM · DNSSEC · HSTS ·")
 	h.assertStatusLineShows("work.example · cloudflare.work")
@@ -137,11 +137,11 @@ func TestTheCachedZoneStatusShowsBeforeAnyRefreshAndOffline(t *testing.T) {
 	f := refreshZones()
 	f.SetZoneStatus("zw1", dnsprovider.ZoneStatus{DNSSEC: dnsprovider.On, HSTS: dnsprovider.On})
 	h, s, _ := newRefreshHarness(t, f)
-	h.press("enter")
+	h.press("space")
 
 	// A later session, with no Provider to Refresh from.
 	h = newHarness(t, s)
-	h.press("enter")
+	h.press("space")
 
 	h.assertShows("cached, last Refresh just now")
 	h.assertBadges(map[string]string{"MX": green, "DNSSEC": green, "HSTS": green})
@@ -152,7 +152,7 @@ func TestAZoneStatusNeverReadIsUnknown(t *testing.T) {
 	seedCache(t, s)
 	h := newHarness(t, s)
 
-	h.press("enter")
+	h.press("space")
 
 	h.assertStatusBarShows("DNSSEC ?", "HSTS ?")
 	h.assertBadges(map[string]string{"MX": gray, "SPF": gray, "DMARC": gray, "DKIM": gray, "DNSSEC ?": gray, "HSTS ?": gray})
@@ -163,12 +163,12 @@ func TestAFailedZoneStatusReadKeepsTheCachedOneAndSaysHowOldItIs(t *testing.T) {
 	f.SetZoneStatus("zw1", dnsprovider.ZoneStatus{DNSSEC: dnsprovider.On, HSTS: dnsprovider.Off})
 	now := testNow
 	h, s, _ := newRefreshHarnessWith(t, f, tui.Deps{Clock: func() time.Time { return now }})
-	h.press("enter")
+	h.press("space")
 
 	now = testNow.Add(2 * time.Hour)
 	f.SetZoneStatus("zw1", dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Off, HSTS: dnsprovider.On})
 	f.Fail(providertest.OpZoneStatus, errors.New("connection reset by peer"))
-	h.press("r")
+	h.press("right", "r", "left")
 
 	h.assertShows("validated this session", "last Refresh just now")
 	h.assertStatusBarShows("settings as of 2h ago")
@@ -179,7 +179,7 @@ func TestAFailedZoneStatusReadKeepsTheCachedOneAndSaysHowOldItIs(t *testing.T) {
 	}
 
 	f.Fail(providertest.OpZoneStatus, nil)
-	h.press("r")
+	h.press("right", "r", "left")
 
 	h.assertBadges(map[string]string{"DNSSEC": red, "HSTS": green})
 	h.assertHides("settings as of")
@@ -200,7 +200,7 @@ func TestTheStatusBarSaysWhichMailRecordsTheCachedZoneHas(t *testing.T) {
 	}
 
 	h := newHarness(t, s)
-	h.press("enter")
+	h.press("space")
 
 	h.assertBadges(map[string]string{"MX": gray, "SPF": green, "DMARC": green, "DKIM": green})
 }
@@ -218,7 +218,7 @@ func openCachedZone(t *testing.T, records ...dns.Record) *harness {
 	}
 
 	h := newHarness(t, s)
-	h.press("enter")
+	h.press("space")
 
 	return h
 }
@@ -271,7 +271,7 @@ func TestHSTSShowsOnlyForCloudflareZones(t *testing.T) {
 	mustZone(t, s, dns.Zone{AccountID: a.ID, Name: "aws.example", ProviderID: "za"})
 
 	h := newHarness(t, s)
-	h.press("enter")
+	h.press("space")
 
 	h.assertStatusBarShows("DNSSEC ?")
 	if strings.Contains(h.statusBar(), "HSTS") {
@@ -283,14 +283,14 @@ func TestAZoneWhoseDNSSECIsPendingSaysSo(t *testing.T) {
 	f := refreshZones()
 	f.SetZoneStatus("zw1", dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Pending, HSTS: dnsprovider.On})
 	h, s, _ := newRefreshHarness(t, f)
-	h.press("enter")
+	h.press("space")
 
 	h.assertStatusBarShows("DNSSEC pending")
 	h.assertBadges(map[string]string{"HSTS": green})
 
 	// From the cache, too.
 	h = newHarness(t, s)
-	h.press("enter")
+	h.press("space")
 	h.assertStatusBarShows("DNSSEC pending")
 }
 
@@ -301,14 +301,14 @@ func TestARateLimitedZoneStatusReadStillSavesTheRecordsButHoldsTheNextRefresh(t 
 	h, _, _ := newRefreshHarnessWith(t, f, tui.Deps{Clock: func() time.Time { return now }})
 
 	f.Fail(providertest.OpZoneStatus, &dnsprovider.APIError{Provider: "cloudflare", StatusCode: http.StatusTooManyRequests, RetryAfter: 90 * time.Second})
-	h.press("enter")
+	h.press("space")
 
 	h.assertShows("validated this session", "203.0.113.20")
 	h.assertStatusBarShows("DNSSEC ?", "HSTS ?")
 
 	// The Provider asked not to be called again yet.
 	f.Fail(providertest.OpZoneStatus, nil)
-	h.press("r")
+	h.press("right", "r")
 
 	retryAt := testNow.Add(90 * time.Second).Local().Format(time.TimeOnly)
 	h.assertShows("rate-limited until " + retryAt)
@@ -318,7 +318,7 @@ func TestARateLimitedZoneStatusReadStillSavesTheRecordsButHoldsTheNextRefresh(t 
 	}
 
 	now = testNow.Add(90 * time.Second)
-	h.press("r")
+	h.press("right", "r", "left")
 
 	h.assertBadges(map[string]string{"DNSSEC": green, "HSTS": red})
 }
@@ -363,7 +363,7 @@ func TestARefreshReadsTheZoneStatusAlongsideTheRecords(t *testing.T) {
 	h.typeText(passphrase)
 	h.press("enter")
 
-	h.press("enter")
+	h.press("space")
 
 	h.assertShows("validated this session", "203.0.113.20")
 	h.assertBadges(map[string]string{"DNSSEC": green, "HSTS": green})

@@ -353,11 +353,11 @@ func TestAZoneThatIsNotTheLiveZoneShowsNoSerialCheckVerdict(t *testing.T) {
 		t.Fatalf("work row = %q, want the possibly-stale marker", row)
 	}
 
-	h.press("enter")
+	h.press("space")
 	h.assertStatusLineShows("no Serial Check: the resolver answers for the Live Zone")
 	h.assertHides("serial matches")
 
-	h.press("j", "enter")
+	h.press("j", "space")
 	h.assertStatusLineShows("possibly stale")
 }
 
@@ -414,10 +414,10 @@ func TestTheZoneStatusBarSaysWhetherTheOpenZoneIsTheLiveZone(t *testing.T) {
 	h.send(tea.WindowSizeMsg{Width: 160, Height: 30})
 
 	// example.com in cloudflare.personal, then in cloudflare.work.
-	h.press("enter")
+	h.press("space")
 	h.assertStatusBarShows("not the Live Zone")
 
-	h.press("j", "enter")
+	h.press("j", "space")
 	h.assertStatusBarShows("· Live Zone")
 
 	if strings.Contains(h.statusBar(), "not the Live Zone") {
@@ -425,7 +425,7 @@ func TestTheZoneStatusBarSaysWhetherTheOpenZoneIsTheLiveZone(t *testing.T) {
 	}
 
 	// two.tv's Delegation lookup failed.
-	h.press("j", "j", "enter")
+	h.press("j", "j", "space")
 	h.assertStatusBarShows("Live Zone unknown")
 }
 

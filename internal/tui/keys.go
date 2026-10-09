@@ -32,17 +32,21 @@ const (
 	ActionHelp
 	ActionClose
 	ActionQuit
-	// ActionAllAccounts clears the Account filter, so the Domains pane shows
-	// the Zones of every Account.
-	ActionAllAccounts
+	// ActionShow shows what the highlighted item holds: in the Domains
+	// pane the Zone's Records, and in the Accounts pane only the Account's
+	// Zones, or every Account's again when that Account is already the
+	// filter.
+	ActionShow
 	// ActionEnrollKeychain enrolls the Keychain with Touch ID as another
 	// Unseal Method, after Unseal.
 	ActionEnrollKeychain
 	// ActionRelistZones re-lists the highlighted Account's Zones from its
 	// Provider, after Unseal.
 	ActionRelistZones
-	// ActionRefresh Refreshes the open Zone again, such as to retry a
-	// failed Refresh.
+	// ActionRefresh acts on the focused pane. In the Records pane it
+	// Refreshes the open Zone again, such as to retry a failed
+	// Refresh; in the Domains and Accounts panes it re-lists the Zones of
+	// the Account shown, or of every Account when no Account is.
 	ActionRefresh
 	// ActionInsert, ActionEdit and ActionDelete act on the focused pane's
 	// items. In the Records pane, insert opens the Record form to add a
@@ -62,8 +66,8 @@ const (
 	ActionInsert
 	ActionEdit
 	ActionDelete
-	// ActionPreviewChanges shows the open Zone's pending Changeset, from
-	// which it is applied or discarded.
+	// ActionPreviewChanges, in the Records pane, shows the open Zone's
+	// pending Changeset, from which it is applied or discarded.
 	ActionPreviewChanges
 	// ActionDiscardChanges discards the pending Changeset shown in the preview.
 	ActionDiscardChanges
@@ -109,15 +113,15 @@ func DefaultShortcutProfile() ShortcutProfile {
 			{Action: ActionPageDown, Keys: []string{"pgdown"}, Help: "page down"},
 			{Action: ActionSelect, Keys: []string{"enter"}},
 			{Action: ActionSearch, Keys: []string{"/"}, Help: "search"},
-			{Action: ActionAllAccounts, Keys: []string{"*"}, Help: "Zones of all Accounts"},
-			{Action: ActionRefresh, Keys: []string{"r"}, Help: "Refresh the open Zone (retry)"},
+			{Action: ActionShow, Keys: []string{" "}},
+			{Action: ActionRefresh, Keys: []string{"r"}},
 			{Action: ActionInsert, Keys: []string{"i", "insert"}},
 			{Action: ActionEdit, Keys: []string{"e"}},
 			{Action: ActionDelete, Keys: []string{"d", "delete"}},
 			{Action: ActionApplyTemplate, Keys: []string{"t"}},
-			{Action: ActionPreviewChanges, Keys: []string{"p"}, Help: "preview the pending changes, Enter applies"},
-			{Action: ActionDiscardChanges, Keys: []string{"D"}, Help: "discard the pending changes (in the preview)"},
-			{Action: ActionApplyOver, Keys: []string{"O"}, Help: "apply over the current values (in the preview, after a conflict)"},
+			{Action: ActionPreviewChanges, Keys: []string{"P"}},
+			{Action: ActionDiscardChanges, Keys: []string{"D"}},
+			{Action: ActionApplyOver, Keys: []string{"O"}},
 			{Action: ActionRelistZones, Keys: []string{"L"}},
 			{Action: ActionEnrollKeychain, Keys: []string{"K"}, Help: "enroll the Keychain (Touch ID)"},
 			{Action: ActionHelp, Keys: []string{"?"}, Help: "toggle help"},
@@ -138,29 +142,44 @@ type paneBinding struct {
 // global ones: every other bound Action.
 var paneHelp = map[pane][]paneBinding{
 	paneDomains: {
-		{ActionSelect, "show the Zone's Records"},
+		{ActionShow, "show the Zone's Records"},
 		{ActionInsert, "Onboard a zone name in the Account shown (starts hosting, never registers)"},
 		{ActionEdit, "edit the Zone: its DNSSEC, HSTS or minimum TLS version, and its Delegation, read-only"},
 		{ActionDelete, "Offboard the Zone, not the Live Zone (stops hosting, never touches the registration)"},
+		{ActionRefresh, "re-list the Zones of the Account shown, or of every Account"},
 	},
 	paneRecords: {
 		{ActionInsert, "insert a new Record"},
 		{ActionEdit, "edit the Record"},
-		{ActionSelect, "edit the Record"},
 		{ActionDelete, "delete the Record, or undo its change"},
+		{ActionRefresh, "Refresh the open Zone (retry)"},
 		{ActionApplyTemplate, "apply a Template, such as Google mail"},
+		{ActionPreviewChanges, "preview the pending changes, Enter applies"},
+		{ActionDiscardChanges, "discard the pending changes (in the preview)"},
+		{ActionApplyOver, "apply over the current values (in the preview, after a conflict)"},
 	},
 	paneAccounts: {
-		{ActionSelect, "show only the Account's Zones"},
+		{ActionShow, "show only the Account's Zones, or every Account's again"},
 		{ActionInsert, "add an Account"},
 		{ActionEdit, "edit the Account: its name or credentials"},
 		{ActionDelete, "remove the Account"},
 		{ActionRelistZones, "re-list the Account's Zones"},
+		{ActionRefresh, "re-list the Zones of the Account shown, or of every Account"},
 	},
 }
 
+// sameAs maps an Action to another that does the same in every pane, so
+// the help overlay lists both Actions' keys on the first one's line.
+var sameAs = map[Action]Action{ActionEdit: ActionSelect}
+
 // paneAction reports whether Action a acts on some pane's items.
 func paneAction(a Action) bool {
+	for _, same := range sameAs {
+		if same == a {
+			return true
+		}
+	}
+
 	for _, bs := range paneHelp {
 		for _, b := range bs {
 			if b.Action == a {
@@ -235,6 +254,17 @@ func (km keymap) keysFor(a Action) string {
 	return ""
 }
 
+// recordsKeys returns the display form of the keys bound to an Action that
+// acts in the Records pane, saying so when another pane has focus, e.g.
+// "r in the Records pane".
+func (m *Model) recordsKeys(a Action) string {
+	if m.focus == paneRecords {
+		return m.keys.keysFor(a)
+	}
+
+	return m.keys.keysFor(a) + " in the Records pane"
+}
+
 func displayKey(k string) string {
 	switch k {
 	case "up":
@@ -247,6 +277,8 @@ func displayKey(k string) string {
 		return "Tab"
 	case "enter":
 		return "Enter"
+	case " ":
+		return "Space"
 	case "esc":
 		return "Esc"
 	case "ctrl+c":

@@ -55,7 +55,7 @@ func TestAddingAProxiedRecord(t *testing.T) {
 	h.saveForm()
 	h.assertHides("Add Record")
 
-	h.press("p", "enter")
+	h.press("P", "enter")
 
 	calls := applyCalls(f)
 	if len(calls) != 1 || len(calls[0].Changes) != 1 {
@@ -84,7 +84,7 @@ func TestEditingARecordShowsAndChangesItsProxyFlag(t *testing.T) {
 	h.saveForm()
 	h.assertShows("~ www")
 
-	h.press("p", "enter")
+	h.press("P", "enter")
 
 	calls := applyCalls(f)
 	if len(calls) != 1 || len(calls[0].Changes) != 1 {
@@ -105,7 +105,7 @@ func TestThePreviewShowsAProxyOnlyChange(t *testing.T) {
 
 	h.press("e", "tab", "tab", "tab", "tab", "left")
 	h.saveForm()
-	h.press("p")
+	h.press("P")
 
 	h.assertShows("~ www CNAME work.example TTL 300 proxied → www CNAME work.example TTL 300 not proxied")
 }
@@ -134,7 +134,7 @@ func TestEditingARecordTheProviderCannotProxyHasNoProxyFlag(t *testing.T) {
 	h.saveForm()
 	h.assertShows("1 pending change")
 
-	h.press("p", "enter")
+	h.press("P", "enter")
 
 	calls := applyCalls(f)
 	if len(calls) != 1 || len(calls[0].Changes) != 1 {
@@ -153,7 +153,7 @@ func TestAddingARecordWithTheProxyFlagOffSendsNoFlag(t *testing.T) {
 	h.addRecord("A", "lan", "10.0.0.1", "300")
 	h.assertHides("Add Record")
 
-	h.press("p", "enter")
+	h.press("P", "enter")
 
 	calls := applyCalls(f)
 	if len(calls) != 1 || len(calls[0].Changes) != 1 {
@@ -180,7 +180,7 @@ func TestARecordWithoutTheProxyFlagIsTheSameAsOneWithItOff(t *testing.T) {
 	off.Extras = map[string]string{"proxied": "false"}
 	f.SetRecords("zw1", off)
 
-	h.press("p", "enter")
+	h.press("P", "enter")
 
 	if calls := applyCalls(f); len(calls) != 1 {
 		t.Fatalf("Apply calls = %+v, want the Changeset sent without a conflict", calls)

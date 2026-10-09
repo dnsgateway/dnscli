@@ -1045,6 +1045,10 @@ func (m *Model) zonesDiscovered(msg zonesDiscoveredMsg) tea.Cmd {
 	if errors.Is(msg.err, store.ErrAccountNotFound) {
 		delete(m.relisting, msg.account.ID)
 
+		if m.inRelistBatch(msg.account.ID) {
+			return m.relistBatchDone()
+		}
+
 		return nil
 	}
 

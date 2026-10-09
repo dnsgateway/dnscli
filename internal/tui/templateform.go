@@ -284,7 +284,7 @@ func (m *Model) submitTemplateForm() tea.Cmd {
 	if len(f.conflicts) > 0 {
 		f.err = fmt.Sprintf("Nothing was staged: %s would change Records you have pending changes for. "+
 			"Discard them (%s, then %s) or make them what the Template wants, and apply it again:",
-			t.Name, m.keys.keysFor(ActionPreviewChanges), m.keys.keysFor(ActionDiscardChanges))
+			t.Name, m.recordsKeys(ActionPreviewChanges), m.keys.keysFor(ActionDiscardChanges))
 
 		return nil
 	}

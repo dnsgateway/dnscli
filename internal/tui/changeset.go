@@ -125,7 +125,7 @@ func (m *Model) writeGate() (dns.Zone, tea.Cmd, bool) {
 		return z, nil, false
 	case !m.validatedZone(z.ID):
 		m.notice = notice{text: fmt.Sprintf("%s is a Stale Zone: it can be edited once a Refresh validates it (%s Refreshes).",
-			z.Name, m.keys.keysFor(ActionRefresh)), err: true}
+			z.Name, m.recordsKeys(ActionRefresh)), err: true}
 
 		return z, nil, false
 	}

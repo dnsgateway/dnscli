@@ -348,7 +348,7 @@ func TestGoDaddyAndNamecheapNeverOfferOffboarding(t *testing.T) {
 			h := newOffboardHarness(t, s, offboardFake(), r)
 
 			// Show the Account's Zones, then Offboard from the Domains pane.
-			h.press("shift+tab", "j", "enter", "tab", "?")
+			h.press("shift+tab", "j", "space", "tab", "?")
 			h.assertHides("Offboard the Zone")
 
 			h.press("esc", "d")
@@ -671,7 +671,7 @@ func openWorkTest(t *testing.T, h *harness) {
 
 	h.press("j", "d")
 	h.unsealWith(passphrase)
-	h.press("esc", "enter", "tab")
+	h.press("esc", "space", "tab")
 	h.assertShows("validated this session")
 }
 
@@ -684,7 +684,7 @@ func TestOffboardingIsRefusedWhileTheZoneIsRefreshed(t *testing.T) {
 	h.unsealWith(passphrase)
 	h.press("esc")
 
-	refresh := h.step(h.pressHolding("enter"))
+	refresh := h.step(h.pressHolding("space"))
 	h.assertShows("refreshing…")
 
 	h.press("d")

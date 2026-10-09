@@ -50,7 +50,7 @@ func TestViewFitsSmallTerminals(t *testing.T) {
 			seedCache(t, s)
 
 			h := newHarness(t, s)
-			h.press("enter")
+			h.press("space")
 			h.send(tea.WindowSizeMsg{Width: w, Height: ht})
 
 			h.assertFits(w, ht)

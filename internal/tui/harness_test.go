@@ -223,6 +223,8 @@ func keyMsg(k string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyShiftTab}
 	case "enter":
 		return tea.KeyMsg{Type: tea.KeyEnter}
+	case "space":
+		return tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}}
 	case "esc":
 		return tea.KeyMsg{Type: tea.KeyEsc}
 	case "backspace":

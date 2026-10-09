@@ -83,7 +83,7 @@ func TestParkedDomainTemplateBuildsAChangesetThatIsPreviewedAndApplied(t *testin
 		t.Fatalf("a Template applied changes without a preview: %+v", calls)
 	}
 
-	h.press("p")
+	h.press("P")
 	h.assertShows("Changes to work.example",
 		"~ @ MX 10 mail.work.example TTL 3600 → @ MX 0 . TTL 3600",
 		"+ @ TXT v=spf1 -all TTL 3600",
@@ -122,7 +122,7 @@ func TestGoogleMailTemplateReplacesSPFAndDMARCInsteadOfAddingThem(t *testing.T) 
 	h.saveForm()
 
 	h.assertShows("3 pending changes")
-	h.press("p", "enter")
+	h.press("P", "enter")
 
 	// The Provider has an automatic TTL, so the Template uses it.
 	want := []dns.Change{
@@ -174,7 +174,7 @@ func TestGoogleMailTemplateTakesADMARCPolicyAndADKIMKey(t *testing.T) {
 	h.saveForm()
 
 	h.assertShows("4 pending changes")
-	h.press("p", "enter")
+	h.press("P", "enter")
 
 	want := []dns.Change{
 		modifyTo(mailRecords[1], "1 smtp.google.com", 3600),
@@ -234,7 +234,7 @@ func TestProtonMailTemplateAsksForItsTokenAndDKIMTargets(t *testing.T) {
 	h.saveForm()
 
 	h.assertHides("Apply a Template")
-	h.press("p", "enter")
+	h.press("P", "enter")
 
 	want := []dns.Change{
 		addOf("TXT", "work.example", "protonmail-verification=abc123", 3600),
@@ -272,7 +272,7 @@ func TestATemplateDoesNotOverwriteAChangeTheUserStaged(t *testing.T) {
 	h.assertShows("1 pending change", "v=spf1 mx ~all")
 
 	// Discarding the edit lets the Template replace the Record.
-	h.press("p", "D")
+	h.press("P", "D")
 	h.assertShows("Discarded 1 pending change", "v=spf1 mx -all")
 	h.openTemplate(parkedDomain)
 	h.saveForm()
@@ -291,7 +291,7 @@ func TestATemplateKeepsAChangeTheUserStagedThatItAgreesWith(t *testing.T) {
 	h.openTemplate(parkedDomain)
 	h.saveForm()
 	h.assertHides("Apply a Template")
-	h.press("p", "enter")
+	h.press("P", "enter")
 
 	want := []dns.Change{
 		{Kind: dns.ChangeDelete, Before: mailRecords[2]},
@@ -316,7 +316,7 @@ func TestATemplateDoesNotModifyARecordIntoOneStagedForDeletion(t *testing.T) {
 	// The user deletes the strict SPF; the Template would turn the other
 	// SPF into it.
 	h.press("down", "d")
-	h.press("p")
+	h.press("P")
 	h.assertShows("- @ TXT v=spf1 -all")
 	h.press("esc")
 
@@ -350,7 +350,7 @@ func TestTheNoProviderIDErrorListsNoConflicts(t *testing.T) {
 	// The SPF the Template would bring back is staged for deletion, and
 	// the DMARC it would change has no Provider ID.
 	h.press("down", "down", "d")
-	h.press("p")
+	h.press("P")
 	h.assertShows("- @ TXT v=spf1 -all")
 	h.press("esc")
 
@@ -366,7 +366,7 @@ func TestTheWriteGateRefusesTemplatesOnAStaleZone(t *testing.T) {
 	h, _, _ := newRefreshHarness(t, f)
 
 	f.Fail(providertest.OpRecords, errors.New("connection reset by peer"))
-	h.press("enter", "tab")
+	h.press("space", "tab")
 	h.assertShows("Refresh failed")
 
 	h.press("t")
@@ -380,7 +380,7 @@ func TestTheWriteGateRefusesTemplatesInASealedSession(t *testing.T) {
 	f := refreshZones()
 	h := newAccountHarness(t, s, f)
 
-	h.press("enter")
+	h.press("space")
 	h.press("esc", "tab")
 
 	h.press("t")
@@ -401,7 +401,7 @@ func TestAMailTemplateKeepsTheZonesDMARCUnlessItIsEdited(t *testing.T) {
 	h.saveForm()
 
 	h.assertShows("2 pending changes")
-	h.press("p", "enter")
+	h.press("P", "enter")
 
 	want := []dns.Change{
 		modifyTo(mailRecords[1], "1 smtp.google.com", 3600),
@@ -429,7 +429,7 @@ func TestAWeakerDMARCPolicyNeedsASecondSave(t *testing.T) {
 	h.press("enter")
 	h.assertHides("Apply a Template")
 	h.assertShows("3 pending changes")
-	h.press("p", "enter")
+	h.press("P", "enter")
 
 	want := []dns.Change{
 		modifyTo(mailRecords[1], "1 smtp.google.com", 3600),

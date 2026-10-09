@@ -163,7 +163,7 @@ func TestSelectingAZoneRefreshesItInTheBackgroundAndValidatesIt(t *testing.T) {
 	h, s, _ := newRefreshHarness(t, f)
 
 	// The cached Records show at once, while the Refresh is in flight.
-	refresh := h.step(h.pressHolding("enter"))
+	refresh := h.step(h.pressHolding("space"))
 
 	h.assertShows("203.0.113.9", "refreshing…")
 	h.assertHides("203.0.113.20")
@@ -196,11 +196,16 @@ func TestAFailedRefreshKeepsTheCacheAndTheRetryKeyRefreshesAgain(t *testing.T) {
 	h, s, _ := newRefreshHarness(t, f)
 
 	f.Fail(providertest.OpRecords, errors.New("connection reset by peer"))
-	h.press("enter")
+	h.press("space")
 
-	h.assertShows("203.0.113.9", "Refresh failed (r retries): connection reset by peer")
+	h.assertShows("203.0.113.9", "Refresh failed (r in the Records pane retries): connection reset by peer")
 	h.assertHides("validated this session", "refreshing…")
 	h.assertMarker("work.example", "✗")
+
+	// In the Records pane, r there is just r.
+	h.press("right")
+	h.assertShows("Refresh failed (r retries): connection reset by peer")
+	h.press("left")
 	h.assertDimmed("work.example")
 	h.assertDimmed("203.0.113.9")
 
@@ -213,7 +218,7 @@ func TestAFailedRefreshKeepsTheCacheAndTheRetryKeyRefreshesAgain(t *testing.T) {
 	}
 
 	f.Fail(providertest.OpRecords, nil)
-	h.press("r")
+	h.press("right", "r", "left")
 
 	h.assertShows("203.0.113.20", "validated this session")
 	h.assertHides("Refresh failed")
@@ -229,7 +234,7 @@ func TestARateLimitedRefreshShowsWhenToRetryAndIsNotRetriedOnItsOwn(t *testing.T
 	h, _, _ := newRefreshHarness(t, f)
 
 	f.Fail(providertest.OpRecords, &dnsprovider.APIError{Provider: "cloudflare", StatusCode: http.StatusTooManyRequests, RetryAfter: 90 * time.Second})
-	h.press("enter")
+	h.press("space")
 
 	retryAt := testNow.Add(90 * time.Second).Local().Format(time.TimeOnly)
 	h.assertShows("rate limited", "retry at "+retryAt, "203.0.113.9")
@@ -249,14 +254,14 @@ func TestARateLimitedZoneIsNotRefreshedUntilTheProviderSaid(t *testing.T) {
 	h, _, _ := newRefreshHarnessWith(t, f, tui.Deps{Clock: func() time.Time { return now }})
 
 	f.Fail(providertest.OpRecords, &dnsprovider.APIError{Provider: "cloudflare", StatusCode: http.StatusTooManyRequests, RetryAfter: 90 * time.Second})
-	h.press("enter")
+	h.press("space")
 	f.Fail(providertest.OpRecords, nil)
 
 	retryAt := testNow.Add(90 * time.Second).Local().Format(time.TimeOnly)
 
 	// Opening the Zone again, or retrying, before then does not call the Provider.
-	h.press("enter")
-	h.press("r")
+	h.press("space")
+	h.press("right", "r")
 
 	h.assertShows("rate-limited until " + retryAt)
 
@@ -265,7 +270,7 @@ func TestARateLimitedZoneIsNotRefreshedUntilTheProviderSaid(t *testing.T) {
 	}
 
 	now = testNow.Add(90 * time.Second)
-	h.press("r")
+	h.press("right", "r", "left")
 
 	h.assertShows("validated this session", "203.0.113.20")
 
@@ -283,7 +288,7 @@ func TestARefreshWithoutASerialKeepsTheCachedOne(t *testing.T) {
 	workTest.Serial = 2026100702
 	mustZone(t, s, workTest)
 
-	h.press("j", "enter")
+	h.press("j", "space")
 	h.assertShows("validated this session")
 
 	if z := cachedZone(t, s, "work.test"); z.Serial != 2026100702 || !z.RefreshedAt.Equal(testNow) {
@@ -295,15 +300,15 @@ func TestRetryingAZoneThatCannotBeRefreshedSaysWhy(t *testing.T) {
 	f := refreshZones()
 	h, _, _ := newRefreshHarness(t, f)
 
-	refresh := h.step(h.pressHolding("enter"))
-	h.press("r")
+	refresh := h.step(h.pressHolding("space"))
+	h.press("right", "r")
 	h.assertShows("work.example is already being Refreshed")
 	h.run(refresh)
 
 	// A later session whose build lacks the Account's Provider type.
 	s, _ := enrollFirstAccount(t)
 	later := newHarnessWith(t, s, tui.Deps{UnsealMethod: fastPassphrase()})
-	later.press("enter", "r")
+	later.press("space", "right", "r")
 
 	later.assertShows(`Provider type "cloudflare" is not available in this build`)
 	later.assertHides("Passphrase")
@@ -313,12 +318,12 @@ func TestRefreshesOfOneZoneAreSingleFlight(t *testing.T) {
 	f := refreshZones()
 	h, s, _ := newRefreshHarness(t, f)
 
-	refresh := h.step(h.pressHolding("enter"))
+	refresh := h.step(h.pressHolding("space"))
 	h.assertShows("refreshing…")
 
 	// Retrying, and opening the Zone again, while its Refresh is in flight
 	// start no second one.
-	h.press("r", "enter")
+	h.press("right", "r", "left", "space")
 	h.assertShows("refreshing…", "203.0.113.9")
 
 	if n := recordsCalls(f, "zw1"); n != 0 {
@@ -338,7 +343,7 @@ func TestRefreshesOfOneZoneAreSingleFlight(t *testing.T) {
 	}
 
 	// Once it has finished, the Zone can be Refreshed again.
-	h.press("r")
+	h.press("right", "r", "left")
 
 	if n := recordsCalls(f, "zw1"); n != 2 {
 		t.Fatalf("Records calls = %d after another retry, want 2", n)
@@ -348,7 +353,7 @@ func TestRefreshesOfOneZoneAreSingleFlight(t *testing.T) {
 func TestARestartStartsEveryZoneNotValidatedAndSelectingPromptsForUnseal(t *testing.T) {
 	f := refreshZones()
 	h, s, _ := newRefreshHarness(t, f)
-	h.press("enter")
+	h.press("space")
 	h.assertShows("validated this session")
 
 	// A new session on the same database: the Refreshed cache is there, but
@@ -363,7 +368,7 @@ func TestARestartStartsEveryZoneNotValidatedAndSelectingPromptsForUnseal(t *test
 
 	later.assertDimmed("work.example")
 
-	later.press("enter")
+	later.press("space")
 
 	// The cached Records show behind the Unseal prompt, which the Refresh needs.
 	later.assertShows("203.0.113.20", "Unseal", "needs your Account secrets")
@@ -391,7 +396,7 @@ func TestARefreshThatNeedsUnsealWaitsForThePromptAlreadyOpen(t *testing.T) {
 
 	// The Zone's cached Records load while the user asks to remove the
 	// Account, which opens the Unseal prompt first.
-	load := h.pressHolding("enter")
+	load := h.pressHolding("space")
 	h.press("shift+tab", "d")
 	h.assertShows("Unseal")
 	h.run(load)
@@ -413,7 +418,7 @@ func TestCancellingUnsealLeavesTheZoneStaleWithItsCache(t *testing.T) {
 	f := refreshZones()
 	h := newAccountHarness(t, s, f)
 
-	h.press("enter", "esc")
+	h.press("space", "esc")
 
 	h.assertShows("sealed · read-only", "work.example")
 	h.assertHides("Unseal", "refreshing…", "validated this session")
@@ -430,7 +435,7 @@ func TestTheSerialCheckHintNeverContradictsAValidatedZone(t *testing.T) {
 	h, _, _ := newRefreshHarnessWith(t, f, tui.Deps{Resolver: &fakeResolver{serials: map[string]uint32{"work.example": liveSerial - 1}}})
 	h.assertMarker("work.example", "!")
 
-	h.press("enter")
+	h.press("space")
 
 	h.assertMarker("work.example", "✓")
 	h.assertShows("validated this session")
@@ -440,11 +445,11 @@ func TestTheSerialCheckHintNeverContradictsAValidatedZone(t *testing.T) {
 func TestAFailedRefreshOfAValidatedZoneMakesItStaleAgain(t *testing.T) {
 	f := refreshZones()
 	h, s, _ := newRefreshHarness(t, f)
-	h.press("enter")
+	h.press("space")
 	h.assertShows("validated this session")
 
 	f.Fail(providertest.OpRecords, &dnsprovider.APIError{Provider: "cloudflare", StatusCode: http.StatusServiceUnavailable})
-	h.press("r")
+	h.press("right", "r", "left")
 
 	h.assertShows("Refresh failed", "503", "203.0.113.20")
 	h.assertHides("validated this session")
@@ -460,8 +465,8 @@ func TestRefreshesRunWithBoundedConcurrency(t *testing.T) {
 	f := refreshZones()
 	h, _, _ := newRefreshHarnessWith(t, f, tui.Deps{Refreshes: 1})
 
-	first := h.step(h.pressHolding("enter")) // work.example
-	h.press("j", "enter")                    // work.test waits for a free slot
+	first := h.step(h.pressHolding("space")) // work.example
+	h.press("j", "space")                    // work.test waits for a free slot
 
 	h.assertMarker("work.example", "↻")
 	h.assertMarker("work.test", "↻")

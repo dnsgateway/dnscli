@@ -10,20 +10,20 @@ func TestRecordsPaneAsksToOpenAZoneBeforeOneIsOpened(t *testing.T) {
 
 	h := newHarness(t, s)
 
-	h.assertShows("Press Enter on a Zone")
+	h.assertShows("Press Space on a Zone")
 	h.assertHides("192.0.2.10", "198.51.100.7")
 }
 
-func TestEnterOnZoneShowsItsCachedRecords(t *testing.T) {
+func TestSpaceOnZoneShowsItsCachedRecords(t *testing.T) {
 	s, _ := openStore(t)
 	seedCache(t, s)
 
 	h := newHarness(t, s)
-	h.press("enter")
+	h.press("space")
 
 	h.assertShows("Name", "Type", "Content", "TTL")
 	h.assertShows("192.0.2.10", "2001:db8::10", "www.example.com", "CNAME", "3600")
-	h.assertHides("198.51.100.7", "Press Enter on a Zone")
+	h.assertHides("198.51.100.7", "Press Space on a Zone")
 	h.assertDimmed("192.0.2.10")
 }
 
@@ -32,7 +32,7 @@ func TestJAndDownMoveToLaterZones(t *testing.T) {
 	seedCache(t, s)
 
 	h := newHarness(t, s)
-	h.press("j", "down", "enter")
+	h.press("j", "down", "space")
 
 	h.assertShows("198.51.100.7")
 	h.assertHides("192.0.2.10")
@@ -43,7 +43,7 @@ func TestKAndUpMoveToEarlierZones(t *testing.T) {
 	seedCache(t, s)
 
 	h := newHarness(t, s)
-	h.press("j", "j", "k", "up", "enter")
+	h.press("j", "j", "k", "up", "space")
 
 	h.assertShows("192.0.2.10")
 }
@@ -54,12 +54,12 @@ func TestMovementStopsAtTheEndsOfTheList(t *testing.T) {
 
 	h := newHarness(t, s)
 
-	h.press("k", "enter")
+	h.press("k", "space")
 	h.assertShows("192.0.2.10")
 
 	// Down past the last Zone moves on to the Accounts pane, whose last
 	// Account is as far as Down goes.
-	h.press("j", "j", "enter")
+	h.press("j", "j", "space")
 	h.assertShows("198.51.100.7")
 
 	h.press("j", "j", "j", "j")
@@ -72,7 +72,7 @@ func TestZoneWithoutCachedRecordsSaysSo(t *testing.T) {
 	seedCache(t, s)
 
 	h := newHarness(t, s)
-	h.press("j", "enter")
+	h.press("j", "space")
 
 	h.assertShows("No cached Records")
 }
@@ -83,10 +83,10 @@ func TestStatusBarShowsOpenZoneAndLastRefresh(t *testing.T) {
 
 	h := newHarness(t, s)
 
-	h.press("enter")
+	h.press("space")
 	h.assertShows("example.com", "cloudflare.personal", "cached", "last Refresh 3h ago")
 
-	h.press("j", "enter")
+	h.press("j", "space")
 	h.assertShows("example.org", "cloudflare.work", "never Refreshed")
 }
 
@@ -95,7 +95,7 @@ func TestMovingWithinRecordsPaneHighlightsTheRecord(t *testing.T) {
 	seedCache(t, s)
 
 	h := newHarness(t, s)
-	h.press("enter", "shift+tab", "shift+tab")
+	h.press("space", "shift+tab", "shift+tab")
 
 	if !h.highlighted("192.0.2.10") || h.highlighted("2001:db8::10") {
 		t.Fatalf("first Record should be highlighted:\n%q", h.rawView())
@@ -113,7 +113,7 @@ func TestRecordsPaneShowsLoadingWhileRecordsAreRead(t *testing.T) {
 	seedCache(t, s)
 
 	h := newHarness(t, s)
-	pending := h.pressHolding("enter")
+	pending := h.pressHolding("space")
 
 	h.assertShows("loading")
 	h.assertHides("No cached Records")
@@ -134,7 +134,7 @@ func TestRecordsReadFailureIsShownInTheRecordsPane(t *testing.T) {
 		t.Fatalf("close: %v", err)
 	}
 
-	h.press("enter")
+	h.press("space")
 
 	h.assertShows("Could not read Records", "list records")
 	h.assertHides("No cached Records")
@@ -145,7 +145,7 @@ func TestMovingInOnePaneLeavesOthersAlone(t *testing.T) {
 	seedCache(t, s)
 
 	h := newHarness(t, s)
-	h.press("shift+tab", "j", "tab", "enter")
+	h.press("shift+tab", "j", "tab", "space")
 
 	h.assertShows("192.0.2.10")
 }

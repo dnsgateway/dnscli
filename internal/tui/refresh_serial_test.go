@@ -62,7 +62,7 @@ func TestARefreshAsksForTheSerialAlongsideTheRecords(t *testing.T) {
 	h.typeText(passphrase)
 	h.press("enter")
 
-	h.press("enter")
+	h.press("space")
 	h.assertShows("validated this session", "203.0.113.20")
 
 	if z := cachedZone(t, s, "work.example"); z.Serial != 2026100799 {
@@ -75,7 +75,7 @@ func TestARefreshDoesNotAskNameserversThatFailedForAFewMinutes(t *testing.T) {
 	r := &fakeResolver{soaAtErrs: map[string]error{"work.example": errors.New("i/o timeout")}}
 	h, _, _ := newRefreshHarnessWith(t, serialZones(zoneNS), tui.Deps{Resolver: r, Clock: func() time.Time { return now }})
 
-	h.press("enter")
+	h.press("space")
 	h.assertShows("validated this session")
 
 	if n := len(r.soaAtQueries()); n != 1 {
@@ -84,7 +84,7 @@ func TestARefreshDoesNotAskNameserversThatFailedForAFewMinutes(t *testing.T) {
 
 	// A minute later, a Refresh does not wait on them again.
 	now = now.Add(time.Minute)
-	h.press("r")
+	h.press("right", "r", "left")
 	h.assertShows("validated this session")
 
 	if n := len(r.soaAtQueries()); n != 1 {
@@ -93,7 +93,7 @@ func TestARefreshDoesNotAskNameserversThatFailedForAFewMinutes(t *testing.T) {
 
 	// Some minutes later, they are asked again.
 	now = now.Add(5 * time.Minute)
-	h.press("r")
+	h.press("right", "r", "left")
 	h.assertShows("validated this session")
 
 	if n := len(r.soaAtQueries()); n != 2 {

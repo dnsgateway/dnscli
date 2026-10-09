@@ -2,6 +2,7 @@ package tui_test
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -186,6 +187,70 @@ func TestRelistingNeedsTheAccountsPane(t *testing.T) {
 
 	if calls := f.Calls(); len(calls) != 0 {
 		t.Fatalf("provider calls = %+v", calls)
+	}
+}
+
+// zonesCalls counts the Provider's Zones listings.
+func zonesCalls(f *fakeProvider) int {
+	n := 0
+
+	for _, c := range f.Calls() {
+		if c.Op == providertest.OpZones {
+			n++
+		}
+	}
+
+	return n
+}
+
+func TestRInTheDomainsPaneReListsEveryAccountWhenNoneIsShown(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+
+	f := workZones()
+	h := newAccountHarness(t, s, f)
+	h.fillAddAccount("home", "home-token")
+	h.unsealWith(passphrase)
+	h.assertShows("cloudflare.home")
+
+	before := zonesCalls(f)
+
+	h.press("tab", "r") // every Account's Zones, in the Domains pane
+
+	if n := zonesCalls(f) - before; n != 2 {
+		t.Fatalf("Zones listings = %d, want one per Account: %+v", n, f.Calls())
+	}
+
+	h.assertShows("Re-listed 2 Accounts: no changes.")
+}
+
+func TestReListingEveryAccountReportsEachFailureOnceAllAreBack(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+
+	f := workZones()
+	h := newAccountHarness(t, s, f)
+	h.fillAddAccount("home", "home-token")
+	h.unsealWith(passphrase)
+
+	f.Fail(providertest.OpZones, errors.New("connection reset by peer"))
+	h.press("tab", "r")
+
+	h.assertShows("Re-listing cloudflare.home failed: connection reset by peer. Re-listing cloudflare.work failed")
+}
+
+func TestRInTheAccountsPaneReListsOnlyTheAccountShown(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	withPersonalAccount(t, s)
+
+	f := workZones()
+	h := newAccountHarness(t, s, f)
+
+	h.press("shift+tab", "j", "space", "k", "r") // cloudflare.work shown, cloudflare.personal highlighted
+	h.unsealWith(passphrase)
+
+	h.assertShows("Re-listed cloudflare.work")
+
+	if n := zonesCalls(f); n != 1 {
+		t.Fatalf("Zones listings = %d, want 1: %+v", n, f.Calls())
 	}
 }
 

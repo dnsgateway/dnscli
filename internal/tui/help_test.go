@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/sergelogvinov/dnscli/internal/tui"
 )
 
@@ -38,6 +40,12 @@ func TestHelpOverlayListsTheFocusedPanesKeysBelowTheGlobalOnes(t *testing.T) {
 	h.press("esc", "shift+tab", "?")
 	h.assertShows("── Accounts ─", "show only the Account's Zones", "add an Account", "edit the Account", "remove the Account", "re-list")
 	h.assertHides("── Domains ─", "insert a new Record")
+	// Edit and Select edit alike: one line lists both keys.
+	h.assertShows("e/Enter")
+
+	if n := strings.Count(h.view(), "edit the Account"); n != 1 {
+		t.Fatalf("edit is listed %d times, want once:\n%s", n, h.view())
+	}
 
 	// The global keys show in every pane, above the rule.
 	h.assertShows("next pane", "search", "quit")
@@ -107,4 +115,52 @@ func TestWithoutAccountsHelpSaysInsertAddsOneFromAnyPane(t *testing.T) {
 		h.assertShows("i/insert", "add an Account")
 		h.assertHides("insert a new Record")
 	}
+}
+
+func TestHelpInTheDomainsPaneSaysWhatTheZoneIconsMean(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	h := newHarness(t, s)
+	h.send(tea.WindowSizeMsg{Width: 120, Height: 50})
+
+	h.press("?")
+	h.assertShows("Domains icons", "±", "pending changes", "the Live Zone", "registration only", "serial differs: maybe stale", "a Stale Zone")
+
+	// Other panes' help has no legend.
+	h.press("esc", "shift+tab", "?")
+	h.assertHides("Domains icons")
+}
+
+func TestHelpLeavesTheIconLegendOutWhenTheTerminalIsTooShort(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	h := newHarness(t, s)
+	h.press("?")
+
+	h.assertShows("quit", "show the Zone's Records")
+	h.assertHides("Domains icons")
+}
+
+func TestPreviewKeysAreListedOnlyInTheRecordsPanesHelp(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	h := newHarness(t, s)
+	h.press("?")
+	h.assertHides("preview the pending changes", "discard the pending changes", "apply over the current values")
+
+	h.press("esc", "right", "?")
+	h.assertShows("preview the pending changes", "discard the pending changes", "apply over the current values")
+}
+
+func TestPreviewingOutsideTheRecordsPaneSaysWhereItWorks(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	h := newHarness(t, s)
+	h.press("space", "P")
+
+	h.assertShows("Pending changes are previewed from the Records pane")
 }

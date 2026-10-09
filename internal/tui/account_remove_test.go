@@ -240,7 +240,7 @@ func TestRemovingTheAccountOfTheOpenZoneClosesIt(t *testing.T) {
 	// Unseal first, then open work.example: Zones are listed by name.
 	h.press("shift+tab", "d")
 	h.unsealWith(passphrase)
-	h.press("esc", "tab", "j", "enter")
+	h.press("esc", "tab", "j", "space")
 	h.assertShows("v=work")
 
 	h.press("shift+tab", "j", "d")
@@ -289,7 +289,7 @@ func TestAZoneThatReusesARemovedZonesIDIsNotValidated(t *testing.T) {
 	h, s, _ := newRefreshHarness(t, f)
 	refreshed := zoneID(t, s, "work.example")
 
-	h.press("enter")
+	h.press("space")
 	h.assertMarker("work.example", "✓")
 
 	h.press("esc", "shift+tab", "d")
@@ -314,7 +314,7 @@ func TestARefreshThatFinishesAfterItsAccountWasRemovedIsDropped(t *testing.T) {
 	f := refreshZones()
 	h, s, _ := newRefreshHarness(t, f)
 
-	refresh := h.step(h.pressHolding("enter"))
+	refresh := h.step(h.pressHolding("space"))
 	h.assertShows("refreshing…")
 
 	h.press("esc", "shift+tab", "d")

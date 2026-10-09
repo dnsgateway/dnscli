@@ -103,8 +103,15 @@ func (c conflict) describe(zone string) string {
 // maxPreviewLines bounds how many changes the preview lists.
 const maxPreviewLines = 12
 
-// previewChanges opens the preview of the open Zone's pending Changeset.
+// previewChanges opens the preview of the open Zone's pending Changeset,
+// from the Records pane.
 func (m *Model) previewChanges() tea.Cmd {
+	if m.focus != paneRecords {
+		m.notice = notice{text: "Pending changes are previewed from the Records pane (" + m.keys.keysFor(ActionPreviewChanges) + " there)."}
+
+		return nil
+	}
+
 	if m.open == nil {
 		m.notice = notice{text: "Open a Zone first.", err: true}
 
@@ -470,10 +477,10 @@ func (m *Model) changesApplied(msg changesAppliedMsg) tea.Cmd {
 
 	switch {
 	case !msg.saved:
-		text += fmt.Sprintf(" Refresh (%s) needed: they could not be cached: %v", m.keys.keysFor(ActionRefresh), msg.err)
+		text += fmt.Sprintf(" Refresh (%s) needed: they could not be cached: %v", m.recordsKeys(ActionRefresh), msg.err)
 	case msg.uncached > 0:
 		text += fmt.Sprintf(" Refresh (%s) needed: the Provider did not return the IDs of %d to cache.",
-			m.keys.keysFor(ActionRefresh), msg.uncached)
+			m.recordsKeys(ActionRefresh), msg.uncached)
 	}
 
 	m.notice = notice{text: text, err: failed > 0 || !msg.saved || msg.uncached > 0}

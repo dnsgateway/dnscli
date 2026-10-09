@@ -37,7 +37,7 @@ func TestAPartialApplyCachesOnlyTheConfirmedChangesAndKeepsTheFailedOnesPending(
 
 		return nil
 	})
-	h.press("p", "enter")
+	h.press("P", "enter")
 
 	h.assertShows("Applied 2 of 3 changes to work.example; 1 failed and are still pending: record is locked",
 		"Changes to work.example", "- @ MX 10 mail.work.example TTL 3600")
@@ -57,7 +57,7 @@ func TestAPartialApplyCachesOnlyTheConfirmedChangesAndKeepsTheFailedOnesPending(
 	// The Zone stays validated, and applying again sends only the failed change.
 	h.assertMarker("work.example", "✓")
 	f.FailChanges(nil)
-	h.press("p", "enter")
+	h.press("P", "enter")
 
 	calls := applyCalls(f)
 	if len(calls) != 2 || !reflect.DeepEqual(calls[1].Changes, []dns.Change{{Kind: dns.ChangeDelete, Before: liveRecords[1]}}) {
@@ -75,7 +75,7 @@ func TestAnAdditionTheProviderReturnsNoRecordForIsNotCachedAndTheZoneNeedsARefre
 	h.addRecord("TXT", "_two", "second", "300")
 
 	f.WithholdRecords(true)
-	h.press("p", "enter")
+	h.press("P", "enter")
 
 	h.assertHides("Changes to work.example", "pending change")
 	h.assertShows("Applied 2 changes to work.example", "Refresh (r) needed")
@@ -101,7 +101,7 @@ func TestTheRecordsPaneShowsTheAppliedChangesAsSoonAsTheApplyReturns(t *testing.
 	h := openValidated(t, f)
 	h.buildChangeset()
 
-	h.press("p")
+	h.press("P")
 	h.step(h.pressHolding("enter")) // any reload of the cache is held back
 
 	h.assertHides("Changes to work.example", "pending change", "203.0.113.20", "10 mail.work.example")
@@ -114,7 +114,7 @@ func TestTheRecordsPaneShowsTheAppliedChangesAsSoonAsTheApplyReturns(t *testing.
 func (h *harness) applyDroppingTheZone() {
 	h.t.Helper()
 
-	h.press("p")
+	h.press("P")
 	cmd := h.pressHolding("enter")
 
 	other := cachedZone(h.t, h.store, "work.test")
@@ -176,7 +176,7 @@ func TestDeletingAModifiedRecordDeletesItAsTheChangeWasBuiltFrom(t *testing.T) {
 	h.press("r")
 	h.assertShows("validated this session", "~ work.example", "203.0.113.99")
 
-	h.press("d", "p")
+	h.press("d", "P")
 
 	h.assertShows("- @ A 203.0.113.20 TTL 300")
 }
@@ -222,7 +222,7 @@ func TestChangingARecordsTypeKeepsTheProxyFlagOnlyWhereItApplies(t *testing.T) {
 			h.saveForm()
 			h.assertShows("~ www.work.example", "1 pending change")
 
-			h.press("p", "enter")
+			h.press("P", "enter")
 
 			calls := applyCalls(f)
 			if len(calls) != 1 || len(calls[0].Changes) != 1 {
@@ -301,7 +301,7 @@ func TestEditingARecordKeepsItsNamesCase(t *testing.T) {
 	h.saveForm()
 	h.assertShows("~ WWW.Work.Example", "192.0.2.2")
 
-	h.press("p", "enter")
+	h.press("P", "enter")
 
 	calls := applyCalls(f)
 	if len(calls) != 1 || calls[0].Changes[0].After.Name != "WWW.Work.Example" {

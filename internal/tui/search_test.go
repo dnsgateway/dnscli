@@ -18,7 +18,7 @@ func TestSlashInDomainsFiltersZonesByNameAsTheUserTypes(t *testing.T) {
 	h.assertShows("example.com", "example.org")
 	h.assertHides("two.tv")
 
-	h.press("a", "m", "p", "l", "e", ".", "o")
+	h.press("a", "m", "P", "l", "e", ".", "o")
 
 	h.assertShows("example.org")
 	h.assertHides("example.com", "two.tv")
@@ -35,7 +35,7 @@ func TestEscClearsTheDomainsSearchAndRestoresAllZones(t *testing.T) {
 	h.assertHides("/two")
 
 	// Search is left too: keys are actions again.
-	h.press("j", "enter")
+	h.press("j", "space")
 	h.assertShows("No cached Records for example.org")
 }
 
@@ -44,23 +44,23 @@ func TestEscWithoutASearchKeepsTheCursor(t *testing.T) {
 	seedCache(t, s)
 
 	h := newHarness(t, s)
-	h.press("j", "esc", "enter")
+	h.press("j", "esc", "space")
 
 	h.assertShows("No cached Records for example.org")
 }
 
-func TestEnterOpensTheHighlightedMatchAndKeepsTheFilter(t *testing.T) {
+func TestSpaceOpensTheHighlightedMatchAndKeepsTheFilter(t *testing.T) {
 	s, _ := openStore(t)
 	seedCache(t, s)
 
 	h := newHarness(t, s)
-	h.press("/", "e", "x", "down", "enter")
+	h.press("/", "e", "x", "down", "space")
 
 	h.assertShows("No cached Records for example.org", "/ex")
 	h.assertHides("two.tv")
 
-	// Enter leaves the search input: keys are actions again.
-	h.press("k", "enter")
+	// Space leaves the search input: keys are actions again.
+	h.press("k", "space")
 	h.assertShows("192.0.2.10", "/ex")
 }
 
@@ -77,7 +77,7 @@ func TestBackspaceWidensTheSearch(t *testing.T) {
 	h.assertHides("/exx", "two.tv")
 
 	// Still typing.
-	h.press("a", "m", "p", "l", "e", ".", "o")
+	h.press("a", "m", "P", "l", "e", ".", "o")
 	h.assertShows("example.org")
 	h.assertHides("example.com")
 }
@@ -105,7 +105,7 @@ func TestSlashInRecordsFiltersByName(t *testing.T) {
 	seedCache(t, s)
 
 	h := newHarness(t, s)
-	h.press("enter", "tab", "/", "w", "w", "w")
+	h.press("space", "tab", "/", "w", "w", "w")
 
 	h.assertShows("/www", "www.example.com", "CNAME")
 	h.assertHides("192.0.2.10", "2001:db8::10")
@@ -116,7 +116,7 @@ func TestSlashInRecordsFiltersByType(t *testing.T) {
 	seedCache(t, s)
 
 	h := newHarness(t, s)
-	h.press("enter", "tab", "/", "a", "a", "a", "a")
+	h.press("space", "tab", "/", "a", "a", "a", "a")
 
 	h.assertShows("2001:db8::10")
 	h.assertHides("192.0.2.10", "www.example.com")
@@ -127,7 +127,7 @@ func TestSlashInRecordsFiltersByValue(t *testing.T) {
 	seedCache(t, s)
 
 	h := newHarness(t, s)
-	h.press("enter", "tab", "/", "1", "9", "2")
+	h.press("space", "tab", "/", "1", "9", "2")
 
 	h.assertShows("192.0.2.10")
 	h.assertHides("2001:db8::10", "www.example.com")
@@ -138,7 +138,7 @@ func TestEscClearsTheRecordsSearchAndRestoresAllRecords(t *testing.T) {
 	seedCache(t, s)
 
 	h := newHarness(t, s)
-	h.press("enter", "tab", "/", "w", "w", "w", "esc")
+	h.press("space", "tab", "/", "w", "w", "w", "esc")
 
 	h.assertShows("192.0.2.10", "2001:db8::10", "www.example.com")
 	h.assertHides("/www")
@@ -149,7 +149,7 @@ func TestOpeningAnotherZoneStartsWithAllItsRecords(t *testing.T) {
 	seedCache(t, s)
 
 	h := newHarness(t, s)
-	h.press("enter", "tab", "/", "w", "w", "w", "shift+tab", "j", "j", "enter")
+	h.press("space", "tab", "/", "w", "w", "w", "shift+tab", "j", "j", "space")
 
 	h.assertShows("198.51.100.7")
 	h.assertHides("/www")
@@ -160,7 +160,7 @@ func TestSearchWithoutMatchesSaysSo(t *testing.T) {
 	seedCache(t, s)
 
 	h := newHarness(t, s)
-	h.press("enter", "/", "z", "z")
+	h.press("space", "/", "z", "z")
 	h.assertShows("No matching Zones")
 
 	h.press("esc", "tab", "/", "z", "z")
@@ -173,7 +173,7 @@ func TestRecordsSearchNeedsRecordsToSearch(t *testing.T) {
 	seedCache(t, s)
 
 	h := newHarness(t, s)
-	h.press("j", "enter", "tab", "/", "q")
+	h.press("j", "space", "tab", "/", "q")
 
 	if !h.quit {
 		t.Fatal("with no Records to search, q should still quit")
@@ -204,7 +204,7 @@ func TestSearchWorksOnStaleZonesInASealedSession(t *testing.T) {
 	h.assertDimmed("two.tv")
 	h.assertHides("example.com")
 
-	h.press("enter", "shift+tab", "shift+tab", "/", "1", "9", "8")
+	h.press("space", "shift+tab", "shift+tab", "/", "1", "9", "8")
 	h.assertShows("198.51.100.7")
 	h.assertDimmed("198.51.100.7")
 }
@@ -255,17 +255,32 @@ func TestPrintableCloseKeyStillClosesTheSearch(t *testing.T) {
 	h.assertHides("/two")
 }
 
-func TestPrintableSelectKeyStillOpensTheMatch(t *testing.T) {
+func TestAPrintableShowKeyIsTypedIntoTheDomainsSearch(t *testing.T) {
 	s, _ := openStore(t)
 	seedCache(t, s)
 
-	profile := profileWith(tui.ActionSelect, "+")
+	profile := profileWith(tui.ActionShow, "o")
 
 	h := newHarnessWith(t, s, tui.Deps{Shortcuts: &profile})
-	h.press("/", "o", "r", "g", "+")
+	h.press("/", "o", "r", "g")
 
-	h.assertShows("No cached Records for example.org", "/org")
-	h.assertHides("/org+")
+	h.assertShows("/org", "example.org")
+	h.assertHides("No cached Records for example.org")
+}
+
+func TestEnterLeavesTheDomainsSearchKeepingItsFilter(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	h := newHarness(t, s)
+	h.press("/", "o", "r", "g", "enter")
+
+	h.assertShows("/org", "example.org")
+	h.assertHides("Edit Zone", "example.com")
+
+	// Keys are actions again: Space opens the match.
+	h.press("space")
+	h.assertShows("No cached Records for example.org")
 }
 
 func TestPrintableNextPaneKeyStillLeavesTheSearch(t *testing.T) {

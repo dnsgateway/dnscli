@@ -126,6 +126,8 @@ type Model struct {
 
 	// relisting holds the IDs of the Accounts whose Zones are being re-listed.
 	relisting map[int64]bool
+	// relistAll is the re-listing of every Account under way; nil when none is.
+	relistAll *relistBatch
 	// tenantPick asks which Tenant an Account acts within; nil when
 	// closed.
 	tenantPick *tenantPick
@@ -476,8 +478,8 @@ func (m *Model) handle(a Action) tea.Cmd {
 		m.move(+m.listRows(m.focus))
 	case ActionSelect:
 		return m.selectItem()
-	case ActionAllAccounts:
-		m.setAccount(0)
+	case ActionShow:
+		return m.showItem()
 	case ActionSearch:
 		m.startSearch()
 	case ActionClose:
@@ -487,7 +489,7 @@ func (m *Model) handle(a Action) tea.Cmd {
 	case ActionRelistZones:
 		return m.relistZones()
 	case ActionRefresh:
-		return m.retryRefresh()
+		return m.refreshOrRelist()
 	case ActionInsert, ActionEdit, ActionDelete:
 		return m.itemAction(a)
 	case ActionPreviewChanges:
@@ -569,19 +571,39 @@ func (m *Model) itemCount(p pane) int {
 	return 0
 }
 
-// selectItem opens the highlighted item of the focused pane: a Zone shows
-// its Records, an Account limits the Domains pane to its Zones, and a
-// Record opens in the Record form, as ActionEdit does.
+// selectItem opens the highlighted item of the focused pane in its edit
+// dialog, as ActionEdit does.
 func (m *Model) selectItem() tea.Cmd {
+	switch m.focus {
+	case paneDomains:
+		return m.editZone()
+	case paneAccounts:
+		return m.accountAction(ActionEdit)
+	case paneRecords:
+		return m.recordAction(ActionEdit)
+	}
+
+	return nil
+}
+
+// showItem shows what the highlighted item of the focused pane holds: a
+// Zone its Records, and an Account only its Zones in the Domains pane, or
+// every Account's again when that Account is already the filter.
+func (m *Model) showItem() tea.Cmd {
 	switch m.focus {
 	case paneDomains:
 		return m.openZone()
 	case paneAccounts:
-		if len(m.accounts) > 0 {
-			m.setAccount(m.accounts[m.cursor[paneAccounts]].ID)
+		if len(m.accounts) == 0 {
+			return nil
 		}
-	case paneRecords:
-		return m.recordAction(ActionEdit)
+
+		id := m.accounts[m.cursor[paneAccounts]].ID
+		if id == m.accountFilter {
+			id = 0
+		}
+
+		m.setAccount(id)
 	}
 
 	return nil

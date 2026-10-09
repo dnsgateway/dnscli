@@ -170,7 +170,7 @@ func TestStartupRendersTheCacheWhileSerialChecksRunBoundedInTheBackground(t *tes
 		}
 	}
 
-	h.press("enter")
+	h.press("space")
 	h.assertShows("checking the serial…", "192.0.2.10")
 
 	h.run(checks)
@@ -194,7 +194,7 @@ func TestAMatchingSerialMarksTheZoneHintCurrentButNotValidated(t *testing.T) {
 
 	h.assertDimmed("example.com")
 
-	h.press("enter")
+	h.press("space")
 	h.assertShows("serial matches (a hint), not validated")
 }
 
@@ -216,11 +216,11 @@ func TestADifferingSerialMarksTheZonePossiblyStale(t *testing.T) {
 
 	h.assertDimmed("example.com")
 
-	h.press("enter")
+	h.press("space")
 	h.assertShows("resolver serial 2026100702, cached 2026100701: possibly stale")
 
 	// two.tv has no cached serial, so nothing can match it.
-	h.press("j", "j", "enter")
+	h.press("j", "j", "space")
 	h.assertShows("resolver serial 7, none cached: possibly stale")
 }
 
@@ -305,6 +305,6 @@ func TestAFailingSerialCheckMarksTheZoneAndShowsTheError(t *testing.T) {
 
 	h.assertDimmed("example.com")
 
-	h.press("enter")
+	h.press("space")
 	h.assertShows("Serial Check failed: i/o timeout", "192.0.2.10")
 }

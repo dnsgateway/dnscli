@@ -21,7 +21,7 @@ func TestAZoneItsProviderServesNoRecordsForIsMarkedRegistrationOnly(t *testing.T
 	h, _, _ := newRefreshHarness(t, f)
 
 	f.Fail(providertest.OpRecords, fmt.Errorf("namecheap: domain is not using proper DNS servers: %w", dnsprovider.ErrNotServed))
-	h.press("j", "enter")
+	h.press("j", "space")
 
 	h.assertShows(registrationOnlyText, "serves no DNS Records for work.test")
 	h.assertHides("Refresh failed", "No cached Records")
@@ -47,7 +47,7 @@ func TestOtherRefreshFailuresAreNotRegistrationOnly(t *testing.T) {
 		h, _, _ := newRefreshHarness(t, f)
 
 		f.Fail(providertest.OpRecords, err)
-		h.press("j", "enter")
+		h.press("j", "space")
 
 		h.assertShows("Refresh failed", "No cached Records for work.test.")
 		h.assertHides(registrationOnlyText)
@@ -62,7 +62,7 @@ func TestARegistrationOnlyZoneBeingRefreshedIsNotSaidToBeRegistrationOnly(t *tes
 	h, _, _ := newRefreshHarness(t, f)
 
 	f.Fail(providertest.OpRecords, dnsprovider.ErrNotServed)
-	h.press("j", "enter")
+	h.press("j", "space")
 	h.assertMarker("work.test", "⌀")
 
 	h.press("tab")
