@@ -131,7 +131,31 @@ func (m *Model) offboardRefusal(z dns.Zone, a dns.Account) error {
 		return liveUnknownError(z.Name, "its Delegation could not be resolved: "+d.err.Error())
 	}
 
-	return liveRefusal(z.Name, a, z.Nameservers, d.ns)
+	if err := liveRefusal(z.Name, a, z.Nameservers, d.ns); err != nil {
+		return err
+	}
+
+	return hostingRefusal(z.Name, a, z.State)
+}
+
+// hostingRefusal says why a Zone of name at Account a, in Hosting State
+// state, may not be Offboarded, whatever its nameservers: a Zone its
+// Provider serves is reached by the Delegation, through custom
+// nameservers, a partial setup or resolvers still caching an older
+// Delegation, and of one whose state is unknown that is not known. Only a
+// pending or moved Zone may be. nil when it may.
+func hostingRefusal(name string, a dns.Account, state dnsprovider.HostingState) error {
+	switch state {
+	case dnsprovider.HostingPending, dnsprovider.HostingMoved:
+		return nil
+	case dnsprovider.HostingActive:
+		return fmt.Errorf("Offboarding is refused: %s serves %s (active), so the Delegation still reaches it, "+
+			"through custom nameservers, a partial setup or resolvers caching an older Delegation. "+
+			"Only a pending or moved Zone is Offboarded.", a.Label(), name)
+	}
+
+	return fmt.Errorf("Offboarding is refused while the Hosting State of %s at %s is unknown: re-list the Account. "+
+		"Only a pending or moved Zone is Offboarded.", name, a.Label())
 }
 
 // liveRefusal says why a Zone of name at Account a, with nameservers ns,
@@ -364,7 +388,8 @@ func heldZone(ctx context.Context, p dnsprovider.Provider, z dns.Zone) (dnsprovi
 
 // checkNotLive resolves the Delegation of z's name anew and refuses z,
 // as its Provider has it now (held) and as cached, when either is, or
-// may be, the Live Zone.
+// may be, the Live Zone, or when its Provider serves it now, or does not
+// say whether it does.
 func checkNotLive(ctx context.Context, r Resolver, a dns.Account, z dns.Zone, held dnsprovider.Zone) error {
 	if r == nil {
 		return liveUnknownError(z.Name, "dnscli has no resolver to read its Delegation with")
@@ -386,10 +411,12 @@ func checkNotLive(ctx context.Context, r Resolver, a dns.Account, z dns.Zone, he
 	}
 
 	if len(z.Nameservers) > 0 {
-		return liveRefusal(z.Name, a, z.Nameservers, delegated)
+		if err := liveRefusal(z.Name, a, z.Nameservers, delegated); err != nil {
+			return err
+		}
 	}
 
-	return nil
+	return hostingRefusal(z.Name, a, held.State)
 }
 
 // deleteMayBeDone reports whether a failed delete may have Offboarded the
@@ -492,6 +519,9 @@ func (m *Model) offboardView() string {
 	z := d.zone
 
 	notes := wrapNote(lipgloss.NewStyle(), "Offboard "+z.Name+" from "+d.account.Label()+"?", noteWidth)
+	notes = append(notes, "")
+	notes = append(notes, wrapNote(lipgloss.NewStyle(), z.Name+" is "+hostingWord(z.State)+" at "+d.account.Label()+
+		" and not the Live Zone; both are checked again with "+d.account.Label()+" and the resolver before the delete.", noteWidth)...)
 	notes = append(notes, "")
 	notes = append(notes, wrapNote(errorStyle, "This stops DNS hosting of "+z.Name+" at "+d.account.Label()+
 		" and drops its Records there; it cannot be undone. It leaves the domain's registration untouched.", noteWidth)...)

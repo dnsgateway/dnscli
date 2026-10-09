@@ -2,6 +2,7 @@ package tui_test
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"testing"
 
@@ -23,11 +24,13 @@ var (
 )
 
 // offboardFake is workZones as a ZoneDeleter, each Zone with the
-// nameservers Cloudflare assigned it.
+// nameservers Cloudflare assigned it: work.example Active, work.test
+// Pending, waiting for a Delegation that never came.
 func offboardFake() *fakeProvider {
 	f := newFake().
 		AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Nameservers: workExampleNS}).
 		AddZone(dns.Zone{Name: "work.test", ProviderID: "zw2", Nameservers: workTestNS})
+	f.SetHostingState("zw2", dnsprovider.HostingPending)
 	f.SetZoneDeleter(true)
 
 	return f
@@ -43,13 +46,16 @@ func offboardResolver() *fakeResolver {
 }
 
 // offboardStore is cloudflare.work enrolled, with its Zones' nameservers
-// cached as a listing caches them.
+// and Hosting States cached as a listing caches them, as offboardFake has
+// them.
 func offboardStore(t *testing.T) *store.Store {
 	t.Helper()
 
 	s, _ := enrollFirstAccount(t)
 	expectNameservers(t, s, "cloudflare.work", "work.example", workExampleNS...)
 	expectNameservers(t, s, "cloudflare.work", "work.test", workTestNS...)
+	setHostingState(t, s, "work.example", dnsprovider.HostingActive)
+	setHostingState(t, s, "work.test", dnsprovider.HostingPending)
 
 	return s
 }
@@ -520,5 +526,96 @@ func TestAZoneTheProviderNoLongerHasIsDroppedFromTheCacheWithoutADelete(t *testi
 
 	if zoneCached(t, s, "work.test") {
 		t.Fatal("work.test is still cached")
+	}
+}
+
+func TestAZoneItsProviderServesOrWhoseHostingStateIsUnknownIsNotOffboarded(t *testing.T) {
+	// Not Live by its nameservers, but a Zone its Provider serves is
+	// reached by the Delegation all the same: through custom nameservers,
+	// a partial setup, or resolvers still caching the old Delegation.
+	cases := map[string]struct {
+		store func(*testing.T) *store.Store
+		want  string
+	}{
+		"active": {
+			store: func(t *testing.T) *store.Store {
+				s := offboardStore(t)
+				setHostingState(t, s, "work.test", dnsprovider.HostingActive)
+
+				return s
+			},
+			want: "Offboarding is refused: cloudflare.work serves work.test (active)",
+		},
+		"unknown": {
+			// Never listed with its Hosting State.
+			store: func(t *testing.T) *store.Store {
+				s, _ := openStore(t)
+				a := mustAccount(t, s, "cloudflare", "work")
+				mustZone(t, s, dns.Zone{AccountID: a.ID, Name: "work.example", ProviderID: "zw1", Nameservers: workExampleNS})
+				mustZone(t, s, dns.Zone{AccountID: a.ID, Name: "work.test", ProviderID: "zw2", Nameservers: workTestNS})
+
+				return s
+			},
+			want: "Offboarding is refused while the Hosting State of work.test at cloudflare.work is unknown",
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := offboardFake()
+			h := newOffboardHarness(t, tc.store(t), f, offboardResolver())
+
+			h.press("j", "d")
+
+			h.assertShows(tc.want)
+			h.assertHides("Unseal", "Offboard work.test from")
+		})
+	}
+}
+
+func TestAZoneItsProviderServesByNowIsNotOffboarded(t *testing.T) {
+	// The cache says pending, but the Provider, read just before the
+	// delete, serves it, or no longer says.
+	for _, state := range []dnsprovider.HostingState{dnsprovider.HostingActive, dnsprovider.HostingUnknown} {
+		t.Run(fmt.Sprint(state), func(t *testing.T) {
+			s := offboardStore(t)
+			f := offboardFake()
+			h := newOffboardHarness(t, s, f, offboardResolver())
+
+			h.press("j", "d")
+			h.unsealWith(passphrase)
+			h.assertShows("Offboard work.test from cloudflare.work?")
+
+			f.SetHostingState("zw2", state)
+			h.press("enter")
+
+			h.assertShows("Offboarding is refused", "work.test")
+			h.assertHides("is Offboarded")
+
+			if calls := deleteZoneCalls(f); len(calls) != 0 || !zoneCached(t, s, "work.test") {
+				t.Fatalf("DeleteZone calls = %q, want none and work.test cached", calls)
+			}
+		})
+	}
+}
+
+func TestAMovedZoneIsOffboarded(t *testing.T) {
+	s := offboardStore(t)
+	setHostingState(t, s, "work.test", dnsprovider.HostingMoved)
+
+	f := offboardFake()
+	f.SetHostingState("zw2", dnsprovider.HostingMoved)
+
+	h := newOffboardHarness(t, s, f, offboardResolver())
+
+	h.press("j", "d")
+	h.unsealWith(passphrase)
+	h.assertShows("Offboard work.test from cloudflare.work?", "moved")
+	h.press("enter")
+
+	h.assertShows("work.test is Offboarded from cloudflare.work")
+
+	if calls := deleteZoneCalls(f); !slices.Equal(calls, []string{"zw2"}) {
+		t.Fatalf("DeleteZone calls = %q, want zw2 once", calls)
 	}
 }
