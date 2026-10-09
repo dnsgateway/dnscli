@@ -136,6 +136,8 @@ func (m *Model) retryRefresh() tea.Cmd {
 		m.notice = notice{text: z.Name + " is already being Refreshed…"}
 	case m.applying[z.ID]:
 		m.notice = notice{text: "Changes to " + z.Name + " are being applied: Refresh it once they are."}
+	case m.isOffboarding(z.ID):
+		m.notice = notice{text: z.Name + " is being Offboarded."}
 	case m.rateLimited(r):
 		m.notice = notice{text: fmt.Sprintf("Refreshing %s is rate-limited until %s.", z.Name, r.retryAt.Local().Format(time.TimeOnly))}
 	default:
@@ -166,8 +168,9 @@ func (m *Model) refreshZone(z dns.Zone) tea.Cmd {
 		}
 
 		// A Refresh during an Apply could cache Records older than the
-		// ones the Apply confirms.
-		if r.pending || m.applying[z.ID] || m.rateLimited(*r) {
+		// ones the Apply confirms; during an Offboarding, Records of a
+		// Zone it removes from the cache.
+		if r.pending || m.applying[z.ID] || m.isOffboarding(z.ID) || m.rateLimited(*r) {
 			return nil
 		}
 

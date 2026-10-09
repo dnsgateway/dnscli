@@ -119,10 +119,15 @@ func cannotOffboard(a dns.Account) string {
 	return a.Label() + " cannot Offboard a Zone: its Provider does not stop hosting a Zone apart from its domain's registration."
 }
 
-// offboardRefusal says why the session may not Offboard z, from what it
-// knows of z's Delegation: z is the Live Zone, may be, or whether it is
-// is unknown. nil when z is known not to be the Live Zone.
+// offboardRefusal says why the session may not Offboard z: work on z is
+// in flight or pending, or, from what the session knows of z's
+// Delegation and Hosting State, z is the Live Zone, may be, or whether it
+// is is unknown. nil when z is known not to be the Live Zone.
 func (m *Model) offboardRefusal(z dns.Zone, a dns.Account) error {
+	if err := m.offboardBusy(z); err != nil {
+		return err
+	}
+
 	if m.deps.Resolver == nil {
 		return liveUnknownError(z.Name, "dnscli has no resolver to read its Delegation with")
 	}
@@ -141,6 +146,33 @@ func (m *Model) offboardRefusal(z dns.Zone, a dns.Account) error {
 	}
 
 	return hostingRefusal(z.Name, a, z.State)
+}
+
+// isOffboarding reports whether the Zone of that ID is being Offboarded.
+func (m *Model) isOffboarding(zoneID int64) bool {
+	_, ok := m.offboarding[zoneID]
+
+	return ok
+}
+
+// offboardBusy says why z may not be Offboarded while the session works
+// on it: an Apply or a Refresh of z in flight would write to the cache a
+// Zone the Offboarding removes from it. A pending Changeset refuses too,
+// rather than being discarded: it is work the user has not applied, and
+// discarding it takes one key in the preview, whereas Offboarding cannot
+// be undone. nil when none is.
+func (m *Model) offboardBusy(z dns.Zone) error {
+	switch {
+	case m.applying[z.ID]:
+		return fmt.Errorf("Offboarding is refused while changes to %s are being applied.", z.Name)
+	case m.refreshes[z.ID] != nil && m.refreshes[z.ID].pending:
+		return fmt.Errorf("Offboarding is refused while %s is being Refreshed: try again once it is.", z.Name)
+	case m.pendingOf(z.ID) != nil:
+		return fmt.Errorf("Offboarding is refused: %s has a pending Changeset. Apply or discard it first (%s preview).",
+			z.Name, m.keys.keysFor(ActionPreviewChanges))
+	}
+
+	return nil
 }
 
 // hostingRefusal says why a Zone of name at Account a, in Hosting State
@@ -293,6 +325,12 @@ func (m *Model) offboardKey(msg tea.KeyMsg) tea.Cmd {
 		}
 
 		d.busy, d.err = true, ""
+
+		if m.offboarding == nil {
+			m.offboarding = map[int64]int64{}
+		}
+
+		m.offboarding[d.zone.ID] = d.account.ID
 
 		return m.deleteZone(d)
 	}
@@ -458,6 +496,8 @@ func uncache(ctx context.Context, s *store.Store, z dns.Zone) error {
 // error and the cache as it was; one made closes it and drops the Zone
 // from the pane.
 func (m *Model) zoneOffboarded(msg zoneOffboardedMsg) tea.Cmd {
+	delete(m.offboarding, msg.zone.ID)
+
 	if msg.resolved {
 		m.recordDelegation(nameKey(msg.zone.Name), msg.delegated, msg.resolveErr)
 	}

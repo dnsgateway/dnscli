@@ -657,3 +657,53 @@ func TestADeleteTheProviderRefusedIsReadBackAndAZoneGoneIsDroppedFromTheCache(t 
 		t.Fatal("work.test is still cached")
 	}
 }
+
+// openWorkTest opens work.test, not Live, in the Records pane of an
+// Unsealed session, validated by its Refresh.
+func openWorkTest(t *testing.T, h *harness) {
+	t.Helper()
+
+	h.press("j", "d")
+	h.unsealWith(passphrase)
+	h.press("esc", "enter", "tab")
+	h.assertShows("validated this session")
+}
+
+func TestOffboardingIsRefusedWhileTheZoneIsRefreshed(t *testing.T) {
+	s := offboardStore(t)
+	f := offboardFake()
+	h := newOffboardHarness(t, s, f, offboardResolver())
+
+	h.press("j", "d")
+	h.unsealWith(passphrase)
+	h.press("esc")
+
+	refresh := h.step(h.pressHolding("enter"))
+	h.assertShows("refreshing…")
+
+	h.press("d")
+	h.assertShows("Offboarding is refused while work.test is being Refreshed")
+	h.assertHides("Offboard work.test from")
+
+	h.run(refresh)
+}
+
+func TestOffboardingIsRefusedWhileTheZoneHasAPendingChangeset(t *testing.T) {
+	// Offboarding would discard it: the user applies or discards it
+	// first.
+	s := offboardStore(t)
+	f := offboardFake()
+	h := newOffboardHarness(t, s, f, offboardResolver())
+
+	openWorkTest(t, h)
+	h.addRecord("TXT", "_verify", "token-123", "3600")
+	h.assertShows("1 pending change")
+
+	h.press("shift+tab", "d")
+	h.assertShows("Offboarding is refused: work.test has a pending Changeset")
+	h.assertHides("Offboard work.test from")
+
+	if calls := deleteZoneCalls(f); len(calls) != 0 {
+		t.Fatalf("DeleteZone calls = %q, want none", calls)
+	}
+}

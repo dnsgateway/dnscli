@@ -140,6 +140,10 @@ type Model struct {
 	onboard *onboardDialog
 	// offboard Offboards a Zone; nil when closed.
 	offboard *offboardDialog
+	// offboarding holds the Account ID of each Zone being Offboarded, by
+	// Zone ID, until the outcome arrives, whether or not the dialog is
+	// still open.
+	offboarding map[int64]int64
 	// editAfterPick is the ID of the Account whose edit dialog was asked
 	// for while the Tenant picker was open; zero when none was. It opens
 	// once the picker closes, rather than over it.
