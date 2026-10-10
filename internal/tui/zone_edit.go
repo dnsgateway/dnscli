@@ -420,6 +420,12 @@ func (msg zoneEditOpenedMsg) tenantUse(m *Model) (int64, func() tea.Cmd, error) 
 	return msg.account.ID, func() tea.Cmd { return m.editZoneOf(msg.zone.ID, msg.turnOn) }, msg.err
 }
 
+// openFailedText says the Provider of msg's Account could not be opened, and
+// why.
+func (msg zoneEditOpenedMsg) openFailedText() string {
+	return "Could not open " + msg.account.Label() + ": " + msg.err.Error()
+}
+
 // zoneEditOpened opens the dialog, its settings read-only when the
 // Provider could not be opened or cannot change them, unless the Tenant
 // picker asks first or another dialog opened meanwhile.
@@ -440,14 +446,14 @@ func (m *Model) zoneEditOpened(msg zoneEditOpenedMsg) {
 
 	switch up, ok := msg.p.(dnsprovider.ZoneUpdater); {
 	case msg.turnOn && msg.err != nil:
-		m.notice = notice{text: "Could not open " + msg.account.Label() + ": " + msg.err.Error(), err: true}
+		m.notice = notice{text: msg.openFailedText(), err: true}
 	case msg.turnOn && !ok:
 		m.notice = notice{text: cannotTurnDNSSECOn(msg.account), err: true}
 	case msg.turnOn:
 		m.openZoneEdit(z, msg.account, up, "", false)
 		m.zoneEdit.confirmTurningOn()
 	case msg.err != nil:
-		m.openZoneEdit(z, msg.account, nil, "Could not open "+msg.account.Label()+": "+msg.err.Error(), false)
+		m.openZoneEdit(z, msg.account, nil, msg.openFailedText(), false)
 	case !ok:
 		m.openZoneEdit(z, msg.account, nil, cannotChangeZoneSettings(msg.account), false)
 	default:

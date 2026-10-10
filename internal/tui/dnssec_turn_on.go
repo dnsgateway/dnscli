@@ -100,7 +100,7 @@ func (m *Model) recordsOf(z dns.Zone) []dns.Record {
 	return m.records
 }
 
-// clockText says a time as the user reads it on the Clock: "13:00", with
+// clockText says a time as the user reads it on a clock: "13:00", with
 // the date when it is not today. A time within a minute rounds up, so it
 // is never before the time it says.
 func clockText(t, now time.Time) string {
