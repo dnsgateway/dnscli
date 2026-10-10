@@ -200,9 +200,14 @@ func (m *Model) startLookup(job lookupJob) tea.Cmd {
 		}
 
 		c.state = lookupResolving
+		read := m.keyReadFor(job.zoneID)
 		id, zone, servers := job.zoneID, c.zone, c.servers
 
 		return func() tea.Msg {
+			if keys, ok := read(ctx); ok {
+				return keysLookedUpMsg{zoneID: id, keys: keys}
+			}
+
 			keys, err := resolver.DNSKEYAt(ctx, zone, servers)
 
 			return keysLookedUpMsg{zoneID: id, keys: keys, err: err}

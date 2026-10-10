@@ -31,6 +31,16 @@ func CacheZones(zones []dnsprovider.Zone) []dns.Zone {
 	return out
 }
 
+// SigningKeys converts the key-signing keys a Provider's API returned.
+func SigningKeys(keys []dnsprovider.SigningKey) []dns.SigningKey {
+	out := make([]dns.SigningKey, len(keys))
+	for i, k := range keys {
+		out[i] = dns.SigningKey{DNSKEY: k.DNSKEY, KeyTag: k.KeyTag, DS: slices.Clone(k.DS)}
+	}
+
+	return out
+}
+
 // ModuleRecord is a cached Record as the module takes it. The Extras, such
 // as Cloudflare's proxy flag, keep their keys.
 func ModuleRecord(r dns.Record) dnsprovider.Record {

@@ -63,7 +63,7 @@ Asking the parent zone's nameservers directly whether they serve DS records for 
 _Avoid_: DNSSEC check
 
 **Key Lookup**:
-Asking a Zone's own nameservers directly for its key-signing keys. They count only when every nameserver serves the same ones, signed by the Zone itself; it is held for the current session only.
+Reading a Zone's key-signing keys: through its Provider's API where it returns them, else by asking the Zone's own nameservers directly, as also when that read fails. Keys read from the nameservers count only when every nameserver serves the same ones, signed by the Zone itself; it is held for the current session only.
 _Avoid_: key check, DNSSEC check
 
 **Refresh**:

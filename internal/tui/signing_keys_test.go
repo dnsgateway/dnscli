@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/dnsgateway/dnsprovider"
+	"github.com/dnsgateway/dnsprovider/providertest"
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
 	"github.com/sergelogvinov/dnscli/internal/tui"
@@ -38,8 +39,21 @@ func newSignedZoneHarness(t *testing.T, r *fakeResolver) *harness {
 func newKeysHarness(t *testing.T, r *fakeResolver, dnssec dnsprovider.Setting) *harness {
 	t.Helper()
 
+	return newKeysHarnessWith(t, newKeysFake(dnssec), r)
+}
+
+// newKeysFake is a Provider hosting example.net as zd1, its DNSSEC as
+// reported.
+func newKeysFake(dnssec dnsprovider.Setting) *fakeProvider {
 	f := newFake().AddZone(dns.Zone{Name: rfcZone, ProviderID: "zd1", Nameservers: cruzDee})
 	f.SetZoneStatus("zd1", dnsprovider.ZoneStatus{DNSSEC: dnssec})
+
+	return f
+}
+
+// newKeysHarnessWith is newKeysHarness with f as the Zone's Provider.
+func newKeysHarnessWith(t *testing.T, f *fakeProvider, r *fakeResolver) *harness {
+	t.Helper()
 
 	if r.ns == nil {
 		r.ns = map[string][]string{}
@@ -230,5 +244,29 @@ func TestAParentDSForAZoneThatServesNoKeysSaysItDoesNotMatch(t *testing.T) {
 			h.assertStatusBarShows("DNSSEC: DS does not match")
 			h.assertBadges(map[string]string{"DNSSEC: DS does not match": red})
 		})
+	}
+}
+
+// rfcProviderKey is the RFC 6605 key as a Provider's API returns it.
+var rfcProviderKey = dnsprovider.SigningKey{DNSKEY: rfcDNSKEY, KeyTag: 55648, DS: []string{rfcDS}}
+
+func TestTheKeysAProviderReturnsAreUsedWithoutAskingTheNameservers(t *testing.T) {
+	f := newKeysFake(dnsprovider.On)
+	f.SetSigningKeys("zd1", rfcProviderKey)
+
+	// The nameservers serve no key yet: the Provider's API is ahead.
+	r := &fakeResolver{}
+	r.setKeys(rfcZone)
+	r.setDS(rfcZone, rfcDS)
+	h := newKeysHarnessWith(t, f, r)
+
+	h.assertStatusBarShows("DNSSEC: On")
+
+	if q := r.keysQueries(); len(q) != 0 {
+		t.Fatalf("DNSKEY queries = %+v, want none when the Provider returns the keys", q)
+	}
+
+	if n := f.count(providertest.OpSigningKeys); n == 0 {
+		t.Fatal("the Provider was not asked for the signing keys")
 	}
 }

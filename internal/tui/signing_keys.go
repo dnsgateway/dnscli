@@ -1,10 +1,12 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -13,11 +15,12 @@ import (
 	"github.com/dnsgateway/dnsprovider"
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
+	"github.com/sergelogvinov/dnscli/internal/provider"
 )
 
 // keyLookup is what this session's Key Lookup of a Zone found: the
-// key-signing keys its own nameservers serve. It is held in memory only,
-// like the DS Check.
+// key-signing keys its Provider's API returns, or else its own
+// nameservers serve. It is held in memory only, like the DS Check.
 type keyLookup struct {
 	state lookup
 	// zone and servers are the zone name and the nameservers asked.
@@ -73,6 +76,42 @@ func (m *Model) lookUpSigningKeys(z dns.Zone) tea.Cmd {
 	m.lookups.push(keysJob(z.ID))
 
 	return m.startLookups()
+}
+
+// keyReadTimeout bounds asking a Provider's API for a Zone's keys, so a
+// slow one holds back asking its nameservers for no longer than this.
+const keyReadTimeout = 10 * time.Second
+
+// keyReadFor returns what reads a Zone's key-signing keys through its
+// Provider's API, for a Key Lookup to prefer over asking its nameservers:
+// ok is false when they cannot be read that way, as the session is
+// sealed or the Provider has no dnsprovider.KeyReader, or when the read
+// fails, whatever the reason.
+func (m *Model) keyReadFor(zoneID int64) func(ctx context.Context) (keys []dns.SigningKey, ok bool) {
+	z, found := m.zoneByID[zoneID]
+	a, known := m.account(z.AccountID)
+	s, key, providers := m.deps.Store, m.key, m.providers
+
+	return func(ctx context.Context) ([]dns.SigningKey, bool) {
+		if !found || !known || key == nil {
+			return nil, false
+		}
+
+		ctx, cancel := context.WithTimeout(ctx, keyReadTimeout)
+		defer cancel()
+
+		p, _, err := accountProvider(ctx, s, key, providers, a)
+		if err != nil || !dnsprovider.CanReadKeys(p) {
+			return nil, false
+		}
+
+		keys, err := p.(dnsprovider.KeyReader).SigningKeys(ctx, provider.ModuleZone(z))
+		if err != nil {
+			return nil, false
+		}
+
+		return provider.SigningKeys(keys), true
+	}
 }
 
 // recordKeyLookup records what a Key Lookup found, unless its Zone is no
@@ -230,7 +269,7 @@ func (m *Model) openSigningKeys() {
 	}
 
 	if len(m.signingKeysOf(*m.open)) == 0 && m.signingKeysError(*m.open) == nil {
-		m.notice = notice{text: "No DNSSEC keys read from the nameservers of " + m.open.Name + " this session."}
+		m.notice = notice{text: "No DNSSEC keys read for " + m.open.Name + " this session."}
 
 		return
 	}
