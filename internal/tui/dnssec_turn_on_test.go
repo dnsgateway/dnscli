@@ -164,7 +164,7 @@ func TestAnUnsignedZoneIsOfferedToTurnDNSSECOnThroughTheConfirmation(t *testing.
 
 // assertNoTurningOn checks that the Zone page shows DNSSEC off but offers
 // no way to turn it on, and that asking anyway changes nothing but says
-// why, in the status line.
+// why, as any other Zone write would.
 func assertNoTurningOn(t *testing.T, h *harness, f *fakeProvider, why string) {
 	t.Helper()
 
@@ -173,7 +173,7 @@ func assertNoTurningOn(t *testing.T, h *harness, f *fakeProvider, why string) {
 
 	h.press("S")
 	h.assertHides("Turn DNSSEC on for")
-	h.assertStatusLineShows(why)
+	h.assertShows(why)
 
 	if calls := updateZoneCalls(f); len(calls) != 0 {
 		t.Fatalf("UpdateZone calls = %+v, want none", calls)
@@ -190,7 +190,10 @@ func TestASealedSessionSeesDNSSECOffButIsOfferedNoWayToTurnItOn(t *testing.T) {
 	_, s := newTurnOnHarness(t, f, r, c)
 	h := restart(t, s, f, r, c)
 
-	assertNoTurningOn(t, h, f, "The session is sealed")
+	assertNoTurningOn(t, h, f, "The session is sealed and read-only: Unseal to edit example.net.")
+
+	// As any other Zone write, it offers to Unseal.
+	h.assertShows("Passphrase")
 }
 
 func TestAStaleZoneSeesDNSSECOffButIsOfferedNoWayToTurnItOn(t *testing.T) {
@@ -207,7 +210,7 @@ func TestAStaleZoneSeesDNSSECOffButIsOfferedNoWayToTurnItOn(t *testing.T) {
 	h.press("right", "r")
 	h.assertHides("validated this session")
 
-	assertNoTurningOn(t, h, f, "is not validated this session")
+	assertNoTurningOn(t, h, f, "example.net is a Stale Zone: it can be edited once a Refresh validates it")
 }
 
 func TestAProviderThatCannotTurnDNSSECOnIsToldToInItsOwnPanel(t *testing.T) {

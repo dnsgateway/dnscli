@@ -117,40 +117,38 @@ func clockText(t, now time.Time) string {
 }
 
 // turnOnText says an unsigned Zone is off, and how to turn it on: through
-// the DNSSEC step where its Provider can and the session may write, in
+// the DNSSEC step where its Provider can and the Zone may be written, in
 // the Provider's own panel where it cannot.
 func (m *Model) turnOnText(z dns.Zone) string {
-	a, _ := m.account(z.AccountID)
+	switch why, inPanel := m.turnOnRefusal(z); {
+	case inPanel:
+		a, _ := m.account(z.AccountID)
 
-	switch {
-	case !m.accountCan(a, dnsprovider.CapZoneUpdater):
 		return "DNSSEC: off (turn it on in " + a.Label() + "'s panel)"
-	case m.dnssecWriteRefusal(z) != "":
+	case why != "":
 		return "DNSSEC: off"
 	}
 
 	return "DNSSEC: off (" + m.keys.keysFor(ActionDNSSECStep) + " turns it on)"
 }
 
-// dnssecWriteRefusal says why z's DNSSEC cannot be changed now, as any
-// Zone write: the session is sealed, or the Zone is not a Validated Zone
-// (ADR-0001). Empty when it can.
-func (m *Model) dnssecWriteRefusal(z dns.Zone) string {
-	switch {
-	case m.key == nil:
-		return "The session is sealed: Unseal it to change the DNSSEC of " + z.Name + "."
-	case !m.validatedZone(z.ID):
-		return z.Name + " is not validated this session: Refresh it (" + m.keys.keysFor(ActionRefresh) +
-			") before changing its DNSSEC."
+// turnOnRefusal says why DNSSEC cannot be turned on for z from the Zone
+// page now: its Provider cannot through its API, which inPanel reports,
+// or z may not be written, as for any Zone write (ADR-0001). Empty when
+// it can.
+func (m *Model) turnOnRefusal(z dns.Zone) (why string, inPanel bool) {
+	a, _ := m.account(z.AccountID)
+	if !m.accountCan(a, dnsprovider.CapZoneUpdater) {
+		return cannotTurnDNSSECOn(a), true
 	}
 
-	return ""
+	return m.writeRefusal(z), false
 }
 
 // takeDNSSECStep takes the open Zone's next DNSSEC step: turning signing
-// on asks to confirm it in the Edit Zone dialog, once the session may
-// write the Zone and its Provider can; publishing the DS shows the keys
-// to copy. Any other step is only waited for.
+// on asks to confirm it in the Edit Zone dialog, once its Provider can
+// and the Zone passes the write gate; publishing the DS shows the keys to
+// copy. Any other step is only waited for.
 func (m *Model) takeDNSSECStep() tea.Cmd {
 	if m.open == nil {
 		m.notice = notice{text: "Open a Zone first.", err: true}
@@ -172,21 +170,15 @@ func (m *Model) takeDNSSECStep() tea.Cmd {
 		return nil
 	}
 
-	a, ok := m.account(z.AccountID)
-
-	switch {
-	case !ok:
-		return nil
-	case !m.accountCan(a, dnsprovider.CapZoneUpdater):
-		m.notice = notice{text: cannotTurnDNSSECOn(a), err: true}
-
-		return nil
-	}
-
-	if why := m.dnssecWriteRefusal(z); why != "" {
+	switch why, inPanel := m.turnOnRefusal(z); {
+	case inPanel:
 		m.notice = notice{text: why, err: true}
 
 		return nil
+	case why != "":
+		_, cmd, _ := m.writeGate()
+
+		return cmd
 	}
 
 	return m.editZoneOf(z.ID, true)

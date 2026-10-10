@@ -101,36 +101,43 @@ func (m *Model) writeGate() (dns.Zone, tea.Cmd, bool) {
 
 	z := *m.open
 
-	switch {
-	case m.sealed():
-		m.notice = notice{text: "The session is sealed and read-only: Unseal to edit " + z.Name + ".", err: true}
+	why := m.writeRefusal(z)
+	if why == "" {
+		return z, nil, true
+	}
 
-		return z, m.withSecrets(func() tea.Cmd {
-			m.notice = notice{} // no longer sealed
+	m.notice = notice{text: why, err: true}
 
-			return m.refreshZone(z)
-		}), false
-	case m.applying[z.ID]:
-		m.notice = notice{text: "The pending changes for " + z.Name + " are being applied…", err: true}
-
-		return z, nil, false
-	case m.refreshOf(z.ID).pending:
-		m.notice = notice{text: z.Name + " is being Refreshed: it can be edited once the Refresh validates it.", err: true}
-
-		return z, nil, false
-	case m.refreshOf(z.ID).notServed:
-		m.notice = notice{text: fmt.Sprintf("%s is %s: its Provider serves no DNS Records for it, so changes made here would not apply.",
-			z.Name, registrationOnly), err: true}
-
-		return z, nil, false
-	case !m.validatedZone(z.ID):
-		m.notice = notice{text: fmt.Sprintf("%s is a Stale Zone: it can be edited once a Refresh validates it (%s Refreshes).",
-			z.Name, m.recordsKeys(ActionRefresh)), err: true}
-
+	if !m.sealed() {
 		return z, nil, false
 	}
 
-	return z, nil, true
+	return z, m.withSecrets(func() tea.Cmd {
+		m.notice = notice{} // no longer sealed
+
+		return m.refreshZone(z)
+	}), false
+}
+
+// writeRefusal says why z may not be edited now, as writeGate does,
+// without offering anything; empty when it may.
+func (m *Model) writeRefusal(z dns.Zone) string {
+	switch {
+	case m.sealed():
+		return "The session is sealed and read-only: Unseal to edit " + z.Name + "."
+	case m.applying[z.ID]:
+		return "The pending changes for " + z.Name + " are being applied…"
+	case m.refreshOf(z.ID).pending:
+		return z.Name + " is being Refreshed: it can be edited once the Refresh validates it."
+	case m.refreshOf(z.ID).notServed:
+		return fmt.Sprintf("%s is %s: its Provider serves no DNS Records for it, so changes made here would not apply.",
+			z.Name, registrationOnly)
+	case !m.validatedZone(z.ID):
+		return fmt.Sprintf("%s is a Stale Zone: it can be edited once a Refresh validates it (%s Refreshes).",
+			z.Name, m.recordsKeys(ActionRefresh))
+	}
+
+	return ""
 }
 
 // pendingOf returns a Zone's pending Changeset; nil when it has none.
