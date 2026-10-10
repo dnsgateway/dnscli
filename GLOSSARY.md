@@ -58,6 +58,10 @@ _Avoid_: domain flags
 **Serial Check**:
 Comparing a Zone's cached SOA serial with the serial returned by the system DNS resolver. A cheap freshness hint, not proof.
 
+**DS Check**:
+Asking the parent zone's nameservers directly whether they serve DS records for a zone name. Its answer is yes, no, or unknown when the lookup fails; it is held for the current session only.
+_Avoid_: DNSSEC check
+
 **Refresh**:
 Re-reading a Zone's Records from its Provider's API and replacing the cached copy.
 
