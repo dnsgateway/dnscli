@@ -1,0 +1,3 @@
+# The Gateway Adapter comes from dnsgate, at dnsgate's Go version
+
+The `dnsgate` Provider type is the Gateway Adapter from dnsgate's `gatewayadapter` package, not a Provider in dnscli's own provider module: the Gateway's protocol and its Relay have one owner there (dnsgate ADR 0008, `../dnsgate/docs/adr/0008-gateway-adapter-in-dnsgate.md`; research in `../dnsgate/docs/research/dnscli-provider.md`). dnscli therefore requires `github.com/dnsgateway/dnsgate` and follows its Go version, now 1.27. This is an exception to ADR-0003, not a reversal: the Gateway Adapter still implements the same Provider interface, the other Providers stay where they are, and Go 1.26 was only one of the reasons dnscontrol was set aside.
