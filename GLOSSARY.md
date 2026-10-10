@@ -35,19 +35,23 @@ A single DNS resource record inside a Zone.
 _Avoid_: entry, host
 
 **Delegation**:
-The records at the parent zone that hand a zone name to its nameservers: the NS records that decide which nameservers answer for it and, when it is signed, the Delegation Signer records. dnscli reads the NS records and may write only the DS records; it does not manage domain registration.
+The records at the parent zone that hand a zone name to its nameservers: the NS records that name them and, for a signed zone, its Delegation Signer records.
 _Avoid_: nameserver settings
 
 **Delegation Signer (DS)**:
-A record in the parent zone, part of the Delegation, that fixes which DNSKEY signs the zone. dnscli writes it through a registrar adapter only after the user confirms.
+A record in the parent zone, part of the Delegation, that fixes which DNSKEY signs the zone.
 _Avoid_: DS key, DNSSEC record
 
 **Live Zone**:
 The Zone, among those sharing a zone name, whose Account's nameservers match the Delegation.
 
 **Registration**:
-The Zone, among those sharing a zone name, held by an Account whose Provider registers the domain.
-_Avoid_: registrar zone, domain
+The Zone, among those sharing a zone name, held by an Account whose Provider is the registrar for that name. It names a Zone, not the act of registering a name, which dnscli does not do.
+_Avoid_: registrar zone
+
+**Registrar Adapter**:
+A Provider that can read and replace the Delegation Signer records of the names its Accounts register; in dnsprovider, one implementing `DSRegistrar`.
+_Avoid_: registrar provider, DS provider
 
 **Changeset**:
 A set of Record additions, modifications and deletions for one Zone, previewed by the user and applied to the Provider as one operation.
