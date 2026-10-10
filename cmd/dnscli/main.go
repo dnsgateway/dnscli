@@ -28,6 +28,10 @@ import (
 // unsealEnv chooses the session's Unseal Method when --unseal is not given.
 const unsealEnv = "DNSCLI_UNSEAL"
 
+// caFileEnv lists the CA files when no --ca-file is given, as a path list
+// split with the OS list separator.
+const caFileEnv = "DNSCLI_CA_FILE"
+
 // registry maps each Provider type this build supports to its Factory.
 // A build with the fakeprovider tag adds an in-memory fake for trying the UI.
 var registry = providers.Registry()
@@ -72,6 +76,9 @@ type options struct {
 	dbPath       string
 	unseal       vault.Method
 	serialChecks int
+	// caFiles are the PEM files whose CA certificates verify a Gateway,
+	// besides the system's.
+	caFiles []string
 	// keychain is the Keychain Unseal Method to offer for enrolling; nil
 	// where the platform has none.
 	keychain vault.Method
@@ -90,6 +97,8 @@ func parseOptions(args []string, getenv func(string) string, goos string, method
 	serialChecks := fs.Int("serial-checks", tui.DefaultSerialChecks, "how many Serial Checks may ask the system DNS resolver at once")
 	unseal := fs.String("unseal", "", fmt.Sprintf("Unseal Method for this session: %s (default $%s, else %s)",
 		strings.Join(methodNames(methods), ", "), unsealEnv, defaultUnsealMethod(goos, methods)))
+	caFiles := fs.StringArray("ca-file", pathList(getenv(caFileEnv)),
+		"PEM file of CA certificates that verify a Gateway, added to the system's; repeat it to trust several (default $"+caFileEnv+", a path list)")
 
 	opts, err := func() (options, error) {
 		if err := fs.Parse(args); err != nil {
@@ -122,7 +131,7 @@ func parseOptions(args []string, getenv func(string) string, goos string, method
 			return options{}, fmt.Errorf("unknown Unseal Method %q (available: %s)", name, strings.Join(methodNames(methods), ", "))
 		}
 
-		return options{dbPath: *dbPath, unseal: m, serialChecks: *serialChecks, keychain: methods[vault.Keychain{}.Name()]}, nil
+		return options{dbPath: *dbPath, unseal: m, serialChecks: *serialChecks, caFiles: *caFiles, keychain: methods[vault.Keychain{}.Name()]}, nil
 	}()
 
 	// pflag has already printed the usage for --help.
@@ -144,11 +153,30 @@ func defaultUnsealMethod(goos string, methods map[string]vault.Method) string {
 	return vault.Passphrase{}.Name()
 }
 
+// pathList returns the non-empty paths of list, split with the OS list
+// separator.
+func pathList(list string) []string {
+	var paths []string
+
+	for _, p := range filepath.SplitList(list) {
+		if p != "" {
+			paths = append(paths, p)
+		}
+	}
+
+	return paths
+}
+
 func methodNames(methods map[string]vault.Method) []string {
 	return slices.Sorted(maps.Keys(methods))
 }
 
 func run(opts options) error {
+	providers, err := providerRegistry(opts.caFiles)
+	if err != nil {
+		return err
+	}
+
 	if err := os.MkdirAll(filepath.Dir(opts.dbPath), 0o700); err != nil {
 		return fmt.Errorf("create database directory: %w", err)
 	}
@@ -166,7 +194,7 @@ func run(opts options) error {
 	model := tui.New(ctx, tui.Deps{
 		Store:        s,
 		Clock:        time.Now,
-		Providers:    registry,
+		Providers:    providers,
 		Resolver:     &resolver.System{},
 		SerialChecks: opts.serialChecks,
 		UnsealMethod: opts.unseal,

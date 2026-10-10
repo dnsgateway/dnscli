@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -167,5 +169,40 @@ func TestHelpPrintsUsageAndExitsWithStatus0(t *testing.T) {
 
 	if !strings.Contains(stderr.String(), "--unseal") {
 		t.Fatalf("help does not show usage:\n%s", stderr.String())
+	}
+}
+
+func TestTheCAFilesComeFromRepeatedFlagsOrTheEnvironmentPathList(t *testing.T) {
+	sep := string(os.PathListSeparator)
+
+	for _, tc := range []struct {
+		name string
+		args []string
+		env  string
+		want []string
+	}{
+		{name: "none"},
+		{name: "repeated flag", args: []string{"--ca-file", "a.pem", "--ca-file", "b.pem"}, want: []string{"a.pem", "b.pem"}},
+		{name: "environment path list", env: "a.pem" + sep + sep + "b.pem", want: []string{"a.pem", "b.pem"}},
+		{name: "flag replaces environment", args: []string{"--ca-file", "c.pem"}, env: "a.pem" + sep + "b.pem", want: []string{"c.pem"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			getenv := func(k string) string {
+				if k == caFileEnv {
+					return tc.env
+				}
+
+				return ""
+			}
+
+			opts, err := parseOptions(tc.args, getenv, "linux", unsealMethods(nil), io.Discard)
+			if err != nil {
+				t.Fatalf("parseOptions: %v", err)
+			}
+
+			if !slices.Equal(opts.caFiles, tc.want) {
+				t.Fatalf("CA files = %q, want %q", opts.caFiles, tc.want)
+			}
+		})
 	}
 }
