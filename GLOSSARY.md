@@ -7,12 +7,24 @@ A terminal application for browsing and editing DNS records across several DNS h
 ### Hosting
 
 **Provider**:
-A DNS hosting service whose API dnscli talks to, such as Cloudflare or GoDaddy.
+A kind of service dnscli manages Zones through: a DNS hosting service whose API it talks to, such as Cloudflare or GoDaddy, or a Gateway reached through the Gateway Adapter.
 _Avoid_: backend, service
 
 **Account**:
 One set of credentials at a Provider, named `<provider>.<account>` (e.g. `cloudflare.work`).
 _Avoid_: profile, login
+
+**Tenant**:
+The scope at a Provider that an Account's credentials act within, such as one Cloudflare account. Some credentials reach several Tenants, and the Account names the one it uses.
+_Avoid_: organization, team, provider account
+
+**Gateway**:
+A dnsgate service that holds the credentials of DNS hosting services and manages records at them on a client's behalf, within the permissions of the token the client presents.
+_Avoid_: DNS Router, proxy
+
+**Gateway Adapter**:
+The Provider type `dnsgate`, which talks to a Gateway rather than to a DNS hosting service. Its Account holds the Gateway's address and a token the Gateway issued, never the DNS hosting service's credentials.
+_Avoid_: dnsgate provider, gateway backend
 
 **Zone**:
 A DNS zone hosted in one Account, identified by the pair (Account, zone name). The same zone name may exist in several Accounts.
