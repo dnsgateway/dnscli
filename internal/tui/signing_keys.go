@@ -236,6 +236,10 @@ func (m *Model) dnssecState(z dns.Zone) (string, lipgloss.Style) {
 	case dsUnknown:
 		return "DNSSEC: unknown", statusStyle
 	case dsNone:
+		if now, after := m.deps.now(), m.publishAfter(z); now.Before(after) {
+			return "DNSSEC: DS can be published after " + clockText(after, now), badgePendingStyle
+		}
+
 		return fmt.Sprintf("DNSSEC: publish the DS (%s shows it)", m.keys.keysFor(ActionShowKeys)), badgePendingStyle
 	case dsServed:
 		if anyDSMatches(z.Name, m.parentDS[nameKey(z.Name)].ds, c.keys) {

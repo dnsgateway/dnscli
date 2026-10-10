@@ -46,6 +46,10 @@ type Zone struct {
 	// StatusAt is when Status was read; zero when it never was. A Refresh
 	// that could not read it leaves it older than RefreshedAt.
 	StatusAt time.Time
+	// SigningSeenAt is when dnscli first saw the Zone signed, its keys
+	// read; zero when it has not, or has seen it unsigned since. The DS is
+	// published only once resolvers may have flushed its unsigned data.
+	SigningSeenAt time.Time
 }
 
 // Record is a single DNS resource record inside a Zone.

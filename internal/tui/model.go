@@ -335,7 +335,14 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case keysLookedUpMsg:
 		again := m.recordKeyLookup(msg)
 
-		return m, tea.Batch(again, m.lookupAnswered())
+		var seen tea.Cmd
+		if z, ok := m.zoneByID[msg.zoneID]; ok {
+			seen = m.noteSigning(z)
+		}
+
+		return m, tea.Batch(again, seen, m.lookupAnswered())
+	case signingSeenMsg:
+		m.signingSeen(msg)
 	case serialCheckedMsg:
 		return m, m.serialChecked(msg)
 	case zoneRefreshedMsg:

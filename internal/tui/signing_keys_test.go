@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/dnsgateway/dnsprovider"
 	"github.com/dnsgateway/dnsprovider/providertest"
@@ -181,6 +182,8 @@ func TestTheKeysAreLookedUpOnceTheDelegationNamesTheNameservers(t *testing.T) {
 	r := &fakeResolver{ns: map[string][]string{"example.com": cruzDee}}
 	r.setKeys("example.com", ecKey)
 	r.setDS("example.com")
+	// Signed long enough ago for its DS to be published.
+	seenSigned(t, s, "example.com", testNow.Add(-2*time.Hour))
 	h, startup := newHarnessHoldingStartup(t, s, tui.Deps{Resolver: r})
 
 	h.press("space")

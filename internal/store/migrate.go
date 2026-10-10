@@ -75,6 +75,10 @@ var migrations = []string{
 	`
 	ALTER TABLE zones ADD COLUMN min_tls TEXT NOT NULL DEFAULT ''; -- dnsprovider.TLSVersion, e.g. '1.2'; '' = unknown
 	`,
+	// 7: when each Zone was first seen signed, for the wait before its DS is published.
+	`
+	ALTER TABLE zones ADD COLUMN signing_seen_at INTEGER NOT NULL DEFAULT 0; -- unix seconds, 0 = not seen signed
+	`,
 }
 
 // migrate applies pending migrations in one write transaction. BEGIN IMMEDIATE
