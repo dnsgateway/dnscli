@@ -197,9 +197,9 @@ func (m *Model) signingKeysError(z dns.Zone) error {
 type dnssecStep int
 
 const (
-	// stepNone is nothing to say yet, or a Zone known not to be the Live
+	// stepSilent is nothing to say yet, or a Zone known not to be the Live
 	// Zone.
-	stepNone dnssecStep = iota
+	stepSilent dnssecStep = iota
 	// stepUnknown is a lookup that failed: never taken as off.
 	stepUnknown
 	// stepTurnOn is an unsigned Zone whose parent serves no DS: signing
@@ -227,12 +227,12 @@ const (
 func (m *Model) dnssecStepOf(z dns.Zone) dnssecStep {
 	c, ok := m.keyLookups[z.ID]
 	if !ok || m.liveness(z) == liveNo {
-		return stepNone
+		return stepSilent
 	}
 
 	switch c.state {
 	case lookupQueued, lookupResolving:
-		return stepNone
+		return stepSilent
 	case lookupFailed:
 		if errors.Is(c.err, dns.ErrNameserversDisagree) {
 			return stepWaitKeys
@@ -255,7 +255,7 @@ func (m *Model) dnssecStepOf(z dns.Zone) dnssecStep {
 			return stepTurnOn
 		}
 
-		return stepNone
+		return stepSilent
 	}
 
 	switch ds {
@@ -275,7 +275,7 @@ func (m *Model) dnssecStepOf(z dns.Zone) dnssecStep {
 		return stepMismatch
 	}
 
-	return stepNone
+	return stepSilent
 }
 
 // dnssecState says, in a few words and its style, the DNSSEC state of z

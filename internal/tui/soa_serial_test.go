@@ -4,6 +4,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
 	"github.com/sergelogvinov/dnscli/internal/tui"
@@ -143,6 +144,7 @@ func TestAnApplyStoresTheNameserversSerialOnlyWhenItIsNewer(t *testing.T) {
 			r.setSOAAt("work.example", c.queried)
 			h.press("P", "enter")
 			h.assertShows("Applied 3 changes to work.example.")
+			h.passTime(time.Minute) // the nameservers are polled for the new serial
 
 			if z := cachedZone(t, s, "work.example"); z.Serial != c.want {
 				t.Fatalf("cached serial = %d, want %d", z.Serial, c.want)

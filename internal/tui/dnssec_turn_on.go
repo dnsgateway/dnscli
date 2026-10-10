@@ -180,13 +180,24 @@ func (m *Model) takeDNSSECStep() tea.Cmd {
 	return m.editZoneOf(z.ID, true)
 }
 
-// dnssecRecheckAt are the waits between re-checks of the open Zone while
-// its DNSSEC waits on something outside dnscli: its nameservers to serve
-// the keys, or the DS to appear at the parent, however it is published.
-// They grow, and stop after about an hour; each new step, and a Refresh,
-// starts them again.
-var dnssecRecheckAt = []time.Duration{
+// dnssecRecheckWaits are the waits between re-checks of the open Zone
+// while its DNSSEC waits on something outside dnscli: its nameservers to
+// serve the keys, or the DS to appear at the parent, however it is
+// published. They grow, then go on at the last for as long as the Zone
+// waits; each new step, and a Refresh, starts them again.
+var dnssecRecheckWaits = []time.Duration{
 	time.Minute, 2 * time.Minute, 5 * time.Minute, 10 * time.Minute, 15 * time.Minute, 30 * time.Minute,
+}
+
+// waits reports whether the step waits on something outside dnscli, and
+// so is re-checked.
+func (s dnssecStep) waits() bool {
+	switch s {
+	case stepWaitKeys, stepWaitTTL, stepPublish:
+		return true
+	}
+
+	return false
 }
 
 // dnssecWatch re-checks the open Zone's DNSSEC in the background while it
@@ -196,7 +207,8 @@ type dnssecWatch struct {
 	zoneID int64
 	// step is the step the re-checks are for.
 	step dnssecStep
-	// next is the index into dnssecRecheckAt of the next re-check.
+	// next is the index into dnssecRecheckWaits of the next re-check; it
+	// stays at the last.
 	next int
 	// armed is set while a re-check is waited for.
 	armed bool
@@ -212,8 +224,8 @@ type dnssecWatchMsg struct {
 }
 
 // watchDNSSEC sets the open Zone's DNSSEC timers its step asks for: a
-// re-check while it waits for keys or for the DS, unless one is set or
-// they have run out, and a timer for the end of the wait before the DS
+// re-check while it waits for keys or for the DS, unless one is set,
+// and a timer for the end of the wait before the DS
 // can be published.
 func (m *Model) watchDNSSEC() tea.Cmd {
 	if m.open == nil {
@@ -231,10 +243,7 @@ func (m *Model) watchDNSSEC() tea.Cmd {
 	}
 
 	step := m.dnssecStepOf(z)
-
-	switch step {
-	case stepWaitKeys, stepWaitTTL, stepPublish:
-	default:
+	if !step.waits() {
 		return nil
 	}
 
@@ -244,10 +253,10 @@ func (m *Model) watchDNSSEC() tea.Cmd {
 
 	var cmds []tea.Cmd
 
-	if !w.armed && w.next < len(dnssecRecheckAt) {
+	if !w.armed {
 		w.armed = true
-		cmds = append(cmds, m.dnssecTimer(w, dnssecRecheckAt[w.next], true))
-		w.next++
+		cmds = append(cmds, m.dnssecTimer(w, dnssecRecheckWaits[w.next], true))
+		w.next = min(w.next+1, len(dnssecRecheckWaits)-1)
 	}
 
 	if end := m.publishAfter(z); step == stepWaitTTL && !end.Equal(w.waitEnd) {
@@ -285,7 +294,10 @@ func (m *Model) dnssecWatched(msg dnssecWatchMsg) tea.Cmd {
 	msg.watch.armed = false
 	z := *m.open
 
-	if m.dnssecStepOf(z) == stepWaitKeys {
+	switch step := m.dnssecStepOf(z); {
+	case !step.waits():
+		return nil
+	case step == stepWaitKeys:
 		return tea.Batch(m.checkParentDS(z), m.lookUpSigningKeys(z))
 	}
 

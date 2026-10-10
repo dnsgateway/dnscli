@@ -43,11 +43,6 @@ type fakeResolver struct {
 	keys     map[string][]dns.SigningKey
 	keysErrs map[string]error
 
-	// asked, when set, is called before each DS or DNSKEY query is
-	// answered, with "DS" or "DNSKEY", so a test can change the answers
-	// or look at what the model shows meanwhile.
-	asked func(query string)
-
 	mu        sync.Mutex
 	keysAsked []soaAtQuery // DNSKEY queries, each with the servers asked
 	nsAsked   []string     // zone names asked for NS, in order
@@ -81,10 +76,6 @@ func (r *fakeResolver) failDS(zone string, err error) {
 }
 
 func (r *fakeResolver) DSAt(_ context.Context, zone string) ([]string, time.Duration, error) {
-	if r.asked != nil {
-		r.asked("DS")
-	}
-
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -139,10 +130,6 @@ func (r *fakeResolver) failKeys(zone string, err error) {
 }
 
 func (r *fakeResolver) DNSKEYAt(_ context.Context, zone string, servers []string) ([]dns.SigningKey, error) {
-	if r.asked != nil {
-		r.asked("DNSKEY")
-	}
-
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -264,22 +251,7 @@ func (h *harness) domainRow(zone string) string {
 func newHarnessHoldingStartup(t *testing.T, s *store.Store, deps tui.Deps) (*harness, tea.Cmd) {
 	t.Helper()
 
-	deps.Store = s
-	deps.Clock = func() time.Time { return testNow }
-
-	h := &harness{t: t, store: s}
-
-	// Like newHarnessWith, waits end at once.
-	deps.After = func(d time.Duration) <-chan time.Time {
-		h.waits = append(h.waits, d)
-
-		c := make(chan time.Time, 1)
-		c <- testNow.Add(d)
-
-		return c
-	}
-
-	h.model = tui.New(context.Background(), deps)
+	h := newHarnessModel(t, s, deps, &testClock{now: testNow})
 	h.send(tea.WindowSizeMsg{Width: 120, Height: 30})
 
 	m, cmd := h.model.Update(h.model.Init()())

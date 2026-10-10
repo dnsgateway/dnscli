@@ -83,6 +83,7 @@ func TestAnApplyStopsPollingForTheSerialAfterThreeTries(t *testing.T) {
 	h, poll := applyHoldingThePolls(t, r, serialZones(zoneNS))
 
 	h.run(poll)
+	h.passTime(time.Minute)
 	h.press("esc") // past the notice, to the Zone's status
 
 	assertCachedSerial(t, h, 2026100700)

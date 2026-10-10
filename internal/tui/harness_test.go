@@ -96,6 +96,28 @@ type harness struct {
 	providers dnsprovider.Registry
 	// waits are the waits the model asked its timer for, in order.
 	waits []time.Duration
+	// clock is the time the model reads, which passTime moves on; nil
+	// when the test gave the Clock.
+	clock *testClock
+	// timers are the waits not ended yet, each holding back the command
+	// waiting on it.
+	timers []*testTimer
+	// parking, set while run runs a command, takes the wait that command
+	// waits on.
+	parking chan *testTimer
+}
+
+// testClock is a Clock a test moves on.
+type testClock struct{ now time.Time }
+
+func (c *testClock) Now() time.Time { return c.now }
+
+// testTimer is a wait the model asked for, ending at end on the clock.
+type testTimer struct {
+	end  time.Time
+	fire chan time.Time
+	// done takes what the command waiting on it returns.
+	done chan tea.Msg
 }
 
 // openStore opens a Store on a fresh temp file.
@@ -121,36 +143,64 @@ func newHarness(t *testing.T, s *store.Store) *harness {
 	return newHarnessWith(t, s, tui.Deps{})
 }
 
-// newHarnessWith is newHarness with extra dependencies; Store is filled in,
-// Clock, when unset, stops at testNow, and After, when unset, records each
-// wait and ends it at once, so a test steps through timed work without
-// sleeping.
+// newHarnessWith is newHarness with extra dependencies; Store is filled
+// in, and Clock, when unset, is a clock at testNow that only passTime
+// moves on.
 func newHarnessWith(t *testing.T, s *store.Store, deps tui.Deps) *harness {
 	t.Helper()
 
-	deps.Store = s
+	var c *testClock
 	if deps.Clock == nil {
-		deps.Clock = func() time.Time { return testNow }
+		c = &testClock{now: testNow}
 	}
 
-	h := &harness{t: t, store: s, providers: deps.Providers}
+	return newHarnessAt(t, s, deps, c)
+}
+
+// newHarnessAt is newHarnessWith on the clock c, which passTime moves on;
+// a nil c leaves the Clock to deps.
+func newHarnessAt(t *testing.T, s *store.Store, deps tui.Deps, c *testClock) *harness {
+	t.Helper()
+
+	h := newHarnessModel(t, s, deps, c)
+	h.run(h.model.Init())
+	h.send(tea.WindowSizeMsg{Width: 120, Height: 30})
+
+	return h
+}
+
+// newHarnessModel builds the model for newHarnessAt without starting it.
+// After, when unset, records each wait, and ends it once passTime moves
+// the clock to its end; a command a test runs itself, such as one held
+// back, ends its wait at once. So a test steps through timed work without
+// sleeping, and work that waits again and again never runs away.
+func newHarnessModel(t *testing.T, s *store.Store, deps tui.Deps, c *testClock) *harness {
+	t.Helper()
+
+	deps.Store = s
+	if c != nil {
+		deps.Clock = c.Now
+	}
+
+	h := &harness{t: t, store: s, providers: deps.Providers, clock: c}
 
 	if deps.After == nil {
 		clock := deps.Clock
 		deps.After = func(d time.Duration) <-chan time.Time {
 			h.waits = append(h.waits, d)
 
-			c := make(chan time.Time, 1)
-			c <- clock().Add(d)
+			w := &testTimer{end: clock().Add(d), fire: make(chan time.Time, 1)}
+			if h.parking == nil {
+				w.fire <- w.end
+			} else {
+				h.parking <- w
+			}
 
-			return c
+			return w.fire
 		}
 	}
 
 	h.model = tui.New(context.Background(), deps)
-
-	h.run(h.model.Init())
-	h.send(tea.WindowSizeMsg{Width: 120, Height: 30})
 
 	return h
 }
@@ -163,7 +213,8 @@ func (h *harness) send(msg tea.Msg) {
 	h.run(cmd)
 }
 
-// run executes a command and feeds every resulting message back into the model.
+// run executes a command and feeds every resulting message back into the
+// model. A command that waits is held back until its wait ends.
 func (h *harness) run(cmd tea.Cmd) {
 	h.t.Helper()
 
@@ -171,7 +222,35 @@ func (h *harness) run(cmd tea.Cmd) {
 		return
 	}
 
-	switch msg := cmd().(type) {
+	done := make(chan tea.Msg, 1)
+
+	h.parking = make(chan *testTimer, 1)
+
+	go func() { done <- cmd() }()
+
+	h.deliver(h.await(done))
+}
+
+// await waits for the command answering on done to return, or to wait.
+func (h *harness) await(done chan tea.Msg) tea.Msg {
+	defer func() { h.parking = nil }()
+
+	select {
+	case msg := <-done:
+		return msg
+	case w := <-h.parking:
+		w.done = done
+		h.timers = append(h.timers, w)
+
+		return nil
+	}
+}
+
+// deliver feeds a command's message back into the model.
+func (h *harness) deliver(msg tea.Msg) {
+	h.t.Helper()
+
+	switch msg := msg.(type) {
 	case nil:
 	case tea.BatchMsg:
 		for _, c := range msg {
@@ -182,6 +261,45 @@ func (h *harness) run(cmd tea.Cmd) {
 	default:
 		h.send(msg)
 	}
+}
+
+// passTime moves the clock on by d, ending each wait as the clock reaches
+// its end, in order.
+func (h *harness) passTime(d time.Duration) {
+	h.t.Helper()
+
+	if h.clock == nil {
+		h.t.Fatal("passTime needs the harness's clock")
+	}
+
+	end := h.clock.now.Add(d)
+
+	for {
+		i := -1
+
+		for j, w := range h.timers {
+			if !w.end.After(end) && (i < 0 || w.end.Before(h.timers[i].end)) {
+				i = j
+			}
+		}
+
+		if i < 0 {
+			break
+		}
+
+		w := h.timers[i]
+		h.timers = append(h.timers[:i], h.timers[i+1:]...)
+
+		if w.end.After(h.clock.now) {
+			h.clock.now = w.end
+		}
+
+		h.parking = make(chan *testTimer, 1)
+		w.fire <- w.end
+		h.deliver(h.await(w.done))
+	}
+
+	h.clock.now = end
 }
 
 // press sends key presses, named the way Bubble Tea prints them ("tab", "shift+tab", "enter", "j").
