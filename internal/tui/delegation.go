@@ -12,7 +12,7 @@ import (
 )
 
 // lookup is how far this session has got with a zone name's Delegation
-// lookup or its DS Check, or with a Zone's key lookup.
+// lookup or its DS Check, or with a Zone's Key Lookup.
 type lookup int
 
 const (
@@ -49,7 +49,7 @@ type delegationMsg struct {
 // zone name however many Accounts have it, and again for every name whose
 // lookup failed or whose result is older than delegationTTL: once per
 // reload, like the Serial Checks. It forgets the Delegations and DS Checks
-// of the names that left the cache, and the key lookups of the Zones that
+// of the names that left the cache, and the Key Lookups of the Zones that
 // did.
 func (m *Model) queueLookups() tea.Cmd {
 	if m.deps.Resolver == nil {
@@ -75,32 +75,32 @@ func (m *Model) queueLookups() tea.Cmd {
 		switch {
 		case !ok:
 			m.delegations[k] = &delegation{}
-			m.lookups.queue = append(m.lookups.queue, lookupJob{kind: lookupDelegation, name: k})
+			m.lookups.push(delegationJob(k))
 		case d.state == lookupFailed,
 			d.state == lookupDone && m.deps.now().Sub(d.at) >= delegationTTL:
 			*d = delegation{}
-			m.lookups.queue = append(m.lookups.queue, lookupJob{kind: lookupDelegation, name: k})
+			m.lookups.push(delegationJob(k))
 		}
 	}
 
 	for k := range m.delegations {
 		if !names[k] {
 			delete(m.delegations, k)
-			m.lookups.drop(lookupJob{kind: lookupDelegation, name: k})
+			m.lookups.drop(delegationJob(k))
 		}
 	}
 
 	for k := range m.parentDS {
 		if !names[k] {
 			delete(m.parentDS, k)
-			m.lookups.drop(lookupJob{kind: lookupDS, name: k})
+			m.lookups.drop(dsJob(k))
 		}
 	}
 
-	for id := range m.signingKeys {
+	for id := range m.keyLookups {
 		if _, ok := m.zoneByID[id]; !ok {
-			delete(m.signingKeys, id)
-			m.lookups.drop(lookupJob{kind: lookupKeys, zoneID: id})
+			delete(m.keyLookups, id)
+			m.lookups.drop(keysJob(id))
 		}
 	}
 
@@ -129,19 +129,31 @@ type lookupKind int
 const (
 	lookupDelegation lookupKind = iota // the zone name's Delegation
 	lookupDS                           // the DS its parent serves: a DS Check
-	lookupKeys                         // a Zone's key-signing keys
+	lookupKeys                         // a Zone's key-signing keys: a Key Lookup
 )
 
-// lookupJob is one lookup the lookups queue schedules: for a zone name, by
-// nameKey, or, for a key lookup, for a Zone, by ID.
+// lookupJob is one lookup the lookups queue schedules. Build it with
+// delegationJob, dsJob or keysJob, which say what it is of.
 type lookupJob struct {
-	kind   lookupKind
-	name   string
+	kind lookupKind
+	// name is the zone name's nameKey, for a Delegation lookup or a DS
+	// Check.
+	name string
+	// zoneID is the Zone's, for a Key Lookup.
 	zoneID int64
 }
 
-// startLookups starts queued Delegation lookups, DS Checks and key
-// lookups, which share one limit, up to it.
+// delegationJob is the Delegation lookup of a zone name, by nameKey.
+func delegationJob(name string) lookupJob { return lookupJob{kind: lookupDelegation, name: name} }
+
+// dsJob is the DS Check of a zone name, by nameKey.
+func dsJob(name string) lookupJob { return lookupJob{kind: lookupDS, name: name} }
+
+// keysJob is the Key Lookup of a Zone, by ID.
+func keysJob(zoneID int64) lookupJob { return lookupJob{kind: lookupKeys, zoneID: zoneID} }
+
+// startLookups starts queued Delegation lookups, DS Checks and Key
+// Lookups, which share one limit, up to it.
 func (m *Model) startLookups() tea.Cmd {
 	var cmds []tea.Cmd
 
@@ -182,7 +194,7 @@ func (m *Model) startLookup(job lookupJob) tea.Cmd {
 			return dsCheckedMsg{name: k, ds: ds, err: err}
 		}
 	case lookupKeys:
-		c, ok := m.signingKeys[job.zoneID]
+		c, ok := m.keyLookups[job.zoneID]
 		if !ok {
 			return nil
 		}
@@ -193,7 +205,7 @@ func (m *Model) startLookup(job lookupJob) tea.Cmd {
 		return func() tea.Msg {
 			keys, err := resolver.DNSKEYAt(ctx, zone, servers)
 
-			return keysCheckedMsg{zoneID: id, keys: keys, err: err}
+			return keysLookedUpMsg{zoneID: id, keys: keys, err: err}
 		}
 	default:
 		d, ok := m.delegations[k]

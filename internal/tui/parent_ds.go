@@ -50,7 +50,7 @@ func (m *Model) checkParentDS(z dns.Zone) tea.Cmd {
 	}
 
 	c.state = lookupQueued
-	m.lookups.queue = append(m.lookups.queue, lookupJob{kind: lookupDS, name: k})
+	m.lookups.push(dsJob(k))
 
 	return m.startLookups()
 }

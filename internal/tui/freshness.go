@@ -56,6 +56,11 @@ type workQueue[K comparable] struct {
 // zoneQueue schedules background work per Zone ID.
 type zoneQueue = workQueue[int64]
 
+// push queues a key behind those waiting.
+func (q *workQueue[K]) push(key K) {
+	q.queue = append(q.queue, key)
+}
+
 // drop removes a key from the queue, such as a Zone that left the cache.
 func (q *workQueue[K]) drop(key K) {
 	q.queue = slices.DeleteFunc(q.queue, func(queued K) bool { return queued == key })
@@ -82,10 +87,10 @@ func (m *Model) queueSerialChecks() tea.Cmd {
 		switch {
 		case !ok:
 			m.fresh[z.ID] = &zoneFreshness{}
-			m.checks.queue = append(m.checks.queue, z.ID)
+			m.checks.push(z.ID)
 		case f.check == freshError:
 			*f = zoneFreshness{}
-			m.checks.queue = append(m.checks.queue, z.ID)
+			m.checks.push(z.ID)
 		default:
 			f.recompare(z.Serial)
 		}

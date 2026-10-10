@@ -95,14 +95,14 @@ type Model struct {
 	// parentDS is what this session found of the DS each zone name's
 	// parent serves, by nameKey.
 	parentDS map[string]*dsCheck
-	// signingKeys is what this session read of each Zone's key-signing
-	// keys from its own nameservers, by Zone ID.
-	signingKeys map[int64]*keyCheck
-	// showKeys shows the open Zone's key-signing keys and their DS, to
-	// copy into a registrar's panel.
-	showKeys bool
-	// lookups schedules the Delegation lookups, the DS Checks and the key
-	// lookups, under one limit.
+	// keyLookups is what this session's Key Lookup of each Zone found,
+	// by Zone ID.
+	keyLookups map[int64]*keyLookup
+	// showSigningKeys shows the open Zone's key-signing keys and their
+	// DS, to copy into a registrar's panel.
+	showSigningKeys bool
+	// lookups schedules the Delegation lookups, the DS Checks and the Key
+	// Lookups, under one limit.
 	lookups workQueue[lookupJob]
 
 	// addForm is the add-Account dialog; nil when closed.
@@ -332,8 +332,8 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.recordDSCheck(msg)
 
 		return m, m.lookupAnswered()
-	case keysCheckedMsg:
-		again := m.recordKeysCheck(msg)
+	case keysLookedUpMsg:
+		again := m.recordKeyLookup(msg)
 
 		return m, tea.Batch(again, m.lookupAnswered())
 	case serialCheckedMsg:
@@ -400,7 +400,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.cursor[paneRecords] = 0
 
-		return m, tea.Batch(m.refreshZone(*m.open), m.checkDNSSEC(*m.open))
+		return m, tea.Batch(m.refreshZone(*m.open), m.checkDSAndLookUpKeys(*m.open))
 	case tea.KeyMsg:
 		if m.unseal != nil {
 			return m, m.unsealKey(msg)
@@ -476,11 +476,11 @@ func (m *Model) handle(a Action) tea.Cmd {
 		return nil
 	}
 
-	if m.showKeys {
+	if m.showSigningKeys {
 		// So does the keys overlay.
 		switch a {
 		case ActionShowKeys, ActionClose:
-			m.showKeys = false
+			m.showSigningKeys = false
 		}
 
 		return nil
@@ -496,7 +496,7 @@ func (m *Model) handle(a Action) tea.Cmd {
 	case ActionHelp:
 		m.help = true
 	case ActionShowKeys:
-		m.openKeys()
+		m.openSigningKeys()
 	case ActionNextPane:
 		m.focus = (m.focus + 1) % paneCount
 	case ActionPrevPane:

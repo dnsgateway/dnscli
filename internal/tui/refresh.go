@@ -132,7 +132,7 @@ func (m *Model) retryRefresh() tea.Cmd {
 		return nil
 	}
 
-	return tea.Batch(m.checkDNSSEC(*m.open), m.refreshOpenZone())
+	return tea.Batch(m.checkDSAndLookUpKeys(*m.open), m.refreshOpenZone())
 }
 
 // refreshOpenZone Refreshes the open Zone, or explains why it cannot.
@@ -187,7 +187,7 @@ func (m *Model) refreshZone(z dns.Zone) tea.Cmd {
 		}
 
 		r.pending = true
-		m.refreshQueue.queue = append(m.refreshQueue.queue, z.ID)
+		m.refreshQueue.push(z.ID)
 
 		return m.startRefreshes()
 	})

@@ -62,6 +62,10 @@ Comparing a Zone's cached SOA serial with the serial returned by the system DNS 
 Asking the parent zone's nameservers directly whether they serve DS records for a zone name. Its answer is yes, no, or unknown when the lookup fails; it is held for the current session only.
 _Avoid_: DNSSEC check
 
+**Key Lookup**:
+Asking a Zone's own nameservers directly for its key-signing keys. They count only when every nameserver serves the same ones, signed by the Zone itself; it is held for the current session only.
+_Avoid_: key check, DNSSEC check
+
 **Refresh**:
 Re-reading a Zone's Records from its Provider's API and replacing the cached copy.
 

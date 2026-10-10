@@ -36,7 +36,7 @@ type Deps struct {
 	// none of them.
 	Resolver Resolver
 	// SerialChecks is how many Serial Checks may run at once, and, apart
-	// from them, how many Delegation lookups, DS Checks and key lookups
+	// from them, how many Delegation lookups, DS Checks and Key Lookups
 	// together.
 	// Defaults to DefaultSerialChecks.
 	SerialChecks int
