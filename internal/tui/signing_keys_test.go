@@ -115,8 +115,11 @@ func TestKeysTheNameserversDoNotAgreeOnAreWaitedFor(t *testing.T) {
 
 	h.assertStatusBarShows("DNSSEC: waiting for nameservers")
 
+	// The keys say why they are waited for, naming the nameserver.
+	h.assertHides("dee.ns.cloudflare.com")
 	h.press("s")
 	h.assertHides("DNSKEY")
+	h.assertShows("Could not read the keys", "dee.ns.cloudflare.com:", "different key-signing keys")
 }
 
 func TestASignedZoneWhoseNameserversServeNoKeysYetIsWaitedFor(t *testing.T) {
@@ -130,12 +133,17 @@ func TestASignedZoneWhoseNameserversServeNoKeysYetIsWaitedFor(t *testing.T) {
 
 func TestAFailedKeyLookupShowsUnknown(t *testing.T) {
 	r := &fakeResolver{}
-	r.failKeys(rfcZone, errors.New("i/o timeout"))
+	r.failKeys(rfcZone, errors.New("cruz.ns.cloudflare.com: i/o timeout"))
 	r.setDS(rfcZone, rfcDS)
 	h := newSignedZoneHarness(t, r)
 
 	h.assertStatusBarShows("DNSSEC: unknown")
 	h.assertHides("DNSSEC: On", "does not match")
+
+	// The keys say why they are unknown, naming the nameserver.
+	h.assertHides("cruz.ns.cloudflare.com")
+	h.press("s")
+	h.assertShows("Could not read the keys", "cruz.ns.cloudflare.com: i/o timeout")
 }
 
 func TestAFailedDSCheckWithKeysShowsUnknown(t *testing.T) {

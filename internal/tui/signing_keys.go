@@ -141,6 +141,16 @@ func (m *Model) keysOf(z dns.Zone) []dns.SigningKey {
 	return nil
 }
 
+// keysError is why this session's lookup of a Zone's key-signing keys
+// failed, naming the nameserver; nil when it did not fail.
+func (m *Model) keysError(z dns.Zone) error {
+	if c, ok := m.signingKeys[z.ID]; ok && c.state == lookupFailed {
+		return c.err
+	}
+
+	return nil
+}
+
 // waitingForKeys is the DNSSEC state of a signed Zone whose nameservers
 // do not all serve the same key-signing keys yet.
 const waitingForKeys = "DNSSEC: waiting for nameservers to serve the keys"
@@ -236,13 +246,14 @@ func anyDSMatches(zone string, ds []string, keys []dns.SigningKey) bool {
 	return false
 }
 
-// openKeys shows the open Zone's key-signing keys, or says why it cannot.
+// openKeys shows the open Zone's key-signing keys, or says why it cannot:
+// a failed lookup says why it failed, naming the nameserver.
 func (m *Model) openKeys() {
 	if m.open == nil {
 		return
 	}
 
-	if len(m.keysOf(*m.open)) == 0 {
+	if len(m.keysOf(*m.open)) == 0 && m.keysError(*m.open) == nil {
 		m.notice = notice{text: "No DNSSEC keys read from the nameservers of " + m.open.Name + " this session."}
 
 		return
@@ -261,7 +272,12 @@ func (m *Model) keysView() string {
 	valueW := max(m.width-8, 20)
 
 	lines := []string{""}
-	lines = append(lines, wrapNote(lipgloss.NewStyle(), "Publish one of these at the registrar of "+z.Name+": the DS, or the DNSKEY where the registrar takes key data.", noteWidth)...)
+
+	if err := m.keysError(z); err != nil {
+		lines = append(lines, wrapNote(errorStyle, "Could not read the keys from the nameservers of "+z.Name+": "+err.Error()+".", noteWidth)...)
+	} else {
+		lines = append(lines, wrapNote(lipgloss.NewStyle(), "Publish one of these at the registrar of "+z.Name+": the DS, or the DNSKEY where the registrar takes key data.", noteWidth)...)
+	}
 
 	for _, k := range m.keysOf(z) {
 		lines = append(lines, "")
