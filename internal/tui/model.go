@@ -104,6 +104,9 @@ type Model struct {
 	// lookups schedules the Delegation lookups, the DS Checks and the Key
 	// Lookups, under one limit.
 	lookups workQueue[lookupJob]
+	// dnssecWatch re-checks the open Zone's DNSSEC while it waits; nil
+	// when no Zone is open, or it is to start afresh.
+	dnssecWatch *dnssecWatch
 
 	// addForm is the add-Account dialog; nil when closed.
 	addForm *addAccountForm
@@ -264,6 +267,9 @@ func (m *Model) readRecords(zoneID int64, opened bool) tea.Cmd {
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	model, cmd := m.update(msg)
 
+	// The open Zone's DNSSEC step may now wait on something new.
+	cmd = tea.Batch(cmd, m.watchDNSSEC())
+
 	// A use of an Account's Provider that needs a Tenant asks for it,
 	// over whatever the use reported.
 	m.askTenant(msg)
@@ -343,6 +349,8 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(again, seen, m.lookupAnswered())
 	case signingSeenMsg:
 		m.signingSeen(msg)
+	case dnssecWatchMsg:
+		return m, m.dnssecWatched(msg)
 	case serialCheckedMsg:
 		return m, m.serialChecked(msg)
 	case zoneRefreshedMsg:
@@ -697,6 +705,7 @@ func (m *Model) openZone() tea.Cmd {
 
 	z := m.visible[m.cursor[paneDomains]]
 	m.open = &z
+	m.dnssecWatch = nil
 	m.records = nil
 	m.search[paneRecords] = search{}
 	m.rebuildRecordRows()

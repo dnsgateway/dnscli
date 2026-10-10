@@ -179,3 +179,115 @@ func (m *Model) takeDNSSECStep() tea.Cmd {
 
 	return m.editZoneOf(z.ID, true)
 }
+
+// dnssecRecheckAt are the waits between re-checks of the open Zone while
+// its DNSSEC waits on something outside dnscli: its nameservers to serve
+// the keys, or the DS to appear at the parent, however it is published.
+// They grow, and stop after about an hour; each new step, and a Refresh,
+// starts them again.
+var dnssecRecheckAt = []time.Duration{
+	time.Minute, 2 * time.Minute, 5 * time.Minute, 10 * time.Minute, 15 * time.Minute, 30 * time.Minute,
+}
+
+// dnssecWatch re-checks the open Zone's DNSSEC in the background while it
+// waits, and wakes the Zone page at the end of the wait before its DS can
+// be published, so the next step shows without a Refresh.
+type dnssecWatch struct {
+	zoneID int64
+	// step is the step the re-checks are for.
+	step dnssecStep
+	// next is the index into dnssecRecheckAt of the next re-check.
+	next int
+	// armed is set while a re-check is waited for.
+	armed bool
+	// waitEnd is the end of the wait a timer is set for; zero when none.
+	waitEnd time.Time
+}
+
+// dnssecWatchMsg is a dnssecWatch's timer firing: a re-check when recheck
+// is set, else the end of the wait.
+type dnssecWatchMsg struct {
+	watch   *dnssecWatch
+	recheck bool
+}
+
+// watchDNSSEC sets the open Zone's DNSSEC timers its step asks for: a
+// re-check while it waits for keys or for the DS, unless one is set or
+// they have run out, and a timer for the end of the wait before the DS
+// can be published.
+func (m *Model) watchDNSSEC() tea.Cmd {
+	if m.open == nil {
+		m.dnssecWatch = nil
+
+		return nil
+	}
+
+	z := *m.open
+
+	w := m.dnssecWatch
+	if w == nil || w.zoneID != z.ID {
+		w = &dnssecWatch{zoneID: z.ID}
+		m.dnssecWatch = w
+	}
+
+	step := m.dnssecStepOf(z)
+
+	switch step {
+	case stepWaitKeys, stepWaitTTL, stepPublish:
+	default:
+		return nil
+	}
+
+	if step != w.step {
+		w.step, w.next = step, 0
+	}
+
+	var cmds []tea.Cmd
+
+	if !w.armed && w.next < len(dnssecRecheckAt) {
+		w.armed = true
+		cmds = append(cmds, m.dnssecTimer(w, dnssecRecheckAt[w.next], true))
+		w.next++
+	}
+
+	if end := m.publishAfter(z); step == stepWaitTTL && !end.Equal(w.waitEnd) {
+		w.waitEnd = end
+		cmds = append(cmds, m.dnssecTimer(w, end.Sub(m.deps.now()), false))
+	}
+
+	return tea.Batch(cmds...)
+}
+
+// dnssecTimer waits d on the Clock for w; quitting stops it.
+func (m *Model) dnssecTimer(w *dnssecWatch, d time.Duration, recheck bool) tea.Cmd {
+	ctx, after := m.ctx, m.deps.after
+
+	return func() tea.Msg {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-after(d):
+		}
+
+		return dnssecWatchMsg{watch: w, recheck: recheck}
+	}
+}
+
+// dnssecWatched re-checks the open Zone when its watch asks to, unless
+// another Zone was opened, or it was Refreshed, meanwhile: the DS at its
+// parent, and its keys while they are waited for. The end of the wait
+// needs nothing but showing the Zone page again.
+func (m *Model) dnssecWatched(msg dnssecWatchMsg) tea.Cmd {
+	if msg.watch != m.dnssecWatch || !msg.recheck || m.open == nil {
+		return nil
+	}
+
+	msg.watch.armed = false
+	z := *m.open
+
+	if m.dnssecStepOf(z) == stepWaitKeys {
+		return tea.Batch(m.checkParentDS(z), m.lookUpSigningKeys(z))
+	}
+
+	return m.checkParentDS(z)
+}

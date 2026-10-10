@@ -132,6 +132,8 @@ func (m *Model) retryRefresh() tea.Cmd {
 		return nil
 	}
 
+	m.dnssecWatch = nil // its re-checks start again
+
 	return tea.Batch(m.checkDSAndLookUpKeys(*m.open), m.refreshOpenZone())
 }
 
