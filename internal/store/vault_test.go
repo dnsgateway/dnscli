@@ -24,13 +24,9 @@ func TestOnlyOneFirstKeySlotIsEverEnrolled(t *testing.T) {
 
 		errs := make([]error, len(stores))
 		for i, s := range stores {
-			wg.Add(1)
-
-			go func() {
-				defer wg.Done()
-
+			wg.Go(func() {
 				_, errs[i] = s.EnrollFirstKeySlot(context.Background(), vault.Slot{Method: "passphrase", Params: []byte("{}"), Wrapped: []byte{byte(i)}})
-			}()
+			})
 		}
 
 		wg.Wait()

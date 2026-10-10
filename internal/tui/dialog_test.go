@@ -15,7 +15,7 @@ import (
 func (h *harness) assertDialogFits(title string) {
 	h.t.Helper()
 
-	for _, line := range strings.Split(h.view(), "\n") {
+	for line := range strings.SplitSeq(h.view(), "\n") {
 		if _, rest, ok := strings.Cut(line, "━ "+title+" "); ok {
 			if !strings.Contains(rest, "┓") {
 				h.t.Fatalf("dialog %q is cut off by the terminal edge:\n%s", title, h.view())

@@ -233,7 +233,7 @@ func (r *fakeResolver) SOA(_ context.Context, zone string) (uint32, error) {
 func (h *harness) domainRow(zone string) string {
 	h.t.Helper()
 
-	for _, line := range strings.Split(ansi.Strip(h.rawView()), "\n") {
+	for line := range strings.SplitSeq(ansi.Strip(h.rawView()), "\n") {
 		cells := strings.FieldsFunc(line, func(r rune) bool { return r == '│' || r == '┃' })
 		if len(cells) > 0 && strings.Contains(cells[0], zone) {
 			return cells[0]

@@ -426,13 +426,14 @@ func (c columns) texts(r dns.Record) []string {
 // format lays out a Records pane row. mark is the one-column mark of a
 // pending change; extras are the values of the extra columns.
 func (c columns) format(mark, name, typ, content, ttl string, extras ...string) string {
-	s := " " + mark + " " + fit(name, c.name) + " " + fit(typ, c.typ) + " " + fit(content, c.content) + " " + fit(ttl, c.ttl)
+	var s strings.Builder
+	s.WriteString(" " + mark + " " + fit(name, c.name) + " " + fit(typ, c.typ) + " " + fit(content, c.content) + " " + fit(ttl, c.ttl))
 
 	for i, w := range c.extraW {
-		s += " " + fit(extras[i], w)
+		s.WriteString(" " + fit(extras[i], w))
 	}
 
-	return s
+	return s.String()
 }
 
 // window returns the range [start, end) of n list items that fits in h rows
@@ -585,7 +586,7 @@ func ago(d time.Duration) string {
 }
 
 // box draws a bordered pane of outer size w×h with the title in the top
-// border. The focused pane uses a heavy, coloured border so it stands out.
+// border. The focused pane uses a heavy, colored border so it stands out.
 func box(title string, lines []string, w, h int, focused bool) string {
 	b := lipgloss.NormalBorder()
 	style := borderStyle
@@ -623,7 +624,7 @@ func box(title string, lines []string, w, h int, focused bool) string {
 	return sb.String()
 }
 
-// changeStyle colours a Record with a pending change: added, modified or deleted.
+// changeStyle colors a Record with a pending change: added, modified or deleted.
 func changeStyle(k dns.ChangeKind) lipgloss.Style {
 	switch k {
 	case dns.ChangeAdd:

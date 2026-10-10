@@ -15,7 +15,7 @@ import (
 func (h *harness) recordsCell(text string) string {
 	h.t.Helper()
 
-	for _, line := range strings.Split(ansi.Strip(h.rawView()), "\n") {
+	for line := range strings.SplitSeq(ansi.Strip(h.rawView()), "\n") {
 		cells := strings.FieldsFunc(line, func(r rune) bool { return r == '│' || r == '┃' })
 		if len(cells) > 1 && strings.Contains(cells[1], text) {
 			return cells[1]
@@ -32,10 +32,14 @@ func (h *harness) recordsCell(text string) string {
 func openProxied(t *testing.T) *harness {
 	t.Helper()
 
-	proxied := dns.Record{ProviderID: "rw3", Type: "CNAME", Name: "www.work.example", Value: "work.example", TTL: 300,
-		Extras: map[string]string{"proxied": "true", "comment": "kept"}}
-	unproxied := dns.Record{ProviderID: "rw4", Type: "A", Name: "api.work.example", Value: "192.0.2.7", TTL: 300,
-		Extras: map[string]string{"proxied": "false"}}
+	proxied := dns.Record{
+		ProviderID: "rw3", Type: "CNAME", Name: "www.work.example", Value: "work.example", TTL: 300,
+		Extras: map[string]string{"proxied": "true", "comment": "kept"},
+	}
+	unproxied := dns.Record{
+		ProviderID: "rw4", Type: "A", Name: "api.work.example", Value: "192.0.2.7", TTL: 300,
+		Extras: map[string]string{"proxied": "false"},
+	}
 
 	f := newFake().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial},
 		liveRecords[0], liveRecords[1], proxied, unproxied)
@@ -93,8 +97,10 @@ func TestAnExtraColumnGivesWayToNameAndContentInANarrowPane(t *testing.T) {
 func openCommented(t *testing.T) *harness {
 	t.Helper()
 
-	commented := dns.Record{ProviderID: "rw3", Type: "CNAME", Name: "www.work.example", Value: "work.example", TTL: 300,
-		Extras: map[string]string{"proxied": "true", "comment": "fronted by the CDN since the 2025 migration", "tags": `["env:prod","team:web"]`}}
+	commented := dns.Record{
+		ProviderID: "rw3", Type: "CNAME", Name: "www.work.example", Value: "work.example", TTL: 300,
+		Extras: map[string]string{"proxied": "true", "comment": "fronted by the CDN since the 2025 migration", "tags": `["env:prod","team:web"]`},
+	}
 
 	f := newFake().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial},
 		liveRecords[0], liveRecords[1], commented)
@@ -140,8 +146,10 @@ func TestEditingARecordKeepsItsCommentAndTags(t *testing.T) {
 
 // A comment of blanks only is not shown, and opening its Record does not fail.
 func TestABlankCommentIsNotShown(t *testing.T) {
-	blank := dns.Record{ProviderID: "rw3", Type: "CNAME", Name: "www.work.example", Value: "work.example", TTL: 300,
-		Extras: map[string]string{"comment": " \n "}}
+	blank := dns.Record{
+		ProviderID: "rw3", Type: "CNAME", Name: "www.work.example", Value: "work.example", TTL: 300,
+		Extras: map[string]string{"comment": " \n "},
+	}
 
 	f := newFake().AddZone(dns.Zone{Name: "work.example", ProviderID: "zw1", Serial: liveSerial},
 		liveRecords[0], liveRecords[1], blank)

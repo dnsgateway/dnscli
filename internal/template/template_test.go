@@ -3,6 +3,7 @@ package template_test
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"slices"
 	"testing"
@@ -454,9 +455,7 @@ func TestMailTemplatesKeepTheTagsOfAnExistingDMARC(t *testing.T) {
 					}
 				}
 
-				for k, v := range tc.edits {
-					values[k] = v
-				}
+				maps.Copy(values, tc.edits)
 
 				if name == "Proton mail" {
 					values["verification"], values["dkim1"], values["dkim2"], values["dkim3"] = "t", "a.example", "b.example", "c.example"

@@ -484,8 +484,10 @@ func TestAConflictOverAZoneNameTheAccountHoldsShowsThatZoneAsOnboarded(t *testin
 	f := onboardFake()
 	// Onboarded already, as by a create whose answer was lost: the Account
 	// holds it, pending, but the cache does not.
-	f.Provider.AddZone(dnsprovider.Zone{ID: "zh", Name: "held.example", State: dnsprovider.HostingPending,
-		Nameservers: []string{"cy.ns.cloudflare.com", "dee.ns.cloudflare.com"}})
+	f.Provider.AddZone(dnsprovider.Zone{
+		ID: "zh", Name: "held.example", State: dnsprovider.HostingPending,
+		Nameservers: []string{"cy.ns.cloudflare.com", "dee.ns.cloudflare.com"},
+	})
 
 	h := newAccountHarness(t, s, f)
 
@@ -622,7 +624,7 @@ func TestEscCancelsACreateInFlightWhichIsReadBack(t *testing.T) {
 	h.press("esc")
 	h.run(create)
 
-	h.assertShows(onboardDialog, "Cancelled", "no Zone of that name", "nothing was Onboarded")
+	h.assertShows(onboardDialog, "Canceled", "no Zone of that name", "nothing was Onboarded")
 	h.assertHides("is Onboarded", "onboarding…")
 
 	if got := zonesCached(t, s); got != before {
@@ -635,8 +637,10 @@ func TestATenantThatCannotBeSavedOnboardsNothingAndIsStillToChoose(t *testing.T)
 	f.SetTenants(twoTenants...)
 	f.SetZoneCreator(true)
 	// The credentials cannot be verified within the Tenant chosen.
-	f.Fail(providertest.OpAccount, &dnsprovider.APIError{Provider: "cloudflare", StatusCode: 403, Messages: []string{"forbidden"},
-		Kind: dnsprovider.ErrUnauthorized})
+	f.Fail(providertest.OpAccount, &dnsprovider.APIError{
+		Provider: "cloudflare", StatusCode: 403, Messages: []string{"forbidden"},
+		Kind: dnsprovider.ErrUnauthorized,
+	})
 
 	h, _ := newUpgradedHarness(t, f)
 

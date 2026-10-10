@@ -157,8 +157,10 @@ var credentialCases = []struct {
 	{"cloudflare", []string{"cf-token"}, map[string]string{"token": "cf-token"}, "cf-token"},
 	{"godaddy", []string{"gd-key", "gd-secret"}, map[string]string{"key": "gd-key", "secret": "gd-secret"}, "gd-key:gd-secret"},
 	{
-		"namecheap", []string{"apiuser", "apikey", "192.0.2.10"},
-		map[string]string{"user": "apiuser", "key": "apikey", "client_ip": "192.0.2.10"}, "apiuser:apikey:192.0.2.10",
+		"namecheap",
+		[]string{"apiuser", "apikey", "192.0.2.10"},
+		map[string]string{"user": "apiuser", "key": "apikey", "client_ip": "192.0.2.10"},
+		"apiuser:apikey:192.0.2.10",
 	},
 }
 
@@ -498,11 +500,11 @@ func TestEscCancelsVerifyingAndSavesNothing(t *testing.T) {
 
 	h.assertShows("adding…")
 	h.press("esc")
-	h.assertShows("Add Account", "Cancelled: nothing was saved.")
+	h.assertShows("Add Account", "Canceled: nothing was saved.")
 	h.assertHides("adding…")
 
 	h.send(save())
-	h.assertShows("Add Account", "Cancelled")
+	h.assertShows("Add Account", "Canceled")
 
 	if accounts, _ := s.Accounts(context.Background()); len(accounts) != 1 {
 		t.Fatalf("stored Accounts = %+v, want only cloudflare.work", accounts)

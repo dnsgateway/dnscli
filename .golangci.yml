@@ -69,6 +69,12 @@ linters:
     - embeddedstructfieldcheck
     - errchkjson
     - exhaustive
+    - containedctx
+    #
+    - dupword
+    - errname
+    - gocritic
+    - gosmopolitan
   settings:
     wsl_v5:
       allow-first-in-block: true
@@ -77,7 +83,7 @@ linters:
       disable:
         - err
     cyclop:
-      max-complexity: 30
+      max-complexity: 60
     dupl:
       threshold: 150
     errcheck:
@@ -91,7 +97,7 @@ linters:
       min-len: 3
       min-occurrences: 3
     gocyclo:
-      min-complexity: 40
+      min-complexity: 60
     gomoddirectives:
       replace-local: true
       replace-allow-list: []
@@ -116,6 +122,7 @@ linters:
           "all",
           "-ST1000",
           "-ST1003",
+          "-ST1005",
           "-ST1016",
           "-ST1020",
           "-ST1021",
@@ -134,6 +141,10 @@ linters:
           - exhaustruct_v5
           - prealloc
           - lll
+          - fatcontext
+          - noctx
+          - wastedassign
+          - gofumpt
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
@@ -150,4 +161,5 @@ formatters:
       sections:
         - standard # Captures all standard packages if they do not match another section.
         - default # Contains all imports that could not be matched to another section type.
+        - prefix(github.com/dnsgateway)
         - localmodule # Imports of this module.

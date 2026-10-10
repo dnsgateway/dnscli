@@ -8,7 +8,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
-
 	"github.com/sergelogvinov/dnscli/internal/tui"
 )
 

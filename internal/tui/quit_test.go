@@ -7,7 +7,7 @@ import (
 )
 
 // rootDone reports whether the model's root context, from which all
-// background work derives, has been cancelled.
+// background work derives, has been canceled.
 func (h *harness) rootDone() bool {
 	return h.model.(*tui.Model).Context().Err() != nil
 }
@@ -20,7 +20,7 @@ func TestQuitCancelsBackgroundWork(t *testing.T) {
 
 			h := newHarness(t, s)
 			if h.rootDone() {
-				t.Fatal("root context cancelled before quitting")
+				t.Fatal("root context canceled before quitting")
 			}
 
 			h.press(key)

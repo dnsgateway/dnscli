@@ -109,7 +109,7 @@ func (h *harness) domainCells(text string) []string {
 
 	var out []string
 
-	for _, line := range strings.Split(ansi.Strip(h.rawView()), "\n") {
+	for line := range strings.SplitSeq(ansi.Strip(h.rawView()), "\n") {
 		cells := strings.FieldsFunc(line, func(r rune) bool { return r == '│' || r == '┃' })
 		if len(cells) > 1 && strings.Contains(cells[0], text) {
 			out = append(out, cells[0])

@@ -742,7 +742,7 @@ func (m *Model) startSaving() (context.Context, context.CancelFunc, int) {
 }
 
 // cancelSaving stops the save in flight, which saves nothing, and returns
-// to the dialog. The cancelled attempt's failure is not shown.
+// to the dialog. The canceled attempt's failure is not shown.
 func (f *addAccountForm) cancelSaving() {
 	if f.cancel != nil {
 		f.cancel()
@@ -750,10 +750,10 @@ func (f *addAccountForm) cancelSaving() {
 
 	f.busy = false
 	f.attempt++
-	f.err = "Cancelled: nothing was saved."
+	f.err = "Canceled: nothing was saved."
 }
 
-// saveIfLive runs save unless ctx ended, as when the user cancelled
+// saveIfLive runs save unless ctx ended, as when the user canceled
 // while the credentials were verified.
 func saveIfLive(ctx context.Context, save func() error) error {
 	if err := ctx.Err(); err != nil {
@@ -853,7 +853,7 @@ type nameSuggestion struct{ tenant dnsprovider.Tenant }
 func (nameSuggestion) Error() string { return "the Account is named after its Tenant" }
 
 // accountSaveFailed shows in the open Account dialog why its save attempt
-// failed; a cancelled attempt has nothing to show.
+// failed; a canceled attempt has nothing to show.
 func (m *Model) accountSaveFailed(prefix string, a dns.Account, attempt int, err error) {
 	f := m.addForm
 	if f == nil || attempt != f.attempt {
@@ -897,7 +897,7 @@ func secretLabel(a dns.Account) string {
 
 // saveAccount verifies the Account's credentials with its Provider, then
 // stores the Account with them sealed by the data key, as a field map.
-// Credentials the Provider refuses save nothing, nor does a cancelled save.
+// Credentials the Provider refuses save nothing, nor does a canceled save.
 func (m *Model) saveAccount(a dns.Account, fields map[string]string) tea.Cmd {
 	key, store, providers := m.key, m.deps.Store, m.providers
 	ctx, cancel, attempt := m.startSaving()
@@ -1266,10 +1266,11 @@ func (f *addAccountForm) dialogFields(name string, values []string) []dialogFiel
 		provider = f.types[f.provider]
 	}
 
-	fields := []dialogField{
-		{label: "Provider", value: provider, choice: f.editing == nil, fixed: f.editing != nil},
-		{label: "Name", value: name},
-	}
+	fields := make([]dialogField, 0, 2+len(f.creds))
+	fields = append(fields,
+		dialogField{label: "Provider", value: provider, choice: f.editing == nil, fixed: f.editing != nil},
+		dialogField{label: "Name", value: name},
+	)
 
 	for i, fd := range f.creds {
 		fields = append(fields, dialogField{label: fd.Label, value: values[i], masked: fd.Secret, choice: picked(fd)})

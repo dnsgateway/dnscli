@@ -226,8 +226,7 @@ func (m *Model) submitTemplateForm() tea.Cmd {
 
 	changes, err := t.Changes(z.Name, current, f.values[t.Name], m.templateTTL(z.ID))
 	if err != nil {
-		var pe *template.ParamError
-		if errors.As(err, &pe) {
+		if pe, ok := errors.AsType[*template.ParamError](err); ok {
 			f.field = 1 + slices.IndexFunc(t.Params, func(p template.Param) bool { return p.Name == pe.Param })
 		}
 
@@ -395,7 +394,9 @@ func (f *templateForm) title() string {
 // dialogFields are the rows of the dialog for Template t with values: the
 // Template, then its parameters.
 func (f *templateForm) dialogFields(t template.Template, values template.Values) []dialogField {
-	fields := []dialogField{{label: "Template", value: t.Name, choice: true}}
+	fields := make([]dialogField, 0, 1+len(t.Params))
+	fields = append(fields, dialogField{label: "Template", value: t.Name, choice: true})
+
 	for _, p := range t.Params {
 		fields = append(fields, dialogField{label: p.Label, value: values[p.Name], choice: p.Choices != nil})
 	}

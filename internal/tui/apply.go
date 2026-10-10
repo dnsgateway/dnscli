@@ -289,8 +289,7 @@ func apply(ctx context.Context, s *store.Store, key *vault.Key, providers *provi
 
 	res, err := dnsprovider.Apply(ctx, p, provider.ModuleChangeset(cs))
 
-	var stale *dnsprovider.StaleError
-	if errors.As(err, &stale) {
+	if stale, ok := errors.AsType[*dnsprovider.StaleError](err); ok {
 		msg.conflicts = staleConflicts(stale)
 
 		return msg

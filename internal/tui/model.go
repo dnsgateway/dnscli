@@ -184,7 +184,7 @@ func New(ctx context.Context, deps Deps) *Model {
 }
 
 // Context is the app's root context. All background work derives from it,
-// and it is cancelled when the user quits.
+// and it is canceled when the user quits.
 func (m *Model) Context() context.Context {
 	return m.ctx
 }

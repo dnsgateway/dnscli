@@ -520,7 +520,7 @@ func TestEscCancelsAnOffboardingInFlightWhichIsReadBack(t *testing.T) {
 	h.press("esc")
 	h.run(del)
 
-	h.assertShows("Offboard work.test from cloudflare.work?", "Cancelled Offboarding work.test", "cloudflare.work still")
+	h.assertShows("Offboard work.test from cloudflare.work?", "Canceled Offboarding work.test", "cloudflare.work still")
 	h.assertHides("is Offboarded", "offboarding…")
 
 	if !zoneCached(t, s, "work.test") {

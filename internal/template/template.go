@@ -446,7 +446,7 @@ func existingDMARC(zone string, current []dns.Record) ([]string, bool) {
 func dmarcTags(value string) ([]string, bool) {
 	var tags []string
 
-	for _, tag := range strings.Split(Unquote(strings.TrimSpace(value)), ";") {
+	for tag := range strings.SplitSeq(Unquote(strings.TrimSpace(value)), ";") {
 		if tag = strings.TrimSpace(tag); tag != "" {
 			tags = append(tags, tag)
 		}

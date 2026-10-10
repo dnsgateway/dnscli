@@ -64,11 +64,7 @@ func TestConcurrentOpensOfAFreshDatabaseAllSucceed(t *testing.T) {
 
 		errs := make([]error, 4)
 		for i := range errs {
-			wg.Add(1)
-
-			go func() {
-				defer wg.Done()
-
+			wg.Go(func() {
 				s, err := store.Open(context.Background(), path)
 				if err == nil {
 					_, err = s.Accounts(context.Background())
@@ -76,7 +72,7 @@ func TestConcurrentOpensOfAFreshDatabaseAllSucceed(t *testing.T) {
 				}
 
 				errs[i] = err
-			}()
+			})
 		}
 
 		wg.Wait()

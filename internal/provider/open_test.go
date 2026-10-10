@@ -173,7 +173,7 @@ func (r *tenanted) registry() dnsprovider.Registry {
 // account-owned tokens are: it verifies only within its Tenant.
 const ownedPrefix = "owned-"
 
-// scoped is a Provider built by tenanted, which honours the Tenant it was
+// scoped is a Provider built by tenanted, which honors the Tenant it was
 // built with, as Cloudflare does: unscoped, a Tenant-owned token is
 // refused; scoped, the Account names its Tenant and expects nameservers
 // of its own, ns.<Tenant>.
@@ -352,15 +352,11 @@ func TestConcurrentOpensListTheTenantsOnce(t *testing.T) {
 	var wg sync.WaitGroup
 
 	for range 8 {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			if _, err := o.Open(context.Background(), "tenanted", creds("tok")); err != nil {
 				t.Errorf("Open: %v", err)
 			}
-		}()
+		})
 	}
 
 	wg.Wait()

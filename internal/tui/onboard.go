@@ -118,7 +118,7 @@ func (m *Model) closeOnboard() {
 // p is nil when it failed. fields are the credentials it was built from,
 // and ctx the opening's, which names their Tenant next.
 type onboardOpenedMsg struct {
-	ctx     context.Context //nolint:containedctx // the opening's, cancelled with it
+	ctx     context.Context //nolint:containedctx // the opening's, canceled with it
 	account dns.Account
 	attempt int
 	p       dnsprovider.Provider
@@ -151,8 +151,8 @@ type zoneOnboardedMsg struct {
 	unsaid bool
 	// err is why the Provider failed the Onboarding.
 	err error
-	// cancelled is set when the user cancelled it.
-	cancelled bool
+	// canceled is set when the user canceled it.
+	canceled bool
 	// readBack is why reading back a create whose answer was lost, or
 	// that was refused as held already, failed.
 	readBack error
@@ -247,7 +247,7 @@ func (m *Model) chooseOnboardAccount(i int) tea.Cmd {
 }
 
 // openOnboardProvider opens the Provider of the chosen Account, as it is
-// now, cancelling an opening in flight. A Tenant the Account acts within
+// now, canceling an opening in flight. A Tenant the Account acts within
 // is asked for in the dialog, not the Tenant picker.
 func (m *Model) openOnboardProvider() tea.Cmd {
 	d := m.onboard
@@ -483,8 +483,10 @@ func (m *Model) onboardSelect() tea.Cmd {
 
 		d.picker = &picker{title: "Account", options: labels, cursor: d.account, pick: func(i int) { d.picked = m.chooseOnboardAccount(i) }}
 	case d.choosesTenant():
-		d.picker = &picker{title: "Tenant of " + d.chosen().Label(), options: tenantOptions(d.tenants), cursor: d.tenantAt,
-			pick: func(i int) { d.tenantAt = i }}
+		d.picker = &picker{
+			title: "Tenant of " + d.chosen().Label(), options: tenantOptions(d.tenants), cursor: d.tenantAt,
+			pick: func(i int) { d.tenantAt = i },
+		}
 	case d.field != onboardFieldName:
 		d.field = onboardFieldName
 	default:
@@ -635,8 +637,10 @@ func onboard(ctx, parent context.Context, s *store.Store, p dnsprovider.ZoneCrea
 
 		held, rerr := readBack(parent, p, name)
 		if rerr != nil || held.ID == "" {
-			return zoneOnboardedMsg{account: a, name: name, err: err, cancelled: errors.Is(err, context.Canceled),
-				readBack: rerr}
+			return zoneOnboardedMsg{
+				account: a, name: name, err: err, canceled: errors.Is(err, context.Canceled),
+				readBack: rerr,
+			}
 		}
 
 		mz = held
@@ -785,8 +789,8 @@ func (m *Model) onboardTenantFailed(d *onboardDialog, msg zoneOnboardedMsg) tea.
 // may hold it all the same.
 func (m *Model) onboardError(msg zoneOnboardedMsg) string {
 	text := "Could not Onboard " + msg.name + ": " + strings.TrimSuffix(msg.err.Error(), ".") + "."
-	if msg.cancelled {
-		text = "Cancelled Onboarding " + msg.name + "."
+	if msg.canceled {
+		text = "Canceled Onboarding " + msg.name + "."
 	}
 
 	if !answerLost(msg.err) {

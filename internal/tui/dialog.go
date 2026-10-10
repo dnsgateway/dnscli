@@ -132,7 +132,7 @@ func wrapNote(style lipgloss.Style, text string, w int) []string {
 
 	line := ""
 
-	for _, word := range strings.Fields(text) {
+	for word := range strings.FieldsSeq(text) {
 		if line != "" && lipgloss.Width(line)+1+lipgloss.Width(word) > w {
 			lines = append(lines, style.Render(line))
 			line = ""

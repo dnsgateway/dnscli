@@ -239,7 +239,7 @@ func TestTheAddAccountDialogTypesKeysThatAreBoundToActions(t *testing.T) {
 	h.assertHides("Add Account", "Choose a passphrase")
 
 	if accounts, _ := s.Accounts(context.Background()); len(accounts) != 0 {
-		t.Fatalf("a cancelled dialog stored %+v", accounts)
+		t.Fatalf("a canceled dialog stored %+v", accounts)
 	}
 
 	h.press("i", "ctrl+c")

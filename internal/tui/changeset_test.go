@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/dnsgateway/dnsprovider"
-
 	"github.com/dnsgateway/dnsprovider/providertest"
 
 	"github.com/sergelogvinov/dnscli/internal/dns"

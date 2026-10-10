@@ -226,8 +226,10 @@ func (m *Model) refreshCmd(z dns.Zone, a dns.Account, r *zoneRefresh) tea.Cmd {
 	return func() tea.Msg {
 		res := refresh(ctx, s, key, providers, a, z, q, now)
 
-		return zoneRefreshedMsg{zoneID: z.ID, state: r, zone: res.zone, caps: res.caps, err: res.err,
-			statusErr: res.statusErr, serialFailed: res.serialFailed}
+		return zoneRefreshedMsg{
+			zoneID: z.ID, state: r, zone: res.zone, caps: res.caps, err: res.err,
+			statusErr: res.statusErr, serialFailed: res.serialFailed,
+		}
 	}
 }
 

@@ -15,8 +15,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/dnsgateway/dnsprovider"
 	"github.com/muesli/termenv"
+
+	"github.com/dnsgateway/dnsprovider"
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
 	"github.com/sergelogvinov/dnscli/internal/store"
@@ -295,19 +296,19 @@ func (h *harness) highlighted(text string) bool {
 // styledWith reports whether text, on the first line that contains it, is
 // drawn with the given SGR attribute (e.g. "2" for faint, "7" for reverse).
 func styledWith(raw, text, attr string) bool {
-	for _, line := range strings.Split(raw, "\n") {
-		i := strings.Index(line, text)
-		if i < 0 {
+	for line := range strings.SplitSeq(raw, "\n") {
+		before, _, ok := strings.Cut(line, text)
+		if !ok {
 			continue
 		}
 
-		return sgrAttrs(line[:i])[attr]
+		return sgrAttrs(before)[attr]
 	}
 
 	return false
 }
 
-// sgrAttrs returns the SGR attributes in effect at the end of s. Colour
+// sgrAttrs returns the SGR attributes in effect at the end of s. Color
 // arguments, such as the 5;7 in 38;5;7, are skipped rather than read as
 // attributes.
 func sgrAttrs(s string) map[string]bool {
@@ -338,7 +339,7 @@ func sgrAttrs(s string) map[string]bool {
 			switch p := ps[j]; p {
 			case "", "0":
 				clear(attrs)
-			case "38", "48", "58": // extended colour: 5;n or 2;r;g;b
+			case "38", "48", "58": // extended color: 5;n or 2;r;g;b
 				if j+1 < len(ps) && ps[j+1] == "5" {
 					j += 2
 				} else if j+1 < len(ps) && ps[j+1] == "2" {

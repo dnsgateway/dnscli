@@ -68,8 +68,8 @@ type zoneOffboardedMsg struct {
 	err error
 	// sent is set when the delete was sent, so it may have been taken.
 	sent bool
-	// cancelled is set when the user cancelled it.
-	cancelled bool
+	// canceled is set when the user canceled it.
+	canceled bool
 	// held is set when reading back a failed delete found the Zone still
 	// at the Provider.
 	held bool
@@ -393,7 +393,7 @@ func (m *Model) deleteZone(d *offboardDialog) tea.Cmd {
 
 		switch {
 		case err != nil:
-			msg.err, msg.cancelled = err, errors.Is(err, context.Canceled)
+			msg.err, msg.canceled = err, errors.Is(err, context.Canceled)
 
 			return msg
 		case !ok && reach.everyErr != nil:
@@ -414,7 +414,7 @@ func (m *Model) deleteZone(d *offboardDialog) tea.Cmd {
 
 			switch {
 			case err != nil:
-				msg.err, msg.cancelled = err, errors.Is(err, context.Canceled)
+				msg.err, msg.canceled = err, errors.Is(err, context.Canceled)
 
 				return msg
 			case !own:
@@ -452,7 +452,7 @@ func (m *Model) deleteZone(d *offboardDialog) tea.Cmd {
 			rcancel()
 
 			if rerr != nil || still {
-				msg.err, msg.cancelled, msg.readBack, msg.held = err, errors.Is(err, context.Canceled), rerr, still
+				msg.err, msg.canceled, msg.readBack, msg.held = err, errors.Is(err, context.Canceled), rerr, still
 
 				return msg
 			}
@@ -524,8 +524,7 @@ func answered(err error) bool {
 		return true
 	}
 
-	var apiErr *dnsprovider.APIError
-	if errors.As(err, &apiErr) {
+	if apiErr, ok := errors.AsType[*dnsprovider.APIError](err); ok {
 		return apiErr.StatusCode < http.StatusInternalServerError
 	}
 
@@ -605,8 +604,8 @@ func (m *Model) zoneOffboarded(msg zoneOffboardedMsg) tea.Cmd {
 // Zone, or, when the read failed, that it may be Offboarded all the same.
 func (m *Model) offboardError(msg zoneOffboardedMsg) string {
 	text := "Could not Offboard " + msg.zone.Name + ": " + strings.TrimSuffix(msg.err.Error(), ".") + "."
-	if msg.cancelled {
-		text = "Cancelled Offboarding " + msg.zone.Name + "."
+	if msg.canceled {
+		text = "Canceled Offboarding " + msg.zone.Name + "."
 	}
 
 	switch {

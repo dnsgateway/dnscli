@@ -197,11 +197,11 @@ func TestCancellingTheRemovalKeepsTheAccountAndTypesBoundKeys(t *testing.T) {
 	h.assertHides("Remove Account")
 
 	if names := zoneNames(t, s); len(names) != 2 {
-		t.Fatalf("a cancelled removal changed the cached Zones: %v", names)
+		t.Fatalf("a canceled removal changed the cached Zones: %v", names)
 	}
 
 	if accounts, _ := s.Accounts(ctx); len(accounts) != 1 {
-		t.Fatalf("a cancelled removal changed the Accounts: %+v", accounts)
+		t.Fatalf("a canceled removal changed the Accounts: %+v", accounts)
 	}
 
 	h.press("d", "ctrl+c")

@@ -195,7 +195,7 @@ func (m *Model) zoneWriteOffered(a Action) bool {
 	return true
 }
 
-// overlay draws fg centred on top of bg.
+// overlay draws fg centered on top of bg.
 func overlay(bg, fg string, width, height int) string {
 	bgLines := strings.Split(bg, "\n")
 	fgLines := strings.Split(fg, "\n")
