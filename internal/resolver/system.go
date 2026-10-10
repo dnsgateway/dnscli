@@ -1,10 +1,11 @@
 // Package resolver asks the system DNS resolver, the servers listed in
-// /etc/resolv.conf, for the answers dnscli uses as freshness hints, and
-// asks a Zone's own nameservers directly for its SOA serial (SOAAt).
+// /etc/resolv.conf, for the answers dnscli uses as freshness hints, asks a
+// Zone's own nameservers directly for its SOA serial (SOAAt), and asks the
+// parent zone's nameservers directly for its DS records (DSAt).
 //
 // The queries through the system resolver are verified by hand, not by the
-// automated suite; reading resolv.conf has tests, and SOAAt is tested
-// against an in-process nameserver.
+// automated suite; reading resolv.conf has tests, and SOAAt and DSAt are
+// tested against an in-process nameserver.
 package resolver
 
 import (
@@ -30,6 +31,11 @@ const ResolvConf = "/etc/resolv.conf"
 type System struct {
 	// Path is the resolv.conf file to read; ResolvConf when empty.
 	Path string
+
+	// port, when set, is the port every query goes to instead of 53, for
+	// the system resolver and for the nameservers found by name alike;
+	// tests use it for an in-process nameserver.
+	port string
 
 	mu     sync.Mutex
 	read   bool      // config and err hold a read of the file
@@ -131,7 +137,7 @@ func (s *System) exchange(ctx context.Context, q *mdns.Msg) (*mdns.Msg, error) {
 	var errs []error
 
 	for _, server := range config.Servers {
-		r, err := exchangeAt(ctx, net.JoinHostPort(server, config.Port), q)
+		r, err := exchangeAt(ctx, net.JoinHostPort(server, s.portOr(config.Port)), q)
 
 		switch {
 		case err != nil:
@@ -195,6 +201,15 @@ func (s *System) load() (*mdns.ClientConfig, error) {
 	}
 
 	return s.config, s.err
+}
+
+// portOr is the port queries go to: port unless the System overrides it.
+func (s *System) portOr(port string) string {
+	if s.port != "" {
+		return s.port
+	}
+
+	return port
 }
 
 func (s *System) path() string {
