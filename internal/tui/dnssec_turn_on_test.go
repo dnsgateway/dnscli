@@ -2,10 +2,12 @@ package tui_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/dnsgateway/dnsprovider"
+	"github.com/dnsgateway/dnsprovider/providertest"
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
 	"github.com/sergelogvinov/dnscli/internal/store"
@@ -155,4 +157,69 @@ func TestAnUnsignedZoneIsOfferedToTurnDNSSECOnThroughTheConfirmation(t *testing.
 
 	// The Provider signs it over time: its nameservers serve no keys yet.
 	h.assertStatusBarShows("DNSSEC: waiting for nameservers to serve the keys")
+}
+
+// assertNoTurningOn checks that the Zone page shows DNSSEC off but offers
+// no way to turn it on, and that asking anyway changes nothing but says
+// why, in the status line.
+func assertNoTurningOn(t *testing.T, h *harness, f *fakeProvider, why string) {
+	t.Helper()
+
+	h.assertStatusBarShows("DNSSEC: off")
+	h.assertHides("turns it on")
+
+	h.press("S")
+	h.assertHides("Turn DNSSEC on for")
+	h.assertStatusLineShows(why)
+
+	if calls := updateZoneCalls(f); len(calls) != 0 {
+		t.Fatalf("UpdateZone calls = %+v, want none", calls)
+	}
+}
+
+func TestASealedSessionSeesDNSSECOffButIsOfferedNoWayToTurnItOn(t *testing.T) {
+	c := &turnOnClock{now: testNow}
+	r := &fakeResolver{}
+	r.setKeys(rfcZone)
+	r.setDS(rfcZone)
+	f := turnOnFake(dnsprovider.Off)
+
+	_, s := newTurnOnHarness(t, f, r, c)
+	h := restart(t, s, f, r, c)
+
+	assertNoTurningOn(t, h, f, "The session is sealed")
+}
+
+func TestAStaleZoneSeesDNSSECOffButIsOfferedNoWayToTurnItOn(t *testing.T) {
+	c := &turnOnClock{now: testNow}
+	r := &fakeResolver{}
+	r.setKeys(rfcZone)
+	r.setDS(rfcZone)
+	f := turnOnFake(dnsprovider.Off)
+
+	h, _ := newTurnOnHarness(t, f, r, c)
+
+	// A Refresh that fails leaves the Zone Stale.
+	f.Fail(providertest.OpRecords, errors.New("api.cloudflare.com: i/o timeout"))
+	h.press("right", "r")
+	h.assertHides("validated this session")
+
+	assertNoTurningOn(t, h, f, "is not validated this session")
+}
+
+func TestAProviderThatCannotTurnDNSSECOnIsToldToInItsOwnPanel(t *testing.T) {
+	c := &turnOnClock{now: testNow}
+	r := &fakeResolver{}
+	r.setKeys(rfcZone)
+	r.setDS(rfcZone)
+	f := turnOnFake(dnsprovider.Off)
+	f.SetZoneUpdater(false)
+
+	h, _ := newTurnOnHarness(t, f, r, c)
+
+	h.assertStatusBarShows("DNSSEC: off (turn it on in cloudflare.work's panel)")
+
+	h.press("S")
+	h.assertHides("Turn DNSSEC on for")
+	h.assertStatusLineShows("turn it on in its own panel")
 }
