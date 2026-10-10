@@ -106,3 +106,25 @@ func TestTheDSCanBePublishedOnceTheLargestTTLHasPassedSinceSigningWasFirstSeenEv
 	h = restart(t, s, f, r, c)
 	h.assertStatusBarShows("DNSSEC: publish the DS")
 }
+
+func TestAZoneSeenUnsignedWaitsAfreshOnceItIsSignedAgain(t *testing.T) {
+	c := &turnOnClock{now: testNow}
+	r := &fakeResolver{}
+	r.setKeys(rfcZone)
+	r.setDS(rfcZone)
+	f := turnOnFake(dnsprovider.Off)
+
+	_, s := newTurnOnHarness(t, f, r, c)
+
+	// It was signed once, long ago; the next session sees it unsigned.
+	seenSigned(t, s, rfcZone, testNow.Add(-24*time.Hour))
+	h := restart(t, s, f, r, c)
+	h.assertHides("publish the DS", "can be published")
+
+	// Signed again by 12:30: the wait starts then.
+	c.now = testNow.Add(30 * time.Minute)
+	r.setKeys(rfcZone, rfcKey)
+	h = restart(t, s, f, r, c)
+
+	h.assertStatusBarShows("DNSSEC: DS can be published after 13:30")
+}
