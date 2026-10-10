@@ -1,11 +1,12 @@
 // Package resolver asks the system DNS resolver, the servers listed in
 // /etc/resolv.conf, for the answers dnscli uses as freshness hints, asks a
-// Zone's own nameservers directly for its SOA serial (SOAAt), and asks the
-// parent zone's nameservers directly for its DS records (DSAt).
+// Zone's own nameservers directly for its SOA serial (SOAAt) and its
+// key-signing keys (DNSKEYAt), and asks the parent zone's nameservers
+// directly for its DS records (DSAt).
 //
 // The queries through the system resolver are verified by hand, not by the
-// automated suite; reading resolv.conf has tests, and SOAAt and DSAt are
-// tested against an in-process nameserver.
+// automated suite; reading resolv.conf has tests, and SOAAt, DNSKEYAt and
+// DSAt are tested against an in-process nameserver.
 package resolver
 
 import (
