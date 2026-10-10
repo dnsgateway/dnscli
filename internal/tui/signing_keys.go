@@ -42,13 +42,13 @@ func (m *Model) checkDNSSEC(z dns.Zone) tea.Cmd {
 
 // checkSigningKeys queues a lookup of the key-signing keys a Zone's own
 // nameservers serve, unless one is queued or in flight, under the limit
-// the Delegation lookups share. A Zone its Provider reports unsigned, one
-// known not to be the Live Zone, and one whose nameservers are not known
-// are not looked up.
+// the Delegation lookups share. A Zone known not to be the Live Zone, and
+// one whose nameservers are not known, are not looked up. One its
+// Provider reports unsigned is: a DS at its parent then matches none.
 func (m *Model) checkSigningKeys(z dns.Zone) tea.Cmd {
 	servers := m.nameserversOf(z)
 
-	if m.deps.Resolver == nil || z.Status.DNSSEC == dnsprovider.Off || m.liveness(z) == liveNo || len(servers) == 0 {
+	if m.deps.Resolver == nil || m.liveness(z) == liveNo || len(servers) == 0 {
 		return nil
 	}
 
@@ -126,6 +126,12 @@ func (m *Model) dnssecState(z dns.Zone) (string, lipgloss.Style) {
 	}
 
 	if len(c.keys) == 0 {
+		// A DS at the parent of a Zone that serves no keys fails
+		// validation, whatever its Provider reports.
+		if m.dsPresenceOf(z.Name) == dsServed {
+			return "DNSSEC: DS does not match", errorStyle
+		}
+
 		if z.Status.DNSSEC == dnsprovider.On || z.Status.DNSSEC == dnsprovider.Pending {
 			return waitingForKeys, badgePendingStyle
 		}

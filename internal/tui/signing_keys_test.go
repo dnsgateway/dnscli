@@ -29,8 +29,16 @@ var rfcKey = dns.SigningKey{DNSKEY: rfcDNSKEY, DS: []string{rfcDS}}
 func newSignedZoneHarness(t *testing.T, r *fakeResolver) *harness {
 	t.Helper()
 
+	return newKeysHarness(t, r, dnsprovider.On)
+}
+
+// newKeysHarness is newSignedZoneHarness with the Zone's DNSSEC as its
+// Provider reports it.
+func newKeysHarness(t *testing.T, r *fakeResolver, dnssec dnsprovider.Setting) *harness {
+	t.Helper()
+
 	f := newFake().AddZone(dns.Zone{Name: rfcZone, ProviderID: "zd1", Nameservers: cruzDee})
-	f.SetZoneStatus("zd1", dnsprovider.ZoneStatus{DNSSEC: dnsprovider.On})
+	f.SetZoneStatus("zd1", dnsprovider.ZoneStatus{DNSSEC: dnssec})
 
 	if r.ns == nil {
 		r.ns = map[string][]string{}
@@ -138,4 +146,18 @@ func TestAFailedDSCheckWithKeysShowsUnknown(t *testing.T) {
 
 	h.assertStatusBarShows("DNSSEC: unknown")
 	h.assertHides("DNSSEC: On", "does not match", "publish the DS")
+}
+
+func TestAParentDSForAZoneThatServesNoKeysSaysItDoesNotMatch(t *testing.T) {
+	for _, dnssec := range []dnsprovider.Setting{dnsprovider.Off, dnsprovider.Unknown, dnsprovider.On} {
+		t.Run(dnssec.String(), func(t *testing.T) {
+			r := &fakeResolver{}
+			r.setKeys(rfcZone)
+			r.setDS(rfcZone, rfcDS)
+			h := newKeysHarness(t, r, dnssec)
+
+			h.assertStatusBarShows("DNSSEC: DS does not match")
+			h.assertBadges(map[string]string{"DNSSEC: DS does not match": red})
+		})
+	}
 }
