@@ -270,3 +270,51 @@ func TestTheKeysAProviderReturnsAreUsedWithoutAskingTheNameservers(t *testing.T)
 		t.Fatal("the Provider was not asked for the signing keys")
 	}
 }
+
+func TestKeysAProviderFailsToReturnAreAskedOfTheNameservers(t *testing.T) {
+	for name, err := range map[string]error{
+		"unauthorized": dnsprovider.ErrUnauthorized,
+		"unreachable":  errors.New("api.cloudflare.com: i/o timeout"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newKeysFake(dnsprovider.On)
+			f.SetSigningKeys("zd1", rfcProviderKey)
+			f.Fail(providertest.OpSigningKeys, err)
+
+			r := &fakeResolver{}
+			r.setKeys(rfcZone, ecKey)
+			r.setDS(rfcZone)
+			h := newKeysHarnessWith(t, f, r)
+
+			h.assertStatusBarShows("DNSSEC: publish the DS")
+			h.assertHides("DNSSEC: unknown")
+
+			if q := r.keysQueries(); len(q) == 0 || q[0].zone != rfcZone || !slices.Equal(q[0].servers, cruzDee) {
+				t.Fatalf("DNSKEY queries = %+v, want %s asked at its nameservers %v", q, rfcZone, cruzDee)
+			}
+
+			h.press("s")
+			h.assertShows(ecKey.DNSKEY)
+			h.assertHides(rfcDNSKEY)
+		})
+	}
+}
+
+func TestTheKeysOfAProviderWithoutAKeyReaderAreAskedOfTheNameservers(t *testing.T) {
+	f := newKeysFake(dnsprovider.On)
+
+	r := &fakeResolver{}
+	r.setKeys(rfcZone, rfcKey)
+	r.setDS(rfcZone, rfcDS)
+	h := newKeysHarnessWith(t, f, r)
+
+	h.assertStatusBarShows("DNSSEC: On")
+
+	if q := r.keysQueries(); len(q) == 0 || q[0].zone != rfcZone {
+		t.Fatalf("DNSKEY queries = %+v, want %s asked at its nameservers", q, rfcZone)
+	}
+
+	if n := f.count(providertest.OpSigningKeys); n != 0 {
+		t.Fatalf("the Provider was asked for the signing keys %d times without a KeyReader", n)
+	}
+}
