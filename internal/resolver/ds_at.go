@@ -10,6 +10,8 @@ import (
 	"time"
 
 	mdns "github.com/miekg/dns"
+
+	"github.com/sergelogvinov/dnscli/internal/dns"
 )
 
 // DSAt returns the Delegation Signer (DS) records the parent zone serves
@@ -162,7 +164,7 @@ func dsFrom(ctx context.Context, addr string, q *mdns.Msg, parent string) ([]str
 			ttl = d.Hdr.Ttl
 		}
 
-		ds = append(ds, fmt.Sprintf("%d %d %d %s", d.KeyTag, d.Algorithm, d.DigestType, strings.ToUpper(d.Digest)))
+		ds = append(ds, dns.DSText(d))
 	}
 
 	slices.Sort(ds)

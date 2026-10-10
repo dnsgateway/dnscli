@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -139,15 +140,12 @@ func keysFrom(ctx context.Context, addr string, q *mdns.Msg) ([]dns.SigningKey, 
 			continue // a zone-signing key, or a revoked key
 		}
 
-		ds := k.ToDS(mdns.SHA256)
-		if ds == nil {
-			return nil, fmt.Errorf("cannot compute the DS of the key with tag %d", k.KeyTag())
+		key, err := dns.SigningKeyOf(k)
+		if err != nil {
+			return nil, err
 		}
 
-		keys = append(keys, dns.SigningKey{
-			DNSKEY: fmt.Sprintf("%d %d %d %s", k.Flags, k.Protocol, k.Algorithm, k.PublicKey),
-			DS:     []string{fmt.Sprintf("%d %d %d %s", ds.KeyTag, ds.Algorithm, ds.DigestType, strings.ToUpper(ds.Digest))},
-		})
+		keys = append(keys, key)
 	}
 
 	slices.SortFunc(keys, func(a, b dns.SigningKey) int { return strings.Compare(a.DNSKEY, b.DNSKEY) })
@@ -182,7 +180,7 @@ func keyTags(keys []dns.SigningKey) string {
 
 	tags := make([]string, len(keys))
 	for i, k := range keys {
-		tags[i] = strings.Fields(k.DS[0])[0]
+		tags[i] = strconv.Itoa(int(k.KeyTag))
 	}
 
 	return "the keys with tags " + strings.Join(tags, ", ")
