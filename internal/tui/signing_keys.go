@@ -83,30 +83,30 @@ func (m *Model) lookUpSigningKeys(z dns.Zone) tea.Cmd {
 const keyReadTimeout = 10 * time.Second
 
 // keyReadFor returns what reads a Zone's key-signing keys through its
-// Provider's API, for a Key Lookup to prefer over asking its nameservers:
-// ok is false when they cannot be read that way, as the session is
-// sealed or the Provider has no dnsprovider.KeyReader, when it returns
-// none, as it has them only once it signs the Zone, or when the read
+// Provider's API, for a Key Lookup to prefer over asking its nameservers,
+// or nil when the session is sealed or the Zone or its Account is gone.
+// ok is false when the Provider has no dnsprovider.KeyReader or returns
+// no keys, as it has them only when it signs the Zone, or when the read
 // fails, whatever the reason.
 func (m *Model) keyReadFor(zoneID int64) func(ctx context.Context) (keys []dns.SigningKey, ok bool) {
 	z, found := m.zoneByID[zoneID]
 	a, known := m.account(z.AccountID)
 	s, key, providers := m.deps.Store, m.key, m.providers
 
-	return func(ctx context.Context) ([]dns.SigningKey, bool) {
-		if !found || !known || key == nil {
-			return nil, false
-		}
+	if !found || !known || key == nil {
+		return nil
+	}
 
+	return func(ctx context.Context) ([]dns.SigningKey, bool) {
 		ctx, cancel := context.WithTimeout(ctx, keyReadTimeout)
 		defer cancel()
 
 		p, _, err := accountProvider(ctx, s, key, providers, a)
-		if err != nil || !dnsprovider.CanReadKeys(p) {
+		if err != nil {
 			return nil, false
 		}
 
-		keys, err := p.(dnsprovider.KeyReader).SigningKeys(ctx, provider.ModuleZone(z))
+		keys, err := dnsprovider.SigningKeysOf(ctx, p, provider.ModuleZone(z))
 		if err != nil || len(keys) == 0 {
 			return nil, false
 		}
