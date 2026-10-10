@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/sergelogvinov/dnscli/internal/dns"
 	"github.com/sergelogvinov/dnscli/internal/store"
 	"github.com/sergelogvinov/dnscli/internal/tui"
 )
@@ -37,7 +38,13 @@ type fakeResolver struct {
 	ds     map[string][]string
 	dsErrs map[string]error
 
-	mu      sync.Mutex
+	// keys are the key-signing keys each zone's own nameservers agree on,
+	// and keysErrs fail those queries; a zone with neither has none.
+	keys     map[string][]dns.SigningKey
+	keysErrs map[string]error
+
+	mu        sync.Mutex
+	keysAsked []soaAtQuery // DNSKEY queries, each with the servers asked
 	nsAsked []string // zone names asked for NS, in order
 	atAsked []soaAtQuery
 	dsAsked []string // zone names whose parent was asked for DS, in order
@@ -95,6 +102,52 @@ func (r *fakeResolver) dsQueries() []string {
 	defer r.mu.Unlock()
 
 	return slices.Clone(r.dsAsked)
+}
+
+// setKeys scripts the key-signing keys a zone's own nameservers agree on.
+func (r *fakeResolver) setKeys(zone string, keys ...dns.SigningKey) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.keys == nil {
+		r.keys = map[string][]dns.SigningKey{}
+	}
+
+	r.keys[zone] = slices.Clone(keys)
+	delete(r.keysErrs, zone)
+}
+
+// failKeys fails the DNSKEY queries to a zone's nameservers with err.
+func (r *fakeResolver) failKeys(zone string, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.keysErrs == nil {
+		r.keysErrs = map[string]error{}
+	}
+
+	r.keysErrs[zone] = err
+}
+
+func (r *fakeResolver) DNSKEYAt(_ context.Context, zone string, servers []string) ([]dns.SigningKey, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.keysAsked = append(r.keysAsked, soaAtQuery{zone: zone, servers: slices.Clone(servers)})
+
+	if err, ok := r.keysErrs[zone]; ok {
+		return nil, err
+	}
+
+	return slices.Clone(r.keys[zone]), nil
+}
+
+// keysQueries returns the DNSKEY queries sent to Zones' nameservers so far.
+func (r *fakeResolver) keysQueries() []soaAtQuery {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return slices.Clone(r.keysAsked)
 }
 
 // soaAtQuery is one SOA query sent straight to a Zone's nameservers.

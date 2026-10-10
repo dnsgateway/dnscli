@@ -95,8 +95,14 @@ type Model struct {
 	// parentDS is what this session found of the DS each zone name's
 	// parent serves, by nameKey.
 	parentDS map[string]*dsCheck
-	// lookups schedules the Delegation lookups and the DS Checks, under
-	// one limit.
+	// signingKeys is what this session read of each Zone's key-signing
+	// keys from its own nameservers, by Zone ID.
+	signingKeys map[int64]*keyCheck
+	// showKeys shows the open Zone's key-signing keys and their DS, to
+	// copy into a registrar's panel.
+	showKeys bool
+	// lookups schedules the Delegation lookups, the DS Checks and the key
+	// lookups, under one limit.
 	lookups workQueue[lookupJob]
 
 	// addForm is the add-Account dialog; nil when closed.
@@ -321,6 +327,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.recordDSCheck(msg)
 
 		return m, m.lookupAnswered()
+	case keysCheckedMsg:
+		m.recordKeysCheck(msg)
+
+		return m, m.lookupAnswered()
 	case serialCheckedMsg:
 		return m, m.serialChecked(msg)
 	case zoneRefreshedMsg:
@@ -385,7 +395,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.cursor[paneRecords] = 0
 
-		return m, tea.Batch(m.refreshZone(*m.open), m.checkParentDS(*m.open))
+		return m, tea.Batch(m.refreshZone(*m.open), m.checkDNSSEC(*m.open))
 	case tea.KeyMsg:
 		if m.unseal != nil {
 			return m, m.unsealKey(msg)
@@ -461,6 +471,16 @@ func (m *Model) handle(a Action) tea.Cmd {
 		return nil
 	}
 
+	if m.showKeys {
+		// So does the keys overlay.
+		switch a {
+		case ActionShowKeys, ActionClose:
+			m.showKeys = false
+		}
+
+		return nil
+	}
+
 	switch a {
 	case ActionNone, ActionUp, ActionDown, ActionPageUp, ActionPageDown:
 	default:
@@ -470,6 +490,8 @@ func (m *Model) handle(a Action) tea.Cmd {
 	switch a {
 	case ActionHelp:
 		m.help = true
+	case ActionShowKeys:
+		m.openKeys()
 	case ActionNextPane:
 		m.focus = (m.focus + 1) % paneCount
 	case ActionPrevPane:

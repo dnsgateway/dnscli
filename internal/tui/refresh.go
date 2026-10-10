@@ -125,14 +125,14 @@ func (m *Model) rateLimited(r zoneRefresh) bool {
 }
 
 // retryRefresh Refreshes the open Zone at the user's request, or explains
-// why it cannot. Either way it checks the DS at the parent again, which
-// needs no secrets.
+// why it cannot. Either way it checks the DS at the parent and the keys
+// at the Zone's nameservers again, which need no secrets.
 func (m *Model) retryRefresh() tea.Cmd {
 	if m.open == nil {
 		return nil
 	}
 
-	return tea.Batch(m.checkParentDS(*m.open), m.refreshOpenZone())
+	return tea.Batch(m.checkDNSSEC(*m.open), m.refreshOpenZone())
 }
 
 // refreshOpenZone Refreshes the open Zone, or explains why it cannot.

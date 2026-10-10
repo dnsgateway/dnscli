@@ -89,6 +89,8 @@ func (m *Model) View() string {
 	switch {
 	case m.help:
 		view = overlay(view, m.helpView(), m.width, m.height)
+	case m.showKeys:
+		view = overlay(view, m.keysView(), m.width, m.height)
 	case m.unseal != nil:
 		view = overlay(view, m.unsealView(), m.width, m.height)
 	case m.addForm != nil:

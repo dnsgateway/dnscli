@@ -12,7 +12,7 @@ import (
 )
 
 // lookup is how far this session has got with a zone name's Delegation
-// lookup or its DS Check.
+// lookup or its DS Check, or with a Zone's key lookup.
 type lookup int
 
 const (
@@ -49,7 +49,8 @@ type delegationMsg struct {
 // zone name however many Accounts have it, and again for every name whose
 // lookup failed or whose result is older than delegationTTL: once per
 // reload, like the Serial Checks. It forgets the Delegations and DS Checks
-// of the names that left the cache.
+// of the names that left the cache, and the key lookups of the Zones that
+// did.
 func (m *Model) queueLookups() tea.Cmd {
 	if m.deps.Resolver == nil {
 		return nil
@@ -96,6 +97,13 @@ func (m *Model) queueLookups() tea.Cmd {
 		}
 	}
 
+	for id := range m.signingKeys {
+		if _, ok := m.zoneByID[id]; !ok {
+			delete(m.signingKeys, id)
+			m.lookups.drop(lookupJob{kind: lookupKeys, zoneID: id})
+		}
+	}
+
 	return m.startLookups()
 }
 
@@ -121,17 +129,19 @@ type lookupKind int
 const (
 	lookupDelegation lookupKind = iota // the zone name's Delegation
 	lookupDS                           // the DS its parent serves: a DS Check
+	lookupKeys                         // a Zone's key-signing keys
 )
 
-// lookupJob is one lookup the lookups queue schedules for a zone name, by
-// nameKey.
+// lookupJob is one lookup the lookups queue schedules: for a zone name, by
+// nameKey, or, for a key lookup, for a Zone, by ID.
 type lookupJob struct {
-	kind lookupKind
-	name string
+	kind   lookupKind
+	name   string
+	zoneID int64
 }
 
-// startLookups starts queued Delegation lookups and DS Checks, which
-// share one limit, up to it.
+// startLookups starts queued Delegation lookups, DS Checks and key
+// lookups, which share one limit, up to it.
 func (m *Model) startLookups() tea.Cmd {
 	var cmds []tea.Cmd
 
@@ -170,6 +180,20 @@ func (m *Model) startLookup(job lookupJob) tea.Cmd {
 			ds, _, err := resolver.DSAt(ctx, k)
 
 			return dsCheckedMsg{name: k, ds: ds, err: err}
+		}
+	case lookupKeys:
+		c, ok := m.signingKeys[job.zoneID]
+		if !ok {
+			return nil
+		}
+
+		c.state = lookupResolving
+		id, zone, servers := job.zoneID, c.zone, c.servers
+
+		return func() tea.Msg {
+			keys, err := resolver.DNSKEYAt(ctx, zone, servers)
+
+			return keysCheckedMsg{zoneID: id, keys: keys, err: err}
 		}
 	default:
 		d, ok := m.delegations[k]

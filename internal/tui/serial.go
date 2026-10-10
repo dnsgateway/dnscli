@@ -27,25 +27,32 @@ type serialQuery struct {
 // hold back every Refresh by serialQueryTimeout.
 const serialQueryBackoff = 5 * time.Minute
 
-// serialQueryFor returns the query for a Zone's serial: at the nameservers
-// its Provider assigned it, else at its Delegation as this session
-// resolved it. A zone name in several Accounts has no fallback: its
-// Delegation may name another copy's nameservers. A Zone whose query
-// failed less than serialQueryBackoff ago has none to ask.
+// serialQueryFor returns the query for a Zone's serial, at nameserversOf
+// it. A Zone whose query failed less than serialQueryBackoff ago has none
+// to ask.
 func (m *Model) serialQueryFor(z dns.Zone) serialQuery {
 	if failed, ok := m.serialFailed[z.ID]; ok && m.deps.now().Before(failed.Add(serialQueryBackoff)) {
 		return serialQuery{}
 	}
 
-	q := serialQuery{resolver: m.deps.Resolver, servers: z.Nameservers}
+	return serialQuery{resolver: m.deps.Resolver, servers: m.nameserversOf(z)}
+}
 
-	if len(q.servers) == 0 && !m.shared[nameKey(z.Name)] {
-		if d, ok := m.delegations[nameKey(z.Name)]; ok && d.state == lookupDone {
-			q.servers = d.ns
-		}
+// nameserversOf returns the nameservers to ask a Zone's own data of, such
+// as its serial or its keys: the ones its Provider assigned it, else its
+// Delegation as this session resolved it. A zone name in several Accounts
+// has no fallback: its Delegation may name another copy's nameservers.
+// None when neither is known.
+func (m *Model) nameserversOf(z dns.Zone) []string {
+	if len(z.Nameservers) > 0 || m.shared[nameKey(z.Name)] {
+		return z.Nameservers
 	}
 
-	return q
+	if d, ok := m.delegations[nameKey(z.Name)]; ok && d.state == lookupDone {
+		return d.ns
+	}
+
+	return nil
 }
 
 // serial returns the serial the Zone's nameservers answer with; zero when

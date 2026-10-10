@@ -7,6 +7,7 @@ import (
 
 	"github.com/dnsgateway/dnsprovider"
 
+	"github.com/sergelogvinov/dnscli/internal/dns"
 	"github.com/sergelogvinov/dnscli/internal/store"
 	"github.com/sergelogvinov/dnscli/internal/vault"
 )
@@ -30,11 +31,13 @@ type Deps struct {
 	Providers dnsprovider.Registry
 	// Resolver is the system DNS resolver the Serial Checks and the
 	// Delegation lookups ask; it also asks a Zone's own nameservers for
-	// the serial its Provider does not report, and the parent zone's for
-	// the DS records it serves. Nil runs none of them.
+	// the serial its Provider does not report and for its key-signing
+	// keys, and the parent zone's for the DS records it serves. Nil runs
+	// none of them.
 	Resolver Resolver
 	// SerialChecks is how many Serial Checks may run at once, and, apart
-	// from them, how many Delegation lookups and DS Checks together.
+	// from them, how many Delegation lookups, DS Checks and key lookups
+	// together.
 	// Defaults to DefaultSerialChecks.
 	SerialChecks int
 	// Refreshes is how many Refreshes may run at once. Defaults to
@@ -57,7 +60,8 @@ type Deps struct {
 // are hints only: a caching resolver can lag behind the Provider and
 // follows public Delegation (ADR-0001). SOAAt asks a Zone's own
 // nameservers instead, for the serial a Provider does not report, and
-// DSAt the parent zone's, for the DS records it serves.
+// DNSKEYAt for its key-signing keys; DSAt asks the parent zone's, for the
+// DS records it serves.
 type Resolver interface {
 	// SOA returns the SOA serial the resolver gives for a zone name.
 	SOA(ctx context.Context, zone string) (serial uint32, err error)
@@ -74,6 +78,13 @@ type Resolver interface {
 	// nameservers directly and without recursion. None, without error,
 	// is a parent that serves no DS.
 	DSAt(ctx context.Context, zone string) (ds []string, ttl time.Duration, err error)
+	// DNSKEYAt returns the key-signing keys, each with its SHA-256 DS,
+	// that every one of zone's authoritative nameservers, servers, serves
+	// in a DNSKEY RRset that validates under its own RRSIG: asked directly
+	// and without recursion. Servers that disagree fail it with an error
+	// that wraps dns.ErrNameserversDisagree. None, without error, is a
+	// Zone whose nameservers serve no DNSKEY.
+	DNSKEYAt(ctx context.Context, zone string, servers []string) (keys []dns.SigningKey, err error)
 }
 
 // DefaultSerialChecks is the default limit on Serial Checks running at once.

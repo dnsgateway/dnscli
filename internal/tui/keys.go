@@ -80,6 +80,9 @@ const (
 	// built-in Template's Records into the open Zone's pending Changeset.
 	// Like editing, it obeys the write gate.
 	ActionApplyTemplate
+	// ActionShowKeys shows the open Zone's key-signing keys and their DS,
+	// as its nameservers serve them, to copy into a registrar's panel.
+	ActionShowKeys
 )
 
 // Binding maps one Action to its keys.
@@ -124,6 +127,7 @@ func DefaultShortcutProfile() ShortcutProfile {
 			{Action: ActionDiscardChanges, Keys: []string{"D"}},
 			{Action: ActionApplyOver, Keys: []string{"O"}},
 			{Action: ActionRelistZones, Keys: []string{"L"}},
+			{Action: ActionShowKeys, Keys: []string{"s"}, Help: "show the open Zone's DNSSEC keys and DS to copy"},
 			{Action: ActionEnrollKeychain, Keys: []string{"K"}, Help: "enroll the Keychain (Touch ID)"},
 			{Action: ActionHelp, Keys: []string{"?"}, Help: "toggle help"},
 			{Action: ActionClose, Keys: []string{"esc"}, Help: "close"},
