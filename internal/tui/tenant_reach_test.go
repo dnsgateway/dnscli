@@ -21,15 +21,15 @@ type otherTenants struct {
 	zones []dnsprovider.Zone
 }
 
-func (o otherTenants) Zones(ctx context.Context, f dnsprovider.ZoneFilter) ([]dnsprovider.Zone, error) {
+func (o otherTenants) Zones(ctx context.Context, f dnsprovider.ZoneFilter) (dnsprovider.ZoneSet, error) {
 	zones, err := o.Provider.Zones(ctx, f)
 	if err != nil {
-		return nil, err
+		return dnsprovider.ZoneSet{}, err
 	}
 
 	for _, z := range o.zones {
 		if strings.Contains(z.Name, f.Contains) {
-			zones = append(zones, z)
+			zones.Zones = append(zones.Zones, z)
 		}
 	}
 

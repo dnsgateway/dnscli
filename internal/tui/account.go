@@ -986,7 +986,7 @@ func discover(ctx context.Context, s *store.Store, key *vault.Key, providers *pr
 		return 0, store.ZoneSync{}, err
 	}
 
-	own := provider.CacheZones(listed)
+	own := provider.CacheZones(listed.Zones)
 
 	expectAccountNameservers(own, func() ([]string, error) {
 		return providers.Nameservers(ctx, reach.own, a.Provider, reach.fields)
@@ -1002,7 +1002,7 @@ func discover(ctx context.Context, s *store.Store, key *vault.Key, providers *pr
 			return 0, store.ZoneSync{}, err
 		}
 
-		zones = append(zones, othersZones(own, provider.CacheZones(listed))...)
+		zones = append(zones, othersZones(own, provider.CacheZones(listed.Zones))...)
 	}
 
 	if len(zones) == 0 {

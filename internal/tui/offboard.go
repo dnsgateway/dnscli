@@ -478,7 +478,7 @@ func heldZone(ctx context.Context, p dnsprovider.Provider, z dns.Zone) (dnsprovi
 		return dnsprovider.Zone{}, false, err
 	}
 
-	for _, mz := range zones {
+	for _, mz := range zones.Zones {
 		if mz.ID == z.ProviderID {
 			return mz, true, nil
 		}
