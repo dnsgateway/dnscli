@@ -93,8 +93,8 @@ func (m *Model) openAddAccount() {
 	m.addForm.size = m.measureAccountForm()
 }
 
-// chooseProvider makes types[i] the Account's Provider, with an empty
-// input for each of its credential fields.
+// chooseProvider makes types[i] the Account's Provider, with an input for
+// each of its credential fields: empty, or a picked field's default.
 func (f *addAccountForm) chooseProvider(i int) {
 	f.provider = i
 	f.creds, f.values, f.tenant = nil, nil, nil
@@ -110,6 +110,43 @@ func (f *addAccountForm) chooseProvider(i int) {
 	}
 
 	f.values = make([]string, len(f.creds))
+	for i, fd := range f.creds {
+		if len(fd.Choices) > 0 {
+			f.values[i] = fd.Default
+		}
+	}
+}
+
+// choices are the values the i-th credential field is picked from; nil
+// for a field that is typed, or for i past the credential fields.
+func (f *addAccountForm) choices(i int) []string {
+	if i < 0 || i >= len(f.creds) {
+		return nil
+	}
+
+	return f.creds[i].Choices
+}
+
+// pickCredential sets the i-th credential field to its j-th choice.
+func (f *addAccountForm) pickCredential(i, j int) {
+	f.values[i] = f.creds[i].Choices[j]
+	// Other credentials may not reach the Tenant picked.
+	f.tenant = nil
+}
+
+// stepCredential moves the i-th credential field step choices on, round
+// the list; a field at none of them moves to the first.
+func (f *addAccountForm) stepCredential(i, step int) {
+	choices := f.creds[i].Choices
+
+	at := slices.Index(choices, f.value(i))
+	if at < 0 {
+		f.pickCredential(i, 0)
+
+		return
+	}
+
+	f.pickCredential(i, (at+step+len(choices))%len(choices))
 }
 
 // saveField is the index of the Save button, after the credential fields.
@@ -224,7 +261,7 @@ func (m *Model) addAccountKey(msg tea.KeyMsg) tea.Cmd {
 		if m.keys.typeInto(&f.name, &f.caret, msg) {
 			return nil
 		}
-	case i >= 0 && i < len(f.values):
+	case i >= 0 && i < len(f.values) && f.choices(i) == nil:
 		if m.keys.typeInto(&f.values[i], &f.caret, msg) {
 			// Other credentials may not reach the Tenant picked.
 			f.tenant = nil
@@ -243,13 +280,16 @@ func (m *Model) addAccountKey(msg tea.KeyMsg) tea.Cmd {
 	case ActionPrevPane, ActionUp:
 		f.field = (f.field + count - 1) % count
 	case ActionPaneLeft, ActionPaneRight:
-		if f.choosesProvider() {
-			step := 1
-			if a == ActionPaneLeft {
-				step = len(f.types) - 1
-			}
+		step := 1
+		if a == ActionPaneLeft {
+			step = -1
+		}
 
-			m.chooseAccountProvider((f.provider + step) % len(f.types))
+		switch i := f.field - addFieldCreds; {
+		case f.choosesProvider():
+			m.chooseAccountProvider((f.provider + step + len(f.types)) % len(f.types))
+		case f.choices(i) != nil:
+			f.stepCredential(i, step)
 		}
 	case ActionSelect:
 		switch {
@@ -259,6 +299,12 @@ func (m *Model) addAccountKey(msg tea.KeyMsg) tea.Cmd {
 			return m.submitAddAccount()
 		case f.choosesProvider():
 			f.picker = &picker{title: "Provider", options: f.types, cursor: f.provider, pick: m.chooseAccountProvider}
+		case f.choices(f.field-addFieldCreds) != nil:
+			i := f.field - addFieldCreds
+			f.picker = &picker{
+				title: f.creds[i].Label, options: f.creds[i].Choices, cursor: max(slices.Index(f.creds[i].Choices, f.value(i)), 0),
+				pick: func(j int) { f.pickCredential(i, j) },
+			}
 		default:
 			f.field++
 		}
@@ -508,11 +554,12 @@ func (f *addAccountForm) changed() bool {
 	return false
 }
 
-// complete checks that each credential field has a value, typed or
-// stored, else focuses the first without one.
+// complete checks that each required credential field has a value,
+// typed or stored, else focuses the first without one. A field with a
+// default is optional: left empty, it takes its default.
 func (f *addAccountForm) complete() bool {
 	for i, fd := range f.creds {
-		if f.value(i) == "" && (f.editing == nil || f.stored[i] == "") {
+		if fd.Default == "" && f.value(i) == "" && (f.editing == nil || f.stored[i] == "") {
 			f.err = "Enter the " + fd.Label + "."
 			f.field = addFieldCreds + i
 
@@ -614,15 +661,18 @@ func (m *Model) updateAccount(old, a dns.Account, typed map[string]string, chang
 }
 
 // requiredFields are the names of the credential fields the dialog asks
-// for, each of which the credentials must hold.
+// for that have no default, each of which the credentials must hold.
 func (f *addAccountForm) requiredFields() []string {
 	if f == nil {
 		return nil
 	}
 
-	names := make([]string, len(f.creds))
-	for i, fd := range f.creds {
-		names[i] = fd.Name
+	var names []string
+
+	for _, fd := range f.creds {
+		if fd.Default == "" {
+			names = append(names, fd.Name)
+		}
 	}
 
 	return names
@@ -1194,7 +1244,7 @@ func (f *addAccountForm) dialogFields(name string, values []string) []dialogFiel
 	}
 
 	for i, fd := range f.creds {
-		fields = append(fields, dialogField{label: fd.Label, value: values[i], masked: fd.Secret})
+		fields = append(fields, dialogField{label: fd.Label, value: values[i], masked: fd.Secret, choice: len(fd.Choices) > 0})
 	}
 
 	return fields
@@ -1238,8 +1288,19 @@ func (m *Model) accountFormHints(field int) []string {
 	return hints
 }
 
-// credentialHint is the hint of a credential field.
+// credentialHint is the hint of a credential field, which names the
+// default an empty field takes.
 func credentialHint(fd dnsprovider.Field, editing bool) string {
+	hint := credentialPurpose(fd, editing)
+	if fd.Default != "" && !editing {
+		hint += " Left empty, it is " + fd.Default + "."
+	}
+
+	return hint
+}
+
+// credentialPurpose says what a credential field is for.
+func credentialPurpose(fd dnsprovider.Field, editing bool) string {
 	switch {
 	case editing && fd.Secret:
 		return "Type a new " + fd.Label + ", or leave it empty to keep the current one."
