@@ -111,27 +111,47 @@ func (f *addAccountForm) chooseProvider(i int) {
 
 	f.values = make([]string, len(f.creds))
 	for i, fd := range f.creds {
-		if len(fd.Choices) > 0 {
+		if picked(fd) {
 			f.values[i] = fd.Default
 		}
 	}
 }
 
-// choices are the values the i-th credential field is picked from; nil
-// for a field that is typed, or for i past the credential fields.
-func (f *addAccountForm) choices(i int) []string {
-	if i < 0 || i >= len(f.creds) {
-		return nil
-	}
+// optional reports whether a credential field may be left empty, as it
+// has a default.
+func optional(fd dnsprovider.Field) bool {
+	return fd.Default != ""
+}
 
-	return f.creds[i].Choices
+// picked reports whether a credential field is picked from its choices
+// rather than typed.
+func picked(fd dnsprovider.Field) bool {
+	return len(fd.Choices) > 0
+}
+
+// focusedCred is the index of the focused credential field: negative
+// before the credential fields, len(f.creds) or more past them.
+func (f *addAccountForm) focusedCred() int {
+	return f.field - addFieldCreds
+}
+
+// picksCredential reports whether the i-th credential field is picked
+// from its choices; false for a typed one, or for i past the credential
+// fields.
+func (f *addAccountForm) picksCredential(i int) bool {
+	return i >= 0 && i < len(f.creds) && picked(f.creds[i])
+}
+
+// credentialsChanged forgets the Tenant picked, which other credentials
+// may not reach.
+func (f *addAccountForm) credentialsChanged() {
+	f.tenant = nil
 }
 
 // pickCredential sets the i-th credential field to its j-th choice.
 func (f *addAccountForm) pickCredential(i, j int) {
 	f.values[i] = f.creds[i].Choices[j]
-	// Other credentials may not reach the Tenant picked.
-	f.tenant = nil
+	f.credentialsChanged()
 }
 
 // stepCredential moves the i-th credential field step choices on, round
@@ -147,6 +167,17 @@ func (f *addAccountForm) stepCredential(i, step int) {
 	}
 
 	f.pickCredential(i, (at+step+len(choices))%len(choices))
+}
+
+// credentialPicker lists the i-th credential field's choices to pick one,
+// starting at its value.
+func (f *addAccountForm) credentialPicker(i int) *picker {
+	choices := f.creds[i].Choices
+
+	return &picker{
+		title: f.creds[i].Label, options: choices, cursor: max(slices.Index(choices, f.value(i)), 0),
+		pick: func(j int) { f.pickCredential(i, j) },
+	}
 }
 
 // saveField is the index of the Save button, after the credential fields.
@@ -256,15 +287,14 @@ func (m *Model) addAccountKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 	}
 
-	switch i := f.field - addFieldCreds; {
+	switch i := f.focusedCred(); {
 	case f.field == addFieldName:
 		if m.keys.typeInto(&f.name, &f.caret, msg) {
 			return nil
 		}
-	case i >= 0 && i < len(f.values) && f.choices(i) == nil:
+	case i >= 0 && i < len(f.values) && !f.picksCredential(i):
 		if m.keys.typeInto(&f.values[i], &f.caret, msg) {
-			// Other credentials may not reach the Tenant picked.
-			f.tenant = nil
+			f.credentialsChanged()
 
 			return nil
 		}
@@ -285,11 +315,11 @@ func (m *Model) addAccountKey(msg tea.KeyMsg) tea.Cmd {
 			step = -1
 		}
 
-		switch i := f.field - addFieldCreds; {
+		switch {
 		case f.choosesProvider():
 			m.chooseAccountProvider((f.provider + step + len(f.types)) % len(f.types))
-		case f.choices(i) != nil:
-			f.stepCredential(i, step)
+		case f.picksCredential(f.focusedCred()):
+			f.stepCredential(f.focusedCred(), step)
 		}
 	case ActionSelect:
 		switch {
@@ -299,12 +329,8 @@ func (m *Model) addAccountKey(msg tea.KeyMsg) tea.Cmd {
 			return m.submitAddAccount()
 		case f.choosesProvider():
 			f.picker = &picker{title: "Provider", options: f.types, cursor: f.provider, pick: m.chooseAccountProvider}
-		case f.choices(f.field-addFieldCreds) != nil:
-			i := f.field - addFieldCreds
-			f.picker = &picker{
-				title: f.creds[i].Label, options: f.creds[i].Choices, cursor: max(slices.Index(f.creds[i].Choices, f.value(i)), 0),
-				pick: func(j int) { f.pickCredential(i, j) },
-			}
+		case f.picksCredential(f.focusedCred()):
+			f.picker = f.credentialPicker(f.focusedCred())
 		default:
 			f.field++
 		}
@@ -559,7 +585,7 @@ func (f *addAccountForm) changed() bool {
 // default is optional: left empty, it takes its default.
 func (f *addAccountForm) complete() bool {
 	for i, fd := range f.creds {
-		if fd.Default == "" && f.value(i) == "" && (f.editing == nil || f.stored[i] == "") {
+		if !optional(fd) && f.value(i) == "" && (f.editing == nil || f.stored[i] == "") {
 			f.err = "Enter the " + fd.Label + "."
 			f.field = addFieldCreds + i
 
@@ -670,7 +696,7 @@ func (f *addAccountForm) requiredFields() []string {
 	var names []string
 
 	for _, fd := range f.creds {
-		if fd.Default == "" {
+		if !optional(fd) {
 			names = append(names, fd.Name)
 		}
 	}
@@ -1244,7 +1270,7 @@ func (f *addAccountForm) dialogFields(name string, values []string) []dialogFiel
 	}
 
 	for i, fd := range f.creds {
-		fields = append(fields, dialogField{label: fd.Label, value: values[i], masked: fd.Secret, choice: len(fd.Choices) > 0})
+		fields = append(fields, dialogField{label: fd.Label, value: values[i], masked: fd.Secret, choice: picked(fd)})
 	}
 
 	return fields
@@ -1292,7 +1318,7 @@ func (m *Model) accountFormHints(field int) []string {
 // default an empty field takes.
 func credentialHint(fd dnsprovider.Field, editing bool) string {
 	hint := credentialPurpose(fd, editing)
-	if fd.Default != "" && !editing {
+	if optional(fd) && !editing {
 		hint += " Left empty, it is " + fd.Default + "."
 	}
 
