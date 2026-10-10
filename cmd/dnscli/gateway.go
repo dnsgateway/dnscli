@@ -42,7 +42,7 @@ func gatewayRoots(caFiles []string) (*x509.CertPool, error) {
 	for _, file := range caFiles {
 		pem, err := os.ReadFile(file)
 		if err != nil {
-			return nil, fmt.Errorf("reading CA file: %w", err)
+			return nil, fmt.Errorf("read CA file: %w", err)
 		}
 
 		if !pool.AppendCertsFromPEM(pem) {
