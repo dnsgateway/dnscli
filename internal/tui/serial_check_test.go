@@ -45,9 +45,9 @@ type fakeResolver struct {
 
 	mu        sync.Mutex
 	keysAsked []soaAtQuery // DNSKEY queries, each with the servers asked
-	nsAsked []string // zone names asked for NS, in order
-	atAsked []soaAtQuery
-	dsAsked []string // zone names whose parent was asked for DS, in order
+	nsAsked   []string     // zone names asked for NS, in order
+	atAsked   []soaAtQuery
+	dsAsked   []string // zone names whose parent was asked for DS, in order
 }
 
 // setDS scripts the DS records a zone's parent serves; none for no DS.

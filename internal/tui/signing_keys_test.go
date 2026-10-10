@@ -12,19 +12,20 @@ import (
 	"github.com/sergelogvinov/dnscli/internal/tui"
 )
 
-// The key and its SHA-256 DS from RFC 4509, section 2.3, for
-// dskey.example.com: a known-good pair to match the parent's DS against.
+// The ECDSA P-256 key-signing key (flag 257) and its SHA-256 DS from
+// RFC 6605, section 6.1, for example.net: a known-good pair to match the
+// parent's DS against.
 const (
-	rfcZone   = "dskey.example.com"
-	rfcDNSKEY = "256 3 5 AQOeiiR0GOMYkDshWoSKz9XzfwJr1AYtsmx3TGkJaNXVbfi/2pHm822aJ5iI9BMzNXxeYCmZDRD99WYwYqUSdjMmmAphXdvxegXd/M5+X7OrzKBaMbCVdFLUUh6DhweJBjEVv5f2wwjM9XzcnOf+EPbtG9DMBmADjFDc2w/rljwvFw=="
-	rfcDS     = "60485 5 2 D4B7D520E7BB5F0F67674A0CCEB1E3E0614B93C4F9E99B8383F6A1E4469DA50A"
+	rfcZone   = "example.net"
+	rfcDNSKEY = "257 3 13 GojIhhXUN/u4v54ZQqGSnyhWJwaubCvTmeexv7bR6edbkrSqQpF64cYbcB7wNcP+e+MAnLr+Wi9xMWyQLc8NAA=="
+	rfcDS     = "55648 13 2 B4C8C1FE2E7477127B27115656AD6256F424625BF5C1E2770CE6D6E37DF61D17"
 )
 
-// rfcKey is the RFC 4509 key as the resolver gives it.
-var rfcKey = dns.SigningKey{DNSKEY: rfcDNSKEY, DS: []string{rfcDS}}
+// rfcKey is the RFC 6605 key as the resolver gives it.
+var rfcKey = dns.SigningKey{DNSKEY: rfcDNSKEY, KeyTag: 55648, DS: []string{rfcDS}}
 
 // newSignedZoneHarness starts an unsealed session with cloudflare.work,
-// which hosts dskey.example.com, signed, as the Live Zone on cruzDee, with
+// which hosts example.net, signed, as the Live Zone on cruzDee, with
 // r as its resolver, and opens the Zone.
 func newSignedZoneHarness(t *testing.T, r *fakeResolver) *harness {
 	t.Helper()
@@ -85,9 +86,11 @@ func TestAParentDSThatMatchesNoKeySaysItDoesNotMatch(t *testing.T) {
 	h.assertHides("DNSSEC: On")
 }
 
-// ecKey is an ECDSA P-256 key-signing key short enough to show on one line.
+// ecKey is an ECDSA P-256 key-signing key short enough to show on one
+// line, with a made-up DS to show: never matched against a parent's DS.
 var ecKey = dns.SigningKey{
 	DNSKEY: "257 3 13 mdsswUyr3DPW132mOi8V9xESWE8jTo0dxCjjnopKl+GqJxpVXckHAeF+KkxLbxILfDLUT0rAK9iUzy1L53eKGQ==",
+	KeyTag: 2371,
 	DS:     []string{"2371 13 2 1F987CC6583E92DF0890718C42"},
 }
 
