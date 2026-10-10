@@ -293,3 +293,21 @@ func TestTheParentIsReCheckedForTheDSUntilItIsServedWithoutARefresh(t *testing.T
 		t.Fatalf("DS queries once On = %v, want no more than %d", got, asked)
 	}
 }
+
+func TestTheDSIsNotToBePublishedWhileTheLargestTTLIsUnknown(t *testing.T) {
+	c := &testClock{now: testNow}
+	r := &fakeResolver{}
+	r.setKeys(rfcZone, rfcKey)
+	r.setDS(rfcZone)
+
+	// The Provider serves no Records for it: no TTL is known.
+	f := newFake().AddZone(dns.Zone{Name: rfcZone, ProviderID: "zd1", Nameservers: cruzDee})
+	f.SetZoneStatus("zd1", dnsprovider.ZoneStatus{DNSSEC: dnsprovider.On})
+
+	_, s := newTurnOnHarness(t, f, r, c)
+	seenSigned(t, s, rfcZone, testNow.Add(-24*time.Hour))
+
+	h := restart(t, s, f, r, c)
+	h.assertStatusBarShows("DNSSEC: DS can be published once the Records' TTLs are known")
+	h.assertHides("publish the DS")
+}

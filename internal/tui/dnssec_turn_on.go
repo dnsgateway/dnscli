@@ -67,25 +67,37 @@ func (m *Model) signingSeen(msg signingSeenMsg) {
 	}
 }
 
-// publishAfter is when the DS of the open Zone z may be published: once
-// the largest TTL among its cached Records has passed since it was first
-// seen signed, so resolvers no longer hold its unsigned data. A Zone
-// whose signing is being stored counts as seen signed now.
-func (m *Model) publishAfter(z dns.Zone) time.Time {
+// publishAfter is when the DS of z may be published: once the largest TTL
+// among its Records has passed since it was first seen signed, so
+// resolvers no longer hold its unsigned data. A Zone whose signing is
+// being stored counts as seen signed now. It is not known while no
+// Records are, as before they are read: the DS is not to be published
+// until it is.
+func (m *Model) publishAfter(z dns.Zone, records []dns.Record) (time.Time, bool) {
+	if len(records) == 0 {
+		return time.Time{}, false
+	}
+
 	seen := z.SigningSeenAt
 	if seen.IsZero() {
 		seen = m.deps.now()
 	}
 
 	var ttl uint32
-
-	if m.open != nil && m.open.ID == z.ID {
-		for _, r := range m.records {
-			ttl = max(ttl, r.TTL)
-		}
+	for _, r := range records {
+		ttl = max(ttl, r.TTL)
 	}
 
-	return seen.Add(time.Duration(ttl) * time.Second)
+	return seen.Add(time.Duration(ttl) * time.Second), true
+}
+
+// recordsOf are z's Records as read: the open Zone's, none for another.
+func (m *Model) recordsOf(z dns.Zone) []dns.Record {
+	if m.open == nil || m.open.ID != z.ID {
+		return nil
+	}
+
+	return m.records
 }
 
 // clockText says a time as the user reads it on the Clock: "13:00", with
@@ -259,7 +271,7 @@ func (m *Model) watchDNSSEC() tea.Cmd {
 		w.next = min(w.next+1, len(dnssecRecheckWaits)-1)
 	}
 
-	if end := m.publishAfter(z); step == stepWaitTTL && !end.Equal(w.waitEnd) {
+	if end, known := m.publishAfter(z, m.recordsOf(z)); step == stepWaitTTL && known && !end.Equal(w.waitEnd) {
 		w.waitEnd = end
 		cmds = append(cmds, m.dnssecTimer(w, end.Sub(m.deps.now()), false))
 	}

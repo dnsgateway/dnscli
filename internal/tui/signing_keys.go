@@ -209,7 +209,8 @@ const (
 	// the same key-signing keys yet.
 	stepWaitKeys
 	// stepWaitTTL is a signed Zone whose unsigned data resolvers may
-	// still hold: the DS is published only after publishAfter.
+	// still hold, or whose largest TTL is not known yet: the DS is
+	// published only after publishAfter.
 	stepWaitTTL
 	// stepPublish is a signed Zone whose DS is to be published.
 	stepPublish
@@ -262,7 +263,7 @@ func (m *Model) dnssecStepOf(z dns.Zone) dnssecStep {
 	case dsUnknown:
 		return stepUnknown
 	case dsNone:
-		if m.deps.now().Before(m.publishAfter(z)) {
+		if end, known := m.publishAfter(z, m.recordsOf(z)); !known || m.deps.now().Before(end) {
 			return stepWaitTTL
 		}
 
@@ -290,7 +291,12 @@ func (m *Model) dnssecState(z dns.Zone) (string, lipgloss.Style) {
 	case stepWaitKeys:
 		return "DNSSEC: waiting for nameservers to serve the keys", badgePendingStyle
 	case stepWaitTTL:
-		return "DNSSEC: DS can be published after " + clockText(m.publishAfter(z), m.deps.now()), badgePendingStyle
+		end, known := m.publishAfter(z, m.recordsOf(z))
+		if !known {
+			return "DNSSEC: DS can be published once the Records' TTLs are known", badgePendingStyle
+		}
+
+		return "DNSSEC: DS can be published after " + clockText(end, m.deps.now()), badgePendingStyle
 	case stepPublish:
 		return fmt.Sprintf("DNSSEC: publish the DS (%s shows it)", m.keys.keysFor(ActionShowKeys)), badgePendingStyle
 	case stepOn:

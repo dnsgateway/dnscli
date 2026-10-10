@@ -43,10 +43,14 @@ func newKeysHarness(t *testing.T, r *fakeResolver, dnssec dnsprovider.Setting) *
 	return newKeysHarnessWith(t, newKeysFake(dnssec), r)
 }
 
+// keysRecord is example.net's Record: its TTL, five minutes, is the wait
+// before its DS can be published once it is signed.
+var keysRecord = dns.Record{ProviderID: "rk1", Type: "A", Name: rfcZone, Value: "192.0.2.53", TTL: 300}
+
 // newKeysFake is a Provider hosting example.net as zd1, its DNSSEC as
 // reported.
 func newKeysFake(dnssec dnsprovider.Setting) *fakeProvider {
-	f := newFake().AddZone(dns.Zone{Name: rfcZone, ProviderID: "zd1", Nameservers: cruzDee})
+	f := newFake().AddZone(dns.Zone{Name: rfcZone, ProviderID: "zd1", Nameservers: cruzDee}, keysRecord)
 	f.SetZoneStatus("zd1", dnsprovider.ZoneStatus{DNSSEC: dnssec})
 
 	return f
@@ -115,6 +119,7 @@ func TestWithoutADSAtTheParentTheKeysAreShownToCopy(t *testing.T) {
 	r.setDS(rfcZone)
 	h := newSignedZoneHarness(t, r)
 
+	h.passTime(5 * time.Minute) // past the largest TTL
 	h.assertStatusBarShows("DNSSEC: publish the DS")
 	h.assertHides(ecKey.DNSKEY)
 
@@ -206,7 +211,7 @@ func TestARefreshThatTurnsDNSSECOnLooksUpTheKeysAgain(t *testing.T) {
 	r.setKeys(rfcZone)
 	r.setDS(rfcZone)
 
-	f := newFake().AddZone(dns.Zone{Name: rfcZone, ProviderID: "zd1", Nameservers: cruzDee})
+	f := newFake().AddZone(dns.Zone{Name: rfcZone, ProviderID: "zd1", Nameservers: cruzDee}, keysRecord)
 	f.SetZoneStatus("zd1", dnsprovider.ZoneStatus{DNSSEC: dnsprovider.On})
 
 	r.ns = map[string][]string{rfcZone: cruzDee}
@@ -233,6 +238,7 @@ func TestARefreshThatTurnsDNSSECOnLooksUpTheKeysAgain(t *testing.T) {
 		h.send(msg)
 	}
 
+	h.passTime(5 * time.Minute) // past the largest TTL
 	h.assertStatusBarShows("DNSSEC: publish the DS")
 }
 
@@ -289,6 +295,7 @@ func TestKeysAProviderFailsToReturnAreAskedOfTheNameservers(t *testing.T) {
 			r.setDS(rfcZone)
 			h := newKeysHarnessWith(t, f, r)
 
+			h.passTime(5 * time.Minute) // past the largest TTL
 			h.assertStatusBarShows("DNSSEC: publish the DS")
 			h.assertHides("DNSSEC: unknown")
 
