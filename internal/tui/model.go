@@ -380,7 +380,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case zoneEditOpenedMsg:
 		m.zoneEditOpened(msg)
 	case zoneSettingsSavedMsg:
-		m.zoneSettingsSaved(msg)
+		return m, m.zoneSettingsSaved(msg)
 	case onboardOpenedMsg:
 		return m, m.onboardOpened(msg)
 	case onboardTenantNamedMsg:
@@ -504,6 +504,8 @@ func (m *Model) handle(a Action) tea.Cmd {
 		m.help = true
 	case ActionShowKeys:
 		m.openSigningKeys()
+	case ActionDNSSECStep:
+		return m.takeDNSSECStep()
 	case ActionNextPane:
 		m.focus = (m.focus + 1) % paneCount
 	case ActionPrevPane:

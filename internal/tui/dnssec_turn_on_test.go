@@ -128,3 +128,31 @@ func TestAZoneSeenUnsignedWaitsAfreshOnceItIsSignedAgain(t *testing.T) {
 
 	h.assertStatusBarShows("DNSSEC: DS can be published after 13:30")
 }
+
+func TestAnUnsignedZoneIsOfferedToTurnDNSSECOnThroughTheConfirmation(t *testing.T) {
+	c := &turnOnClock{now: testNow}
+	r := &fakeResolver{}
+	r.setKeys(rfcZone)
+	r.setDS(rfcZone)
+	f := turnOnFake(dnsprovider.Off)
+
+	h, _ := newTurnOnHarness(t, f, r, c)
+	h.assertStatusBarShows("DNSSEC: off (S turns it on)")
+
+	h.press("S")
+	h.assertShows("Turn DNSSEC on for example.net at cloudflare.work?")
+
+	if calls := updateZoneCalls(f); len(calls) != 0 {
+		t.Fatalf("UpdateZone before confirming: %+v", calls)
+	}
+
+	h.press("enter")
+
+	calls := updateZoneCalls(f)
+	if len(calls) != 1 || calls[0].Zone.ID != "zd1" || calls[0].ZoneUpdate.DNSSEC == nil || !*calls[0].ZoneUpdate.DNSSEC {
+		t.Fatalf("UpdateZone calls = %+v, want one turning DNSSEC on for zd1", calls)
+	}
+
+	// The Provider signs it over time: its nameservers serve no keys yet.
+	h.assertStatusBarShows("DNSSEC: waiting for nameservers to serve the keys")
+}

@@ -190,62 +190,112 @@ func (m *Model) signingKeysError(z dns.Zone) error {
 	return nil
 }
 
-// waitingForKeys is the DNSSEC state of a signed Zone whose nameservers
-// do not all serve the same key-signing keys yet.
-const waitingForKeys = "DNSSEC: waiting for nameservers to serve the keys"
+// dnssecStep is the DNSSEC state of a Zone, and the next step it offers,
+// worked out each time from what can be observed: its Provider's Zone
+// Status, its Key Lookup, the DS Check of its parent and when it was
+// first seen signed. No step is stored.
+type dnssecStep int
 
-// dnssecState says, in a few words and its style, the DNSSEC state of z
-// for the Zone Status bar, as worked out from its Key Lookup and the DS
-// Check: On when the parent serves a DS that matches one of its keys,
-// whoever published it; an error when the parent's DS matches none, or
-// the Zone serves no keys; the DS to publish when the parent serves none.
-// A failed lookup is unknown, never off. It is empty when there is
-// nothing to say yet, or for a Zone known not to be the Live Zone.
-func (m *Model) dnssecState(z dns.Zone) (string, lipgloss.Style) {
+const (
+	// stepNone is nothing to say yet, or a Zone known not to be the Live
+	// Zone.
+	stepNone dnssecStep = iota
+	// stepUnknown is a lookup that failed: never taken as off.
+	stepUnknown
+	// stepTurnOn is an unsigned Zone whose parent serves no DS: signing
+	// may be turned on.
+	stepTurnOn
+	// stepWaitKeys is a signed Zone whose nameservers do not all serve
+	// the same key-signing keys yet.
+	stepWaitKeys
+	// stepWaitTTL is a signed Zone whose unsigned data resolvers may
+	// still hold: the DS is published only after publishAfter.
+	stepWaitTTL
+	// stepPublish is a signed Zone whose DS is to be published.
+	stepPublish
+	// stepOn is a Zone whose parent serves a DS matching one of its keys.
+	stepOn
+	// stepMismatch is a parent DS that matches none of the Zone's keys,
+	// or a DS for a Zone that serves none: it fails validation.
+	stepMismatch
+)
+
+// dnssecStepOf works out z's DNSSEC step: On when the parent serves a DS
+// that matches one of its keys, whoever published it; a mismatch when
+// the parent's DS matches none, or the Zone serves no keys; else the next
+// step towards publishing the DS. A failed lookup is unknown, never off.
+func (m *Model) dnssecStepOf(z dns.Zone) dnssecStep {
 	c, ok := m.keyLookups[z.ID]
 	if !ok || m.liveness(z) == liveNo {
-		return "", statusStyle
+		return stepNone
 	}
 
 	switch c.state {
 	case lookupQueued, lookupResolving:
-		return "", statusStyle
+		return stepNone
 	case lookupFailed:
 		if errors.Is(c.err, dns.ErrNameserversDisagree) {
-			return waitingForKeys, badgePendingStyle
+			return stepWaitKeys
 		}
 
-		return "DNSSEC: unknown", statusStyle
+		return stepUnknown
 	}
+
+	ds := m.dsPresenceOf(z.Name)
 
 	if len(c.keys) == 0 {
-		// A DS at the parent of a Zone that serves no keys fails
-		// validation, whatever its Provider reports.
-		if m.dsPresenceOf(z.Name) == dsServed {
-			return "DNSSEC: DS does not match", errorStyle
+		switch {
+		case ds == dsServed:
+			// A DS at the parent of a Zone that serves no keys fails
+			// validation, whatever its Provider reports.
+			return stepMismatch
+		case signingReported(z):
+			return stepWaitKeys
+		case ds == dsNone:
+			return stepTurnOn
 		}
 
-		if z.Status.DNSSEC == dnsprovider.On || z.Status.DNSSEC == dnsprovider.Pending {
-			return waitingForKeys, badgePendingStyle
-		}
-
-		return "", statusStyle
+		return stepNone
 	}
 
-	switch m.dsPresenceOf(z.Name) {
+	switch ds {
 	case dsUnknown:
-		return "DNSSEC: unknown", statusStyle
+		return stepUnknown
 	case dsNone:
-		if now, after := m.deps.now(), m.publishAfter(z); now.Before(after) {
-			return "DNSSEC: DS can be published after " + clockText(after, now), badgePendingStyle
+		if m.deps.now().Before(m.publishAfter(z)) {
+			return stepWaitTTL
 		}
 
-		return fmt.Sprintf("DNSSEC: publish the DS (%s shows it)", m.keys.keysFor(ActionShowKeys)), badgePendingStyle
+		return stepPublish
 	case dsServed:
 		if anyDSMatches(z.Name, m.parentDS[nameKey(z.Name)].ds, c.keys) {
-			return "DNSSEC: On", badgeOnStyle
+			return stepOn
 		}
 
+		return stepMismatch
+	}
+
+	return stepNone
+}
+
+// dnssecState says, in a few words and its style, the DNSSEC state of z
+// and the step it offers, for the Zone Status bar; empty when there is
+// nothing to say yet, or for a Zone known not to be the Live Zone.
+func (m *Model) dnssecState(z dns.Zone) (string, lipgloss.Style) {
+	switch m.dnssecStepOf(z) {
+	case stepUnknown:
+		return "DNSSEC: unknown", statusStyle
+	case stepTurnOn:
+		return m.turnOnText(z), statusStyle
+	case stepWaitKeys:
+		return "DNSSEC: waiting for nameservers to serve the keys", badgePendingStyle
+	case stepWaitTTL:
+		return "DNSSEC: DS can be published after " + clockText(m.publishAfter(z), m.deps.now()), badgePendingStyle
+	case stepPublish:
+		return fmt.Sprintf("DNSSEC: publish the DS (%s shows it)", m.keys.keysFor(ActionShowKeys)), badgePendingStyle
+	case stepOn:
+		return "DNSSEC: On", badgeOnStyle
+	case stepMismatch:
 		return "DNSSEC: DS does not match", errorStyle
 	}
 

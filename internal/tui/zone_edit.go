@@ -308,6 +308,9 @@ type zoneEditOpenedMsg struct {
 	account dns.Account
 	p       dnsprovider.Provider
 	err     error
+	// turnOn opens the dialog asking to confirm turning DNSSEC on, the
+	// DNSSEC step taken from the Zone page.
+	turnOn bool
 }
 
 // zoneSettingsSavedMsg reports changes of a Zone's settings: the Zone as
@@ -358,10 +361,28 @@ func (m *Model) editZone() tea.Cmd {
 	case m.key == nil:
 		m.openZoneEdit(z, a, nil, "The session is sealed: Enter on a setting Unseals it, to change the settings.", true)
 	default:
-		return tea.Batch(checkDS, m.editZoneOf(z.ID))
+		return tea.Batch(checkDS, m.editZoneOf(z.ID, false))
 	}
 
 	return checkDS
+}
+
+// cannotTurnDNSSECOn says an Account's Provider cannot turn DNSSEC on
+// through its API.
+func cannotTurnDNSSECOn(a dns.Account) string {
+	return a.Label() + " cannot turn DNSSEC on through its API: turn it on in its own panel."
+}
+
+// confirmTurningOn picks DNSSEC on and asks to confirm it, as Save would.
+func (f *zoneEditForm) confirmTurningOn() {
+	for i, s := range f.settings {
+		if s == dnssecSetting {
+			f.choice[i] = slices.Index(f.options(i), "on")
+		}
+	}
+
+	f.field = f.saveField()
+	f.confirming = len(f.changes()) > 0
 }
 
 // cannotChangeZoneSettings says an Account's Provider cannot change Zone
@@ -371,8 +392,9 @@ func cannotChangeZoneSettings(a dns.Account) string {
 }
 
 // editZoneOf opens the Provider of a Zone's Account, as it is now, for
-// the Edit Zone dialog.
-func (m *Model) editZoneOf(zoneID int64) tea.Cmd {
+// the Edit Zone dialog: asking to confirm turning DNSSEC on when turnOn
+// is set.
+func (m *Model) editZoneOf(zoneID int64, turnOn bool) tea.Cmd {
 	z, ok := m.zoneByID[zoneID]
 	if !ok {
 		return nil
@@ -388,14 +410,14 @@ func (m *Model) editZoneOf(zoneID int64) tea.Cmd {
 	return func() tea.Msg {
 		p, _, err := accountProvider(ctx, s, key, providers, a)
 
-		return zoneEditOpenedMsg{zone: z, account: a, p: p, err: err}
+		return zoneEditOpenedMsg{zone: z, account: a, p: p, err: err, turnOn: turnOn}
 	}
 }
 
 // tenantUse opens the Edit Zone dialog again, for the Zone as it is by
 // then.
 func (msg zoneEditOpenedMsg) tenantUse(m *Model) (int64, func() tea.Cmd, error) {
-	return msg.account.ID, func() tea.Cmd { return m.editZoneOf(msg.zone.ID) }, msg.err
+	return msg.account.ID, func() tea.Cmd { return m.editZoneOf(msg.zone.ID, msg.turnOn) }, msg.err
 }
 
 // zoneEditOpened opens the dialog, its settings read-only when the
@@ -417,6 +439,13 @@ func (m *Model) zoneEditOpened(msg zoneEditOpenedMsg) {
 	}
 
 	switch up, ok := msg.p.(dnsprovider.ZoneUpdater); {
+	case msg.turnOn && msg.err != nil:
+		m.notice = notice{text: "Could not open " + msg.account.Label() + ": " + msg.err.Error(), err: true}
+	case msg.turnOn && !ok:
+		m.notice = notice{text: cannotTurnDNSSECOn(msg.account), err: true}
+	case msg.turnOn:
+		m.openZoneEdit(z, msg.account, up, "", false)
+		m.zoneEdit.confirmTurningOn()
 	case msg.err != nil:
 		m.openZoneEdit(z, msg.account, nil, "Could not open "+msg.account.Label()+": "+msg.err.Error(), false)
 	case !ok:
@@ -527,7 +556,7 @@ func (m *Model) zoneEditKey(msg tea.KeyMsg) tea.Cmd {
 			m.zoneEdit = nil
 			id := f.zone.ID
 
-			return m.withSecrets(func() tea.Cmd { return m.editZoneOf(id) })
+			return m.withSecrets(func() tea.Cmd { return m.editZoneOf(id, false) })
 		default:
 			f.field++
 		}
@@ -577,14 +606,19 @@ func (m *Model) changeZoneSettings(f *zoneEditForm) tea.Cmd {
 // the other values picked kept; made changes, or ones that could not be
 // cached, close it. The Zone Status cached is updated wherever the
 // session holds the Zone.
-func (m *Model) zoneSettingsSaved(msg zoneSettingsSavedMsg) {
+func (m *Model) zoneSettingsSaved(msg zoneSettingsSavedMsg) tea.Cmd {
 	f := m.zoneEdit
 	if f != nil && f.zone.ID != msg.zone.ID {
 		f = nil
 	}
 
+	// Turning DNSSEC on or off changes the keys its nameservers serve.
+	var keys tea.Cmd
+
 	if msg.cached {
+		before := m.zoneByID[msg.zone.ID]
 		m.updateZone(msg.zone)
+		keys = m.signingKeysChanged(before)
 	}
 
 	switch {
@@ -623,6 +657,8 @@ func (m *Model) zoneSettingsSaved(msg zoneSettingsSavedMsg) {
 
 		m.notice = notice{text: strings.Join(said, "; ") + "."}
 	}
+
+	return keys
 }
 
 // failedText says why an update failed: the changes it did not make, or,
