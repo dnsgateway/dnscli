@@ -10,19 +10,24 @@ import (
 	"github.com/sergelogvinov/dnscli/internal/tui"
 )
 
-// optionsRegistry registers the fake as "dnsgate", taking a secret token,
-// a region with a default and an egress picked from choices, with a
-// default, as the Gateway Adapter's Fields do. fb keeps the field map of
-// each build.
-func (f *fakeProvider) optionsRegistry(fb *fieldBuilds) dnsprovider.Registry {
+// optionFields are credential fields of each kind the Account form
+// handles: a secret token, a typed region with a default, and an egress
+// picked from choices, with a default.
+func optionFields() []dnsprovider.Field {
+	return []dnsprovider.Field{
+		{Name: "token", Label: "API token", Secret: true},
+		{Name: "region", Label: "Region", Default: "eu-west"},
+		{Name: "egress", Label: "Egress", Default: "auto", Choices: []string{"auto", "gateway", "agent"}},
+	}
+}
+
+// optionsRegistry registers f as "dnsgate", taking fields; fb keeps the
+// field map of each build.
+func optionsRegistry(f *fakeProvider, fb *fieldBuilds, fields []dnsprovider.Field) dnsprovider.Registry {
 	inner := f.Factory()
 
 	return dnsprovider.Registry{"dnsgate": {
-		Fields: []dnsprovider.Field{
-			{Name: "token", Label: "API token", Secret: true},
-			{Name: "region", Label: "Region", Default: "eu-west"},
-			{Name: "egress", Label: "Egress", Default: "auto", Choices: []string{"auto", "gateway", "agent"}},
-		},
+		Fields: fields,
 		New: func(m map[string]string, opts ...dnsprovider.Option) (dnsprovider.Provider, error) {
 			fb.mu.Lock()
 			fb.built = append(fb.built, maps.Clone(m))
@@ -37,7 +42,7 @@ func newOptionsHarness(t *testing.T, s *store.Store, f *fakeProvider, fb *fieldB
 	t.Helper()
 
 	return newHarnessWith(t, s, tui.Deps{
-		Providers:    f.optionsRegistry(fb),
+		Providers:    optionsRegistry(f, fb, optionFields()),
 		UnsealMethod: fastPassphrase(),
 	})
 }
