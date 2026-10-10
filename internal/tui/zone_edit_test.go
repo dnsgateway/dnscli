@@ -377,11 +377,12 @@ func TestAZoneSettingWrittenBeforeTheProviderFailsIsCachedWithTheError(t *testin
 	h.assertShows("DNSSEC       pending")
 }
 
-func TestTurningDNSSECOffWarnsToRemoveTheDSRecordAtTheRegistrarFirst(t *testing.T) {
+func TestTurningDNSSECOffWithoutCheckingTheDSAtTheParentStillWarnsOfIt(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
 	status := dnsprovider.ZoneStatus{DNSSEC: dnsprovider.On, HSTS: dnsprovider.On}
 	withZoneStatus(t, s, "work.example", status)
 
+	// No resolver: whether the parent serves a DS is unknown, never no.
 	h := newAccountHarness(t, s, settingsFake(status, true))
 
 	h.press("e", "enter")
@@ -389,10 +390,10 @@ func TestTurningDNSSECOffWarnsToRemoveTheDSRecordAtTheRegistrarFirst(t *testing.
 
 	// The hint warns as soon as off is picked, and the confirmation again.
 	h.press("right")
-	h.assertShows("DS record", "registrar")
+	h.assertShows("could not tell whether")
 
 	h.press(saveFromDNSSEC...)
-	h.assertShows("Turn DNSSEC off for work.example", "DS record", "registrar")
+	h.assertShows("Turn DNSSEC off for work.example", "could not tell whether")
 }
 
 func TestTurningHSTSOnWarnsThatBrowsersWillPinHTTPS(t *testing.T) {

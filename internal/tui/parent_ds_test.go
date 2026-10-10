@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/dnsgateway/dnsprovider"
+
 	"github.com/sergelogvinov/dnscli/internal/store"
 	"github.com/sergelogvinov/dnscli/internal/tui"
 )
@@ -115,6 +117,52 @@ func TestDSChecksWaitForAFreeSlotAmongTheDelegationLookups(t *testing.T) {
 	}
 
 	h.assertStatusBarShows("DS at parent: yes (1)")
+}
+
+// editDNSSECOff opens work.example's Edit Zone dialog in a session with
+// r as its resolver, Unseals, and picks DNSSEC off.
+func editDNSSECOff(t *testing.T, r *fakeResolver) *harness {
+	t.Helper()
+
+	s, _ := enrollFirstAccount(t)
+	status := dnsprovider.ZoneStatus{DNSSEC: dnsprovider.On, HSTS: dnsprovider.On}
+	withZoneStatus(t, s, "work.example", status)
+
+	h := newHarnessWith(t, s, tui.Deps{
+		Providers:    settingsFake(status, true).registry(),
+		UnsealMethod: fastPassphrase(),
+		Resolver:     r,
+	})
+
+	h.press("e", "enter")
+	h.unsealWith(passphrase)
+	h.press("right")
+
+	return h
+}
+
+func TestTurningDNSSECOffWarnsToRemoveTheDSFirstWhenTheParentServesOne(t *testing.T) {
+	r := &fakeResolver{}
+	r.setDS("work.example", dsOne)
+	h := editDNSSECOff(t, r)
+
+	// The hint warns as soon as off is picked, and the confirmation again.
+	h.assertShows("Remove the DS record")
+
+	h.press(saveFromDNSSEC...)
+	h.assertShows("Turn DNSSEC off for work.example", "Remove the DS record")
+}
+
+func TestTurningDNSSECOffDoesNotWarnWhenTheParentServesNoDS(t *testing.T) {
+	r := &fakeResolver{}
+	r.setDS("work.example")
+	h := editDNSSECOff(t, r)
+
+	h.assertHides("Remove the DS record")
+
+	h.press(saveFromDNSSEC...)
+	h.assertShows("Turn DNSSEC off for work.example")
+	h.assertHides("Remove the DS record")
 }
 
 func TestRefreshingTheZoneChecksTheDSAtItsParentAgain(t *testing.T) {

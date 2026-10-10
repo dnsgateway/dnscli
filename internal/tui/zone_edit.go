@@ -33,8 +33,9 @@ type zoneSetting struct {
 	// hint says what the setting does, as its field's hint.
 	hint string
 	// warning is what setting it to v, from cur, does to zone beyond the
-	// setting itself; empty when nothing.
-	warning func(zone, cur, v string) string
+	// setting itself, given whether zone's parent serves a DS; empty when
+	// nothing.
+	warning func(zone, cur, v string, ds dsPresence) string
 }
 
 // settingOnOff are the values of a setting turned on or off.
@@ -50,11 +51,16 @@ var (
 		says:   func(v string) string { return "turn DNSSEC " + v },
 		hint: "Signs the Zone's Records, so validating resolvers can check them. Once on, it stays pending " +
 			"until the DS record the Provider gives is added at the registrar.",
-		// dnscli does not read the DS record from the parent zone: the
-		// warning is said whenever DNSSEC is turned off.
-		warning: func(zone, _, v string) string {
-			if v != "off" {
+		// The warning is said only when the parent serves a DS, and,
+		// hedged, when whether it does is unknown: never taken as no DS.
+		warning: func(zone, _, v string, ds dsPresence) string {
+			switch {
+			case v != "off" || ds == dsNone:
 				return ""
+			case ds == dsUnknown:
+				return "dnscli could not tell whether the parent zone serves a DS record for " + zone + ". If it does, " +
+					"remove it at the registrar first: while it is there, validating resolvers fail to resolve " +
+					zone + " once it is unsigned."
 			}
 
 			return "Remove the DS record for " + zone + " at the registrar first: while it is there, " +
@@ -70,7 +76,7 @@ var (
 		hint:   "Tells browsers to reach the zone over HTTPS only.",
 		// The module turns HSTS on for six months when the Zone holds no
 		// max-age, and keeps the one it holds.
-		warning: func(zone, _, v string) string {
+		warning: func(zone, _, v string, _ dsPresence) string {
 			if v != "on" {
 				return ""
 			}
@@ -88,7 +94,7 @@ var (
 		hint: "The oldest TLS version the Provider accepts for HTTPS to the zone. 1.2 suits most sites; " +
 			"1.0 and 1.1 are deprecated.",
 		// The versions compare as their words do.
-		warning: func(zone, cur, v string) string {
+		warning: func(zone, cur, v string, _ dsPresence) string {
 			if v < "1.2" || (cur != "unknown" && v <= cur) {
 				return ""
 			}
@@ -334,6 +340,10 @@ func (m *Model) editZone() tea.Cmd {
 		return nil
 	}
 
+	// Whether the parent serves a DS decides the DNSSEC warning; it is
+	// public, so it is checked whatever the session.
+	ds := m.checkParentDS(z)
+
 	// Whether the Provider can is known only once it is opened, which
 	// needs secrets; a Provider type without Zone settings shows them
 	// read-only before asking for them.
@@ -343,10 +353,10 @@ func (m *Model) editZone() tea.Cmd {
 	case m.key == nil:
 		m.openZoneEdit(z, a, nil, "The session is sealed: Enter on a setting Unseals it, to change the settings.", true)
 	default:
-		return m.editZoneOf(z.ID)
+		return tea.Batch(ds, m.editZoneOf(z.ID))
 	}
 
-	return nil
+	return ds
 }
 
 // cannotChangeZoneSettings says an Account's Provider cannot change Zone
@@ -741,8 +751,9 @@ func (m *Model) zoneEditHints(f *zoneEditForm, field int, warn string) []string 
 }
 
 // warning is what the change the focused setting field holds would do
-// beyond the setting; empty when nothing.
-func (f *zoneEditForm) warning() string {
+// beyond the setting, given whether the parent serves a DS; empty when
+// nothing.
+func (f *zoneEditForm) warning(ds dsPresence) string {
 	i, ok := f.setting()
 	if !ok {
 		return ""
@@ -753,7 +764,7 @@ func (f *zoneEditForm) warning() string {
 		return ""
 	}
 
-	return c.setting.warning(f.zone.Name, c.setting.word(f.zone.Status), c.value)
+	return c.setting.warning(f.zone.Name, c.setting.word(f.zone.Status), c.value, ds)
 }
 
 // zoneEditKeys are the keys the Edit Zone dialog takes, as the dialog and
@@ -787,7 +798,7 @@ func (m *Model) zoneEditView() string {
 		footer = wrapNote(lipgloss.NewStyle(), capitalise(changesText(cs))+" for "+z.Name+" at "+f.account.Label()+"?", noteWidth)
 
 		for _, c := range cs {
-			if w := c.setting.warning(z.Name, c.setting.word(z.Status), c.value); w != "" {
+			if w := c.setting.warning(z.Name, c.setting.word(z.Status), c.value, m.dsPresenceOf(z.Name)); w != "" {
 				footer = append(footer, "")
 				footer = append(footer, wrapNote(errorStyle, w, noteWidth)...)
 			}
@@ -797,7 +808,7 @@ func (m *Model) zoneEditView() string {
 		// presses it, Esc goes back to the form.
 		footer = append(footer, "", hintStyle.Render(m.zoneEditKeys()), "", applyRow())
 	default:
-		footer = append(m.zoneEditHints(f, f.field, f.warning()), "", f.buttonRow(f.field == f.saveField()))
+		footer = append(m.zoneEditHints(f, f.field, f.warning(m.dsPresenceOf(z.Name))), "", f.buttonRow(f.field == f.saveField()))
 	}
 
 	if f.err != "" {
@@ -846,7 +857,9 @@ func (m *Model) measureZoneEdit() dialogSize {
 		warnings := []string{""}
 		if i := field - zoneFieldSettings; i >= 0 && i < len(f.settings) && f.p != nil {
 			for _, v := range f.settings[i].values {
-				warnings = append(warnings, f.settings[i].warning(f.zone.Name, "unknown", v))
+				for _, ds := range []dsPresence{dsServed, dsUnknown} {
+					warnings = append(warnings, f.settings[i].warning(f.zone.Name, "unknown", v, ds))
+				}
 			}
 		}
 
