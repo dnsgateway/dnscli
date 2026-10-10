@@ -64,6 +64,14 @@ type keyServer struct {
 func serveKeys(t *testing.T, zone string, keys []signingKey, signer signingKey, signed []signingKey) *keyServer {
 	t.Helper()
 
+	return serveKeysSignedAs(t, zone, zone, keys, signer, signed)
+}
+
+// serveKeysSignedAs is serveKeys with signerName as the RRSIG's signer
+// name, in place of the zone.
+func serveKeysSignedAs(t *testing.T, zone, signerName string, keys []signingKey, signer signingKey, signed []signingKey) *keyServer {
+	t.Helper()
+
 	if signed == nil {
 		signed = keys
 	}
@@ -89,7 +97,7 @@ func serveKeys(t *testing.T, zone string, keys []signingKey, signer signingKey, 
 			Expiration:  uint32(time.Now().Add(24 * time.Hour).Unix()),
 			Inception:   uint32(time.Now().Add(-time.Hour).Unix()),
 			KeyTag:      signer.rr.KeyTag(),
-			SignerName:  mdns.Fqdn(zone),
+			SignerName:  mdns.Fqdn(signerName),
 		}
 
 		if err := sig.Sign(signer.priv, rrset(signed)); err != nil {
@@ -217,6 +225,24 @@ func TestDNSKEYAtFailsWhenTheKeysDoNotValidateUnderTheirOwnSignature(t *testing.
 	}
 
 	if errors.Is(err, dns.ErrNameserversDisagree) || !strings.Contains(err.Error(), bad.addr) {
+		t.Fatalf("DNSKEYAt error = %v, want a bad signature, naming %s", err, bad.addr)
+	}
+}
+
+func TestDNSKEYAtFailsWhenTheSignatureNamesAnotherSigner(t *testing.T) {
+	ksk := newKey(t, "work.example", 257)
+
+	// The keys are signed by their own key, but under the parent's name.
+	bad := serveKeysSignedAs(t, "work.example", "example", []signingKey{ksk}, ksk, nil)
+
+	s := &System{}
+
+	got, err := s.DNSKEYAt(context.Background(), "work.example", []string{bad.addr})
+	if err == nil {
+		t.Fatalf("DNSKEYAt = %+v, want an error", got)
+	}
+
+	if !strings.Contains(err.Error(), bad.addr) {
 		t.Fatalf("DNSKEYAt error = %v, want a bad signature, naming %s", err, bad.addr)
 	}
 }

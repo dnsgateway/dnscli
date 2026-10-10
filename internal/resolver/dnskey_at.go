@@ -127,7 +127,7 @@ func keysFrom(ctx context.Context, addr string, q *mdns.Msg) ([]dns.SigningKey, 
 		return nil, nil
 	}
 
-	if !selfSigned(rrset, sigs, time.Now()) {
+	if !selfSigned(name, rrset, sigs, time.Now()) {
 		return nil, errors.New("its DNSKEY records do not validate under their own RRSIG")
 	}
 
@@ -155,11 +155,11 @@ func keysFrom(ctx context.Context, addr string, q *mdns.Msg) ([]dns.SigningKey, 
 	return keys, nil
 }
 
-// selfSigned reports whether a DNSKEY RRset validates, at now, under one of
-// sigs made by a key in the set itself.
-func selfSigned(rrset []mdns.RR, sigs []*mdns.RRSIG, now time.Time) bool {
+// selfSigned reports whether zone's DNSKEY RRset validates, at now, under
+// one of sigs made by zone itself, with a key in the set.
+func selfSigned(zone string, rrset []mdns.RR, sigs []*mdns.RRSIG, now time.Time) bool {
 	for _, sig := range sigs {
-		if !sig.ValidityPeriod(now) {
+		if !sig.ValidityPeriod(now) || !strings.EqualFold(mdns.Fqdn(sig.SignerName), mdns.Fqdn(zone)) {
 			continue
 		}
 
