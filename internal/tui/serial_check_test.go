@@ -31,9 +31,69 @@ type fakeResolver struct {
 	soaAt     map[string]uint32
 	soaAtErrs map[string]error
 
+	// ds are the DS records each zone's parent serves, an empty slice
+	// for none; dsErrs fail those queries.
+	ds     map[string][]string
+	dsErrs map[string]error
+
 	mu      sync.Mutex
 	nsAsked []string // zone names asked for NS, in order
 	atAsked []soaAtQuery
+	dsAsked []string // zone names whose parent was asked for DS, in order
+}
+
+// setDS scripts the DS records a zone's parent serves; none for no DS.
+func (r *fakeResolver) setDS(zone string, ds ...string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.ds == nil {
+		r.ds = map[string][]string{}
+	}
+
+	r.ds[zone] = append([]string{}, ds...)
+	delete(r.dsErrs, zone)
+}
+
+// failDS fails the DS queries for a zone with err.
+func (r *fakeResolver) failDS(zone string, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.dsErrs == nil {
+		r.dsErrs = map[string]error{}
+	}
+
+	r.dsErrs[zone] = err
+}
+
+func (r *fakeResolver) DSAt(_ context.Context, zone string) ([]string, time.Duration, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.dsAsked = append(r.dsAsked, zone)
+
+	if err, ok := r.dsErrs[zone]; ok {
+		return nil, 0, err
+	}
+
+	if ds, ok := r.ds[zone]; ok {
+		if len(ds) == 0 {
+			return nil, 0, nil
+		}
+
+		return append([]string(nil), ds...), time.Hour, nil
+	}
+
+	return nil, 0, errors.New("no DS answer scripted at the parent of " + zone)
+}
+
+// dsQueries returns the zone names whose parent was asked for DS so far.
+func (r *fakeResolver) dsQueries() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return append([]string(nil), r.dsAsked...)
 }
 
 // soaAtQuery is one SOA query sent straight to a Zone's nameservers.

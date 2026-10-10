@@ -125,12 +125,18 @@ func (m *Model) rateLimited(r zoneRefresh) bool {
 }
 
 // retryRefresh Refreshes the open Zone at the user's request, or explains
-// why it cannot.
+// why it cannot. Either way it checks the DS at the parent again, which
+// needs no secrets.
 func (m *Model) retryRefresh() tea.Cmd {
 	if m.open == nil {
 		return nil
 	}
 
+	return tea.Batch(m.checkParentDS(*m.open), m.refreshOpenZone())
+}
+
+// refreshOpenZone Refreshes the open Zone, or explains why it cannot.
+func (m *Model) refreshOpenZone() tea.Cmd {
 	z := *m.open
 	r := m.refreshOf(z.ID)
 

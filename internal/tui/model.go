@@ -92,8 +92,12 @@ type Model struct {
 	serialPolls map[int64]*serialPoll
 	// delegations is each zone name's Delegation this session, by nameKey.
 	delegations map[string]*delegation
-	// lookups schedules the Delegation lookups, by nameKey.
-	lookups workQueue[string]
+	// parentDS is what this session found of the DS each zone name's
+	// parent serves, by nameKey.
+	parentDS map[string]*dsCheck
+	// lookups schedules the Delegation lookups and the DS checks, under
+	// one limit.
+	lookups workQueue[lookupJob]
 
 	// addForm is the add-Account dialog; nil when closed.
 	addForm *addAccountForm
@@ -311,6 +315,8 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.queueSerialChecks(), m.queueDelegations())
 	case delegationMsg:
 		return m, m.delegationResolved(msg)
+	case dsCheckedMsg:
+		return m, m.dsChecked(msg)
 	case serialCheckedMsg:
 		return m, m.serialChecked(msg)
 	case zoneRefreshedMsg:
@@ -375,7 +381,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.cursor[paneRecords] = 0
 
-		return m, m.refreshZone(*m.open)
+		return m, tea.Batch(m.refreshZone(*m.open), m.checkParentDS(*m.open))
 	case tea.KeyMsg:
 		if m.unseal != nil {
 			return m, m.unsealKey(msg)

@@ -72,22 +72,29 @@ func (m *Model) queueDelegations() tea.Cmd {
 		switch {
 		case !ok:
 			m.delegations[k] = &delegation{}
-			m.lookups.queue = append(m.lookups.queue, k)
+			m.lookups.queue = append(m.lookups.queue, lookupJob{name: k})
 		case d.state == lookupFailed,
 			d.state == lookupDone && m.deps.now().Sub(d.at) >= delegationTTL:
 			*d = delegation{}
-			m.lookups.queue = append(m.lookups.queue, k)
+			m.lookups.queue = append(m.lookups.queue, lookupJob{name: k})
 		}
 	}
 
 	for k := range m.delegations {
 		if !names[k] {
 			delete(m.delegations, k)
-			m.lookups.drop(k)
+			m.lookups.drop(lookupJob{name: k})
 		}
 	}
 
-	return m.startDelegations()
+	for k := range m.parentDS {
+		if !names[k] {
+			delete(m.parentDS, k)
+			m.lookups.drop(lookupJob{name: k, ds: true})
+		}
+	}
+
+	return m.startLookups()
 }
 
 // forgetDelegations forgets what this session resolved for an Account's
@@ -106,32 +113,58 @@ func (m *Model) forgetDelegations(accountID int64) {
 	}
 }
 
-// startDelegations starts queued Delegation lookups up to the limit.
-func (m *Model) startDelegations() tea.Cmd {
+// lookupJob is one lookup the lookups queue schedules for a zone name,
+// by nameKey: its Delegation, or the DS its parent serves.
+type lookupJob struct {
+	name string
+	ds   bool
+}
+
+// startLookups starts queued Delegation lookups and DS checks, which
+// share one limit, up to it.
+func (m *Model) startLookups() tea.Cmd {
 	var cmds []tea.Cmd
 
 	for m.lookups.running < m.deps.serialChecks() && len(m.lookups.queue) > 0 {
-		k := m.lookups.queue[0]
+		job := m.lookups.queue[0]
 		m.lookups.queue = m.lookups.queue[1:]
 
-		d, ok := m.delegations[k]
-		if !ok {
+		var cmd tea.Cmd
+		if job.ds {
+			cmd = m.startDSCheck(job.name)
+		} else {
+			cmd = m.startDelegation(job.name)
+		}
+
+		if cmd == nil {
 			continue // left the cache meanwhile
 		}
 
-		d.state = lookupResolving
 		m.lookups.running++
 
-		ctx, resolver := m.ctx, m.deps.Resolver
-
-		cmds = append(cmds, func() tea.Msg {
-			ns, err := resolver.NS(ctx, k)
-
-			return delegationMsg{name: k, ns: ns, err: err}
-		})
+		cmds = append(cmds, cmd)
 	}
 
 	return tea.Batch(cmds...)
+}
+
+// startDelegation starts the Delegation lookup of a zone name; nil when
+// the name left the cache meanwhile.
+func (m *Model) startDelegation(k string) tea.Cmd {
+	d, ok := m.delegations[k]
+	if !ok {
+		return nil
+	}
+
+	d.state = lookupResolving
+
+	ctx, resolver := m.ctx, m.deps.Resolver
+
+	return func() tea.Msg {
+		ns, err := resolver.NS(ctx, k)
+
+		return delegationMsg{name: k, ns: ns, err: err}
+	}
 }
 
 // delegationResolved records a lookup result and starts the next one. A
@@ -142,7 +175,7 @@ func (m *Model) delegationResolved(msg delegationMsg) tea.Cmd {
 
 	m.recordDelegation(msg.name, msg.ns, msg.err)
 
-	return m.startDelegations()
+	return m.startLookups()
 }
 
 // recordDelegation records what the resolver answered for a zone name,
