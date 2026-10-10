@@ -15,6 +15,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/dnsgateway/dnsprovider"
 	"github.com/muesli/termenv"
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
@@ -90,6 +91,8 @@ type harness struct {
 	ctx    context.Context
 	quit   bool
 	dbPath string
+	// providers are the Provider types the model was given.
+	providers dnsprovider.Registry
 	// waits are the waits the model asked its timer for, in order.
 	waits []time.Duration
 }
@@ -129,7 +132,7 @@ func newHarnessWith(t *testing.T, s *store.Store, deps tui.Deps) *harness {
 		deps.Clock = func() time.Time { return testNow }
 	}
 
-	h := &harness{t: t, store: s}
+	h := &harness{t: t, store: s, providers: deps.Providers}
 
 	if deps.After == nil {
 		clock := deps.Clock

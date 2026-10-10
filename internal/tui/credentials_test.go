@@ -163,11 +163,11 @@ var credentialCases = []struct {
 }
 
 // pressRightTo presses Right in the add-Account dialog's Provider field
-// until it shows typ, one of the module's Provider types.
+// until it shows typ, one of the Provider types the harness was given.
 func (h *harness) pressRightTo(typ string) {
 	h.t.Helper()
 
-	for range providers.Registry().Types() {
+	for range h.providers.Types() {
 		if strings.Contains(h.view(), "‹ "+typ+" ›") {
 			return
 		}
