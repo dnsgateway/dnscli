@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"maps"
+	"strings"
 	"testing"
 
 	"github.com/dnsgateway/dnsprovider"
@@ -36,11 +37,11 @@ func TestAddAccountShowsOneInputPerFieldOfTheChosenProvider(t *testing.T) {
 	h.assertShows("‹ cloudflare ›", "API token")
 	h.assertHides("Account ID", "API key")
 
-	h.press("right")
+	h.pressRightTo("godaddy")
 	h.assertShows("‹ godaddy ›", "API key", "API secret")
 	h.assertHides("API token")
 
-	h.press("right")
+	h.pressRightTo("namecheap")
 	h.assertShows("‹ namecheap ›", "API user", "API key", "Whitelisted client IPv4")
 	h.assertHides("API secret")
 
@@ -149,29 +150,41 @@ func addOldAccount(t *testing.T, s *store.Store, typ, name, token string) dns.Ac
 // Providers: as typed into the form, and as an earlier dnscli stored them.
 var credentialCases = []struct {
 	typ    string
-	right  int // presses of Right from the first Provider type
 	values []string
 	fields map[string]string
 	old    string
 }{
-	{"cloudflare", 0, []string{"cf-token"}, map[string]string{"token": "cf-token"}, "cf-token"},
-	{"godaddy", 1, []string{"gd-key", "gd-secret"}, map[string]string{"key": "gd-key", "secret": "gd-secret"}, "gd-key:gd-secret"},
+	{"cloudflare", []string{"cf-token"}, map[string]string{"token": "cf-token"}, "cf-token"},
+	{"godaddy", []string{"gd-key", "gd-secret"}, map[string]string{"key": "gd-key", "secret": "gd-secret"}, "gd-key:gd-secret"},
 	{
-		"namecheap", 2, []string{"apiuser", "apikey", "192.0.2.10"},
+		"namecheap", []string{"apiuser", "apikey", "192.0.2.10"},
 		map[string]string{"user": "apiuser", "key": "apikey", "client_ip": "192.0.2.10"}, "apiuser:apikey:192.0.2.10",
 	},
 }
 
+// pressRightTo presses Right in the add-Account dialog's Provider field
+// until it shows typ, one of the module's Provider types.
+func (h *harness) pressRightTo(typ string) {
+	h.t.Helper()
+
+	for range providers.Registry().Types() {
+		if strings.Contains(h.view(), "‹ "+typ+" ›") {
+			return
+		}
+
+		h.press("right")
+	}
+
+	h.assertShows("‹ " + typ + " ›")
+}
+
 // fillAccountFields adds <typ>.<name> from the Accounts pane, typing a
 // value into each credential field in turn.
-func (h *harness) fillAccountFields(right int, name string, values ...string) {
+func (h *harness) fillAccountFields(typ, name string, values ...string) {
 	h.t.Helper()
 
 	h.press("shift+tab", "i")
-
-	for range right {
-		h.press("right")
-	}
+	h.pressRightTo(typ)
 
 	h.press("tab")
 	h.typeText(name)
@@ -192,7 +205,7 @@ func TestAddingAnAccountVerifiesThenSealsItsFieldsAsJSON(t *testing.T) {
 			fb := &fieldBuilds{}
 			h := newFieldsHarness(t, s, f, fb)
 
-			h.fillAccountFields(tc.right, "home", tc.values...)
+			h.fillAccountFields(tc.typ, "home", tc.values...)
 			h.unsealWith(passphrase)
 
 			label := tc.typ + ".home"
@@ -219,7 +232,7 @@ func TestCredentialsTheProviderRefusesAreShownAndNothingIsSaved(t *testing.T) {
 	f.Fail(providertest.OpAccount, dnsprovider.ErrUnauthorized)
 	h := newFieldsHarness(t, s, f, &fieldBuilds{})
 
-	h.fillAccountFields(1, "home", "gd-key", "wrong-secret")
+	h.fillAccountFields("godaddy", "home", "gd-key", "wrong-secret")
 	h.unsealWith(passphrase)
 
 	h.assertShows("Add Account", "The Provider did not accept the credentials", "authorized")
@@ -331,7 +344,7 @@ func TestCredentialFieldsAreTrimmedAndBlankOnesAreMissing(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
 	h := newFieldsHarness(t, s, newFake(), &fieldBuilds{})
 
-	h.fillAccountFields(2, "home", " apiuser ", "   ", "192.0.2.10")
+	h.fillAccountFields("namecheap", "home", " apiuser ", "   ", "192.0.2.10")
 	h.assertShows("Enter the API key.")
 
 	// The blank field is focused.
@@ -463,7 +476,7 @@ func TestFieldsTheProviderCannotBeBuiltFromAreNotItsRefusal(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
 	h := newHarnessWith(t, s, tui.Deps{Providers: providers.Registry(), UnsealMethod: fastPassphrase()})
 
-	h.fillAccountFields(2, "home", "apiuser", "apikey", "not-an-ip")
+	h.fillAccountFields("namecheap", "home", "apiuser", "apikey", "not-an-ip")
 	h.unsealWith(passphrase)
 
 	h.assertShows("Add Account", "The credentials are not valid", "IPv4")
@@ -475,7 +488,7 @@ func TestEscCancelsVerifyingAndSavesNothing(t *testing.T) {
 	f := newFake()
 	h := newFieldsHarness(t, s, f, &fieldBuilds{})
 
-	h.fillAccountFields(0, "home", "cf-token")
+	h.fillAccountFields("cloudflare", "home", "cf-token")
 	h.typeText(passphrase)
 
 	// Hold the save while the credentials are verified.
