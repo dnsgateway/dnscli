@@ -6,7 +6,7 @@ import (
 	"maps"
 	"os"
 
-	"github.com/dnsgateway/dnsgate/gatewayadapter"
+	"github.com/dnsgateway/dnsgate-go/gatewayadapter"
 	"github.com/dnsgateway/dnsprovider"
 )
 

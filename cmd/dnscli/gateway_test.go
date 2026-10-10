@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dnsgateway/dnsgate/gatewayadapter"
+	"github.com/dnsgateway/dnsgate-go/gatewayadapter"
 )
 
 // testCA is a self-signed CA certificate, written to a PEM file, with a
