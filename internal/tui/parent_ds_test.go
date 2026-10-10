@@ -95,7 +95,7 @@ func TestDSChecksWaitForAFreeSlotAmongTheDelegationLookups(t *testing.T) {
 	h, startup := newHarnessHoldingStartup(t, s, tui.Deps{Resolver: r, SerialChecks: 1})
 
 	// The one slot is taken by a Delegation lookup: opening a Zone queues
-	// its DS check behind it.
+	// its DS Check behind it.
 	lookups := runOnce(startup)
 	if got := r.nsQueries(); len(got) != 1 {
 		t.Fatalf("NS queries in flight = %v, want 1", got)
@@ -195,7 +195,7 @@ func TestTurningDNSSECOffWhileTheDSCheckRunsSaysItIsChecking(t *testing.T) {
 	r.setDS("work.example", dsOne)
 
 	// The one slot is taken by a Delegation lookup that never answers, so
-	// the DS check stays queued while the dialog is open.
+	// the DS Check stays queued while the dialog is open.
 	providers := settingsFake(status, true).registry()
 	h, _ := newHarnessHoldingStartup(t, s, tui.Deps{
 		Providers:    providers,

@@ -347,7 +347,7 @@ func (m *Model) editZone() tea.Cmd {
 
 	// Whether the parent serves a DS decides the DNSSEC warning; it is
 	// public, so it is checked whatever the session.
-	ds := m.checkParentDS(z)
+	checkDS := m.checkParentDS(z)
 
 	// Whether the Provider can is known only once it is opened, which
 	// needs secrets; a Provider type without Zone settings shows them
@@ -358,10 +358,10 @@ func (m *Model) editZone() tea.Cmd {
 	case m.key == nil:
 		m.openZoneEdit(z, a, nil, "The session is sealed: Enter on a setting Unseals it, to change the settings.", true)
 	default:
-		return tea.Batch(ds, m.editZoneOf(z.ID))
+		return tea.Batch(checkDS, m.editZoneOf(z.ID))
 	}
 
-	return ds
+	return checkDS
 }
 
 // cannotChangeZoneSettings says an Account's Provider cannot change Zone

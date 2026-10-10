@@ -11,7 +11,8 @@ import (
 	"github.com/sergelogvinov/dnscli/internal/dns"
 )
 
-// lookup is how far this session has resolved a zone name's Delegation.
+// lookup is how far this session has got with a zone name's Delegation
+// lookup or its DS Check.
 type lookup int
 
 const (
@@ -43,12 +44,13 @@ type delegationMsg struct {
 	err  error
 }
 
-// queueDelegations runs after each cache (re)load. It queues a Delegation
+// queueLookups runs after each cache (re)load. It queues a Delegation
 // lookup for every zone name this session has not resolved yet, once per
 // zone name however many Accounts have it, and again for every name whose
 // lookup failed or whose result is older than delegationTTL: once per
-// reload, like the Serial Checks. It forgets the names that left the cache.
-func (m *Model) queueDelegations() tea.Cmd {
+// reload, like the Serial Checks. It forgets the Delegations and DS Checks
+// of the names that left the cache.
+func (m *Model) queueLookups() tea.Cmd {
 	if m.deps.Resolver == nil {
 		return nil
 	}
@@ -72,25 +74,25 @@ func (m *Model) queueDelegations() tea.Cmd {
 		switch {
 		case !ok:
 			m.delegations[k] = &delegation{}
-			m.lookups.queue = append(m.lookups.queue, lookupJob{name: k})
+			m.lookups.queue = append(m.lookups.queue, lookupJob{kind: lookupDelegation, name: k})
 		case d.state == lookupFailed,
 			d.state == lookupDone && m.deps.now().Sub(d.at) >= delegationTTL:
 			*d = delegation{}
-			m.lookups.queue = append(m.lookups.queue, lookupJob{name: k})
+			m.lookups.queue = append(m.lookups.queue, lookupJob{kind: lookupDelegation, name: k})
 		}
 	}
 
 	for k := range m.delegations {
 		if !names[k] {
 			delete(m.delegations, k)
-			m.lookups.drop(lookupJob{name: k})
+			m.lookups.drop(lookupJob{kind: lookupDelegation, name: k})
 		}
 	}
 
 	for k := range m.parentDS {
 		if !names[k] {
 			delete(m.parentDS, k)
-			m.lookups.drop(lookupJob{name: k, ds: true})
+			m.lookups.drop(lookupJob{kind: lookupDS, name: k})
 		}
 	}
 
@@ -113,14 +115,22 @@ func (m *Model) forgetDelegations(accountID int64) {
 	}
 }
 
-// lookupJob is one lookup the lookups queue schedules for a zone name,
-// by nameKey: its Delegation, or the DS its parent serves.
+// lookupKind is what a lookupJob looks up.
+type lookupKind int
+
+const (
+	lookupDelegation lookupKind = iota // the zone name's Delegation
+	lookupDS                           // the DS its parent serves: a DS Check
+)
+
+// lookupJob is one lookup the lookups queue schedules for a zone name, by
+// nameKey.
 type lookupJob struct {
+	kind lookupKind
 	name string
-	ds   bool
 }
 
-// startLookups starts queued Delegation lookups and DS checks, which
+// startLookups starts queued Delegation lookups and DS Checks, which
 // share one limit, up to it.
 func (m *Model) startLookups() tea.Cmd {
 	var cmds []tea.Cmd
@@ -129,13 +139,7 @@ func (m *Model) startLookups() tea.Cmd {
 		job := m.lookups.queue[0]
 		m.lookups.queue = m.lookups.queue[1:]
 
-		var cmd tea.Cmd
-		if job.ds {
-			cmd = m.startDSCheck(job.name)
-		} else {
-			cmd = m.startDelegation(job.name)
-		}
-
+		cmd := m.startLookup(job)
 		if cmd == nil {
 			continue // left the cache meanwhile
 		}
@@ -148,32 +152,45 @@ func (m *Model) startLookups() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// startDelegation starts the Delegation lookup of a zone name; nil when
-// the name left the cache meanwhile.
-func (m *Model) startDelegation(k string) tea.Cmd {
-	d, ok := m.delegations[k]
-	if !ok {
-		return nil
-	}
+// startLookup marks a job's zone name as resolving and returns the command
+// that asks the resolver; nil when the name is no longer tracked.
+func (m *Model) startLookup(job lookupJob) tea.Cmd {
+	ctx, resolver, k := m.ctx, m.deps.Resolver, job.name
 
-	d.state = lookupResolving
+	switch job.kind {
+	case lookupDS:
+		c, ok := m.parentDS[k]
+		if !ok {
+			return nil
+		}
 
-	ctx, resolver := m.ctx, m.deps.Resolver
+		c.state = lookupResolving
 
-	return func() tea.Msg {
-		ns, err := resolver.NS(ctx, k)
+		return func() tea.Msg {
+			ds, _, err := resolver.DSAt(ctx, k)
 
-		return delegationMsg{name: k, ns: ns, err: err}
+			return dsCheckedMsg{name: k, ds: ds, err: err}
+		}
+	default:
+		d, ok := m.delegations[k]
+		if !ok {
+			return nil
+		}
+
+		d.state = lookupResolving
+
+		return func() tea.Msg {
+			ns, err := resolver.NS(ctx, k)
+
+			return delegationMsg{name: k, ns: ns, err: err}
+		}
 	}
 }
 
-// delegationResolved records a lookup result and starts the next one. A
-// failure leaves the Live Zone unknown and raises no error: it shows only
-// in the Edit Zone dialog.
-func (m *Model) delegationResolved(msg delegationMsg) tea.Cmd {
+// lookupAnswered frees the slot of a lookup that answered, whatever its
+// kind, and starts the next one.
+func (m *Model) lookupAnswered() tea.Cmd {
 	m.lookups.running--
-
-	m.recordDelegation(msg.name, msg.ns, msg.err)
 
 	return m.startLookups()
 }
@@ -181,7 +198,8 @@ func (m *Model) delegationResolved(msg delegationMsg) tea.Cmd {
 // recordDelegation records what the resolver answered for a zone name,
 // by nameKey, whoever asked it: a lookup, or a check just before a Zone
 // write such as an Offboarding. A name this session does not track, as
-// it left the cache, is not recorded.
+// it left the cache, is not recorded. A failure leaves the Live Zone
+// unknown and raises no error: it shows only in the Edit Zone dialog.
 func (m *Model) recordDelegation(name string, ns []string, err error) {
 	d, ok := m.delegations[name]
 	if !ok {

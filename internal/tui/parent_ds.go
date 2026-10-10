@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -15,19 +14,14 @@ import (
 type dsCheck struct {
 	state lookup
 	// ds are the DS records the parent serves, in presentation form.
-	ds []string
-	// ttl is the TTL of their set.
-	ttl time.Duration
+	ds  []string
 	err error
-	// at is when the parent answered.
-	at time.Time
 }
 
-// dsCheckedMsg carries the result of one DS check.
+// dsCheckedMsg carries the result of one DS Check.
 type dsCheckedMsg struct {
 	name string // nameKey of the zone name
 	ds   []string
-	ttl  time.Duration
 	err  error
 }
 
@@ -56,43 +50,24 @@ func (m *Model) checkParentDS(z dns.Zone) tea.Cmd {
 	}
 
 	c.state = lookupQueued
-	m.lookups.queue = append(m.lookups.queue, lookupJob{name: k, ds: true})
+	m.lookups.queue = append(m.lookups.queue, lookupJob{kind: lookupDS, name: k})
 
 	return m.startLookups()
 }
 
-// startDSCheck starts the DS check of a zone name; nil when the name is
-// no longer tracked.
-func (m *Model) startDSCheck(k string) tea.Cmd {
-	c, ok := m.parentDS[k]
+// recordDSCheck records what a DS Check found, unless its zone name is no
+// longer tracked.
+func (m *Model) recordDSCheck(msg dsCheckedMsg) {
+	c, ok := m.parentDS[msg.name]
 	if !ok {
-		return nil
+		return
 	}
 
-	c.state = lookupResolving
-
-	ctx, resolver := m.ctx, m.deps.Resolver
-
-	return func() tea.Msg {
-		ds, ttl, err := resolver.DSAt(ctx, k)
-
-		return dsCheckedMsg{name: k, ds: ds, ttl: ttl, err: err}
+	if msg.err != nil {
+		*c = dsCheck{state: lookupFailed, err: msg.err}
+	} else {
+		*c = dsCheck{state: lookupDone, ds: msg.ds}
 	}
-}
-
-// dsChecked records a DS check result and starts the next lookup.
-func (m *Model) dsChecked(msg dsCheckedMsg) tea.Cmd {
-	m.lookups.running--
-
-	if c, ok := m.parentDS[msg.name]; ok {
-		if msg.err != nil {
-			*c = dsCheck{state: lookupFailed, err: msg.err}
-		} else {
-			*c = dsCheck{state: lookupDone, ds: msg.ds, ttl: msg.ttl, at: m.deps.now()}
-		}
-	}
-
-	return m.startLookups()
 }
 
 // dsPresence is whether a zone name's parent serves a DS, as far as this

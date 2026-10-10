@@ -3,6 +3,7 @@ package tui_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -51,7 +52,7 @@ func (r *fakeResolver) setDS(zone string, ds ...string) {
 		r.ds = map[string][]string{}
 	}
 
-	r.ds[zone] = append([]string{}, ds...)
+	r.ds[zone] = slices.Clone(ds)
 	delete(r.dsErrs, zone)
 }
 
@@ -82,7 +83,7 @@ func (r *fakeResolver) DSAt(_ context.Context, zone string) ([]string, time.Dura
 			return nil, 0, nil
 		}
 
-		return append([]string(nil), ds...), time.Hour, nil
+		return slices.Clone(ds), time.Hour, nil
 	}
 
 	return nil, 0, errors.New("no DS answer scripted at the parent of " + zone)
@@ -93,7 +94,7 @@ func (r *fakeResolver) dsQueries() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	return append([]string(nil), r.dsAsked...)
+	return slices.Clone(r.dsAsked)
 }
 
 // soaAtQuery is one SOA query sent straight to a Zone's nameservers.

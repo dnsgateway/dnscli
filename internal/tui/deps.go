@@ -34,9 +34,8 @@ type Deps struct {
 	// the DS records it serves. Nil runs none of them.
 	Resolver Resolver
 	// SerialChecks is how many Serial Checks may run at once, and, apart
-	// from them, how many Delegation lookups and DS checks together.
-	// Defaults to
-	// DefaultSerialChecks.
+	// from them, how many Delegation lookups and DS Checks together.
+	// Defaults to DefaultSerialChecks.
 	SerialChecks int
 	// Refreshes is how many Refreshes may run at once. Defaults to
 	// DefaultRefreshes.

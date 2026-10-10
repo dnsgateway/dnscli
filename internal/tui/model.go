@@ -95,7 +95,7 @@ type Model struct {
 	// parentDS is what this session found of the DS each zone name's
 	// parent serves, by nameKey.
 	parentDS map[string]*dsCheck
-	// lookups schedules the Delegation lookups and the DS checks, under
+	// lookups schedules the Delegation lookups and the DS Checks, under
 	// one limit.
 	lookups workQueue[lookupJob]
 
@@ -312,11 +312,15 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cursor[p] = min(m.cursor[p], max(m.itemCount(p)-1, 0))
 		}
 
-		return m, tea.Batch(m.queueSerialChecks(), m.queueDelegations())
+		return m, tea.Batch(m.queueSerialChecks(), m.queueLookups())
 	case delegationMsg:
-		return m, m.delegationResolved(msg)
+		m.recordDelegation(msg.name, msg.ns, msg.err)
+
+		return m, m.lookupAnswered()
 	case dsCheckedMsg:
-		return m, m.dsChecked(msg)
+		m.recordDSCheck(msg)
+
+		return m, m.lookupAnswered()
 	case serialCheckedMsg:
 		return m, m.serialChecked(msg)
 	case zoneRefreshedMsg:

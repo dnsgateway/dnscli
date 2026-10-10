@@ -36,7 +36,7 @@ const (
 // zoneStatusItems are the Zone Status of the open Zone, one rendered item
 // each, in the order the status bar shows them. Mail records come from the
 // cached Records; DNSSEC and HSTS from the Zone Status the last Refresh
-// read; the DS at the parent from this session's DS check; the Live Zone
+// read; the DS at the parent from this session's DS Check; the Live Zone
 // from the Delegation and the cached nameservers.
 func (m *Model) zoneStatusItems(z dns.Zone) []string {
 	var items []string
