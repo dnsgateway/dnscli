@@ -58,10 +58,9 @@ type execQueryRower interface {
 // stores z's Hosting State even when it is Unknown. replaced reports that
 // a cached Zone of that name had another Provider zone ID.
 func putZone(ctx context.Context, db execQueryRower, z dns.Zone, listing bool) (stored dns.Zone, replaced bool, err error) {
-	var (
-		refreshed, statusAt, signingSeen int64
-		ns, oldID, state                 string
-	)
+	var oldID string
+
+	scan := zoneScan{z: &z}
 
 	err = db.QueryRowContext(ctx, `SELECT provider_zone_id FROM zones WHERE account_id = ? AND name = ?`,
 		z.AccountID, z.Name).Scan(&oldID)
@@ -95,18 +94,14 @@ func putZone(ctx context.Context, db execQueryRower, z dns.Zone, listing bool) (
 			min_tls          = IIF(excluded.provider_zone_id = provider_zone_id, min_tls, ''),
 			status_at        = IIF(excluded.provider_zone_id = provider_zone_id, status_at, 0),
 			signing_seen_at  = IIF(excluded.provider_zone_id = provider_zone_id, signing_seen_at, 0)
-		RETURNING id, soa_serial, refreshed_at, dnssec, hsts, min_tls, status_at, nameservers, hosting_state, signing_seen_at`,
+		RETURNING id, `+zoneStateColumns,
 		z.AccountID, z.Name, z.ProviderID, z.Serial, unixOrZero(z.RefreshedAt), joinNames(z.Nameservers), hostingWord(z.State), listing,
-	).Scan(&z.ID, &z.Serial, &refreshed, &z.Status.DNSSEC, &z.Status.HSTS, &z.Status.MinTLS, &statusAt, &ns, &state, &signingSeen)
+	).Scan(scan.dests(&z.ID)...)
 	if err != nil {
 		return dns.Zone{}, false, fmt.Errorf("put zone %s: %w", z.Name, err)
 	}
 
-	z.RefreshedAt = timeOrZero(refreshed)
-	z.StatusAt = timeOrZero(statusAt)
-	z.Nameservers = splitNames(ns)
-	z.State = hostingStateOf(state)
-	z.SigningSeenAt = timeOrZero(signingSeen)
+	scan.fill()
 
 	return z, replaced, nil
 }
@@ -244,8 +239,7 @@ func accountZones(ctx context.Context, conn *sql.Conn, accountID int64) (map[str
 // Zones returns every cached Zone, ordered by zone name and then Account.
 func (s *Store) Zones(ctx context.Context) ([]dns.Zone, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT z.id, z.account_id, z.name, z.provider_zone_id, z.soa_serial, z.refreshed_at,
-			z.dnssec, z.hsts, z.min_tls, z.status_at, z.nameservers, z.hosting_state, z.signing_seen_at
+		SELECT z.id, z.account_id, z.name, z.provider_zone_id, `+zoneStateColumns+`
 		FROM zones z JOIN accounts a ON a.id = z.account_id
 		ORDER BY z.name, a.provider, a.name`)
 	if err != nil {
@@ -256,22 +250,14 @@ func (s *Store) Zones(ctx context.Context) ([]dns.Zone, error) {
 	var out []dns.Zone
 
 	for rows.Next() {
-		var (
-			z                                dns.Zone
-			refreshed, statusAt, signingSeen int64
-			ns, state                        string
-		)
+		var z dns.Zone
 
-		if err := rows.Scan(&z.ID, &z.AccountID, &z.Name, &z.ProviderID, &z.Serial, &refreshed,
-			&z.Status.DNSSEC, &z.Status.HSTS, &z.Status.MinTLS, &statusAt, &ns, &state, &signingSeen); err != nil {
+		scan := zoneScan{z: &z}
+		if err := rows.Scan(scan.dests(&z.ID, &z.AccountID, &z.Name, &z.ProviderID)...); err != nil {
 			return nil, fmt.Errorf("list zones: %w", err)
 		}
 
-		z.RefreshedAt = timeOrZero(refreshed)
-		z.StatusAt = timeOrZero(statusAt)
-		z.Nameservers = splitNames(ns)
-		z.State = hostingStateOf(state)
-		z.SigningSeenAt = timeOrZero(signingSeen)
+		scan.fill()
 
 		out = append(out, z)
 	}
@@ -368,10 +354,7 @@ func (s *Store) SaveRefresh(ctx context.Context, z dns.Zone, records []dns.Recor
 // still has that very Zone: the same ID, Account, zone name and Provider
 // zone ID.
 func (s *Store) SaveZoneStatus(ctx context.Context, z dns.Zone, u dnsprovider.ZoneUpdate, status dnsprovider.ZoneStatus, at time.Time) (dns.Zone, error) {
-	var (
-		refreshed, statusAt, signingSeen int64
-		ns, state                        string
-	)
+	scan := zoneScan{z: &z}
 
 	err := s.db.QueryRowContext(ctx, `
 		UPDATE zones SET
@@ -380,10 +363,10 @@ func (s *Store) SaveZoneStatus(ctx context.Context, z dns.Zone, u dnsprovider.Zo
 			min_tls   = IIF(?10, ?11, min_tls),
 			status_at = MAX(status_at, ?5)
 		WHERE id = ?6 AND account_id = ?7 AND name = ?8 AND provider_zone_id = ?9
-		RETURNING soa_serial, refreshed_at, dnssec, hsts, min_tls, status_at, nameservers, hosting_state, signing_seen_at`,
+		RETURNING `+zoneStateColumns,
 		u.DNSSEC != nil, status.DNSSEC, u.HSTS != nil, status.HSTS, unixOrZero(at),
 		z.ID, z.AccountID, z.Name, z.ProviderID, u.MinTLS != nil, status.MinTLS,
-	).Scan(&z.Serial, &refreshed, &z.Status.DNSSEC, &z.Status.HSTS, &z.Status.MinTLS, &statusAt, &ns, &state, &signingSeen)
+	).Scan(scan.dests()...)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrZoneNotCached
 	}
@@ -392,11 +375,7 @@ func (s *Store) SaveZoneStatus(ctx context.Context, z dns.Zone, u dnsprovider.Zo
 		return dns.Zone{}, fmt.Errorf("save zone status: %w", err)
 	}
 
-	z.RefreshedAt = timeOrZero(refreshed)
-	z.StatusAt = timeOrZero(statusAt)
-	z.Nameservers = splitNames(ns)
-	z.State = hostingStateOf(state)
-	z.SigningSeenAt = timeOrZero(signingSeen)
+	scan.fill()
 
 	return z, nil
 }
@@ -609,6 +588,33 @@ func timeOrZero(unix int64) time.Time {
 	}
 
 	return time.Unix(unix, 0).UTC()
+}
+
+// zoneStateColumns are the columns of a cached Zone's state, in the order
+// a zoneScan reads them.
+const zoneStateColumns = `soa_serial, refreshed_at, dnssec, hsts, min_tls, status_at, nameservers, hosting_state, signing_seen_at`
+
+// zoneScan reads zoneStateColumns into a Zone: Scan into its dests, then
+// fill the Zone.
+type zoneScan struct {
+	z                                *dns.Zone
+	refreshed, statusAt, signingSeen int64
+	ns, state                        string
+}
+
+// dests are the Scan destinations of zoneStateColumns, after any before.
+func (s *zoneScan) dests(before ...any) []any {
+	return append(before, &s.z.Serial, &s.refreshed, &s.z.Status.DNSSEC, &s.z.Status.HSTS, &s.z.Status.MinTLS,
+		&s.statusAt, &s.ns, &s.state, &s.signingSeen)
+}
+
+// fill sets the Zone's state from what was scanned.
+func (s *zoneScan) fill() {
+	s.z.RefreshedAt = timeOrZero(s.refreshed)
+	s.z.StatusAt = timeOrZero(s.statusAt)
+	s.z.Nameservers = splitNames(s.ns)
+	s.z.State = hostingStateOf(s.state)
+	s.z.SigningSeenAt = timeOrZero(s.signingSeen)
 }
 
 // joinNames stores a list of DNS names, such as nameservers, in one column.
