@@ -52,12 +52,17 @@ var (
 		hint: "Signs the Zone's Records, so validating resolvers can check them. Once on, it stays pending " +
 			"until the DS record the Provider gives is added at the registrar.",
 		// The warning is said only when the parent serves a DS, and,
-		// hedged, when whether it does is unknown: never taken as no DS.
+		// hedged, while it is checked or when whether it does is unknown:
+		// never taken as no DS.
 		warning: func(zone, _, v string, ds dsPresence) string {
 			switch {
 			case v != "off" || ds == dsNone:
 				return ""
-			case ds == dsUnknown:
+			case ds == dsChecking:
+				return "dnscli is checking whether the parent zone serves a DS record for " + zone + ". If it does, " +
+					"remove it at the registrar first: while it is there, validating resolvers fail to resolve " +
+					zone + " once it is unsigned."
+			case ds == dsNotChecked, ds == dsUnknown:
 				return "dnscli could not tell whether the parent zone serves a DS record for " + zone + ". If it does, " +
 					"remove it at the registrar first: while it is there, validating resolvers fail to resolve " +
 					zone + " once it is unsigned."
@@ -857,7 +862,7 @@ func (m *Model) measureZoneEdit() dialogSize {
 		warnings := []string{""}
 		if i := field - zoneFieldSettings; i >= 0 && i < len(f.settings) && f.p != nil {
 			for _, v := range f.settings[i].values {
-				for _, ds := range []dsPresence{dsServed, dsUnknown} {
+				for _, ds := range []dsPresence{dsServed, dsChecking, dsUnknown} {
 					warnings = append(warnings, f.settings[i].warning(f.zone.Name, "unknown", v, ds))
 				}
 			}

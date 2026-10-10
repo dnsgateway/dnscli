@@ -185,3 +185,34 @@ func TestRefreshingTheZoneChecksTheDSAtItsParentAgain(t *testing.T) {
 		t.Fatalf("DS queries = %v, want example.com asked again", got)
 	}
 }
+
+func TestTurningDNSSECOffWhileTheDSCheckRunsSaysItIsChecking(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	status := dnsprovider.ZoneStatus{DNSSEC: dnsprovider.On, HSTS: dnsprovider.On}
+	withZoneStatus(t, s, "work.example", status)
+
+	r := &fakeResolver{ns: map[string][]string{}}
+	r.setDS("work.example", dsOne)
+
+	// The one slot is taken by a Delegation lookup that never answers, so
+	// the DS check stays queued while the dialog is open.
+	providers := settingsFake(status, true).registry()
+	h, _ := newHarnessHoldingStartup(t, s, tui.Deps{
+		Providers:    providers,
+		UnsealMethod: fastPassphrase(),
+		Resolver:     r,
+		SerialChecks: 1,
+	})
+	h.providers = providers
+
+	h.press("e", "enter")
+	h.unsealWith(passphrase)
+	h.press("right")
+
+	h.assertShows("is checking whether the parent")
+	h.assertHides("could not tell")
+
+	h.press(saveFromDNSSEC...)
+	h.assertShows("Turn DNSSEC off for work.example", "is checking whether the parent")
+	h.assertHides("could not tell")
+}

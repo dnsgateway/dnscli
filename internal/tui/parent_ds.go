@@ -100,9 +100,12 @@ func (m *Model) dsChecked(msg dsCheckedMsg) tea.Cmd {
 type dsPresence int
 
 const (
-	// dsUnknown is a parent not checked this session, being checked, or
-	// whose check failed: never taken as no DS.
-	dsUnknown dsPresence = iota
+	// dsNotChecked is a parent not checked this session.
+	dsNotChecked dsPresence = iota
+	// dsChecking is a parent whose check is queued or in flight.
+	dsChecking
+	// dsUnknown is a parent whose check failed: never taken as no DS.
+	dsUnknown
 	dsNone
 	dsServed
 )
@@ -110,11 +113,18 @@ const (
 // dsPresenceOf says whether a zone name's parent serves a DS.
 func (m *Model) dsPresenceOf(zone string) dsPresence {
 	c, ok := m.parentDS[nameKey(zone)]
+	if !ok {
+		return dsNotChecked
+	}
 
-	switch {
-	case !ok || c.state != lookupDone:
+	switch c.state {
+	case lookupQueued, lookupResolving:
+		return dsChecking
+	case lookupFailed:
 		return dsUnknown
-	case len(c.ds) == 0:
+	}
+
+	if len(c.ds) == 0 {
 		return dsNone
 	}
 
@@ -124,21 +134,16 @@ func (m *Model) dsPresenceOf(zone string) dsPresence {
 // parentDSText says, in a few words, what this session found of the DS
 // records z's parent serves, for the Zone Status bar.
 func (m *Model) parentDSText(z dns.Zone) string {
-	c, ok := m.parentDS[nameKey(z.Name)]
-	if !ok {
+	switch m.dsPresenceOf(z.Name) {
+	case dsNotChecked:
 		return "DS at parent: not checked this session"
-	}
-
-	switch c.state {
-	case lookupQueued, lookupResolving:
+	case dsChecking:
 		return "DS at parent: checking…"
-	case lookupFailed:
+	case dsUnknown:
 		return "DS at parent: unknown"
-	}
-
-	if len(c.ds) == 0 {
+	case dsNone:
 		return "DS at parent: no"
 	}
 
-	return fmt.Sprintf("DS at parent: yes (%d)", len(c.ds))
+	return fmt.Sprintf("DS at parent: yes (%d)", len(m.parentDS[nameKey(z.Name)].ds))
 }
