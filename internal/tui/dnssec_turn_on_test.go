@@ -311,3 +311,16 @@ func TestTheDSIsNotToBePublishedWhileTheLargestTTLIsUnknown(t *testing.T) {
 	h.assertStatusBarShows("DNSSEC: DS can be published once the Records' TTLs are known")
 	h.assertHides("publish the DS")
 }
+
+func TestAFailedDSCheckOfAnUnsignedZoneShowsDNSSECUnknownNotOff(t *testing.T) {
+	c := &testClock{now: testNow}
+	r := &fakeResolver{}
+	r.setKeys(rfcZone)
+	r.failDS(rfcZone, errors.New("i/o timeout"))
+	f := turnOnFake(dnsprovider.Off)
+
+	h, _ := newTurnOnHarness(t, f, r, c)
+
+	h.assertStatusBarShows("DNSSEC: unknown")
+	h.assertHides("DNSSEC: off")
+}

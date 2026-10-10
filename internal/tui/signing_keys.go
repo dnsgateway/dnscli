@@ -254,6 +254,8 @@ func (m *Model) dnssecStepOf(z dns.Zone) dnssecStep {
 			return stepWaitKeys
 		case ds == dsNone:
 			return stepTurnOn
+		case ds == dsUnknown:
+			return stepUnknown
 		}
 
 		return stepSilent
