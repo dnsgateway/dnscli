@@ -222,7 +222,7 @@ type editAccountMsg struct {
 // openEditAccount opens the edit-Account dialog, showing the stored
 // credential fields that are not secret. Credentials that cannot be read
 // do not stop it: the Account can still be renamed, or its credentials
-// typed anew.
+// typed anew, with a picked field at its default as when adding.
 func (m *Model) openEditAccount(msg editAccountMsg) {
 	if errors.Is(msg.err, store.ErrAccountNotFound) {
 		return
@@ -235,7 +235,7 @@ func (m *Model) openEditAccount(msg editAccountMsg) {
 	f.stored = make([]string, len(f.creds))
 	for i, fd := range f.creds {
 		f.stored[i] = msg.fields[fd.Name]
-		if !fd.Secret {
+		if !fd.Secret && msg.err == nil {
 			f.values[i] = f.stored[i]
 		}
 	}
@@ -565,14 +565,16 @@ func (m *Model) submitEditAccount() tea.Cmd {
 }
 
 // changed reports whether a credential field holds a value other than
-// the stored one; an empty one keeps it.
+// the stored one; an empty one keeps it, and so does an optional one at
+// its default where none is stored.
 func (f *addAccountForm) changed() bool {
 	if f.tenant != nil {
 		return true
 	}
 
-	for i := range f.creds {
-		if v := f.value(i); v != "" && v != f.stored[i] {
+	for i, fd := range f.creds {
+		v := f.value(i)
+		if v != "" && v != f.stored[i] && (f.stored[i] != "" || v != fd.Default) {
 			return true
 		}
 	}

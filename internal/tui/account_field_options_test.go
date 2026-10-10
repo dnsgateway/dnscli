@@ -135,3 +135,31 @@ func TestEditingAnAccountLeavesAFieldWithADefaultEmpty(t *testing.T) {
 		t.Errorf("sealed fields = %v, want the new token and no region", got)
 	}
 }
+
+func TestUnreadableCredentialsStartAPickedFieldAtItsDefault(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	// With two secrets, an old single API token cannot be read into them.
+	fields := append(optionFields(), dnsprovider.Field{Name: "key", Label: "API key", Secret: true})
+	addOldAccount(t, s, "dnsgate", "old", "only-a-token")
+	h := newHarnessWith(t, s, tui.Deps{
+		Providers:    optionsRegistry(newFake(), &fieldBuilds{}, fields),
+		UnsealMethod: fastPassphrase(),
+	})
+
+	h.press("shift+tab", "j", "e")
+	h.unsealWith(passphrase)
+	h.assertShows("Edit Account dnsgate.old", "cannot read the stored credentials")
+
+	h.typeText("2")
+	h.press("down", "down", "down") // past the token and region to the egress
+	h.assertShows("‹ auto ›")
+
+	// The default changes nothing: a rename reseals the credentials as
+	// they are.
+	h.press("down", "down", "enter") // past the key to the Save button
+	h.assertShows("Saved dnsgate.old2.")
+
+	if got := storedPlaintext(t, s, accountLabeled(t, s, "dnsgate.old2")); got != "only-a-token" {
+		t.Errorf("renaming resealed the credentials as %q, want them as they were", got)
+	}
+}
