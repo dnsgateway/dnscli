@@ -318,3 +318,26 @@ func TestTheKeysOfAProviderWithoutAKeyReaderAreAskedOfTheNameservers(t *testing.
 		t.Fatalf("the Provider was asked for the signing keys %d times without a KeyReader", n)
 	}
 }
+
+func TestTheKeysAProviderReturnsNoneOfAreAskedOfTheNameservers(t *testing.T) {
+	f := newKeysFake(dnsprovider.On)
+	f.SetSigningKeys("zd1")
+
+	r := &fakeResolver{}
+	r.setKeys(rfcZone, rfcKey)
+	r.setDS(rfcZone, rfcDS)
+	h := newKeysHarnessWith(t, f, r)
+
+	h.assertStatusBarShows("DNSSEC: On")
+
+	if n := f.count(providertest.OpSigningKeys); n == 0 {
+		t.Fatal("the Provider was not asked for the signing keys")
+	}
+
+	if q := r.keysQueries(); len(q) == 0 || q[0].zone != rfcZone || !slices.Equal(q[0].servers, cruzDee) {
+		t.Fatalf("DNSKEY queries = %+v, want %s asked at its nameservers %v", q, rfcZone, cruzDee)
+	}
+
+	h.press("s")
+	h.assertShows(rfcDNSKEY)
+}

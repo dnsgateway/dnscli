@@ -85,7 +85,8 @@ const keyReadTimeout = 10 * time.Second
 // keyReadFor returns what reads a Zone's key-signing keys through its
 // Provider's API, for a Key Lookup to prefer over asking its nameservers:
 // ok is false when they cannot be read that way, as the session is
-// sealed or the Provider has no dnsprovider.KeyReader, or when the read
+// sealed or the Provider has no dnsprovider.KeyReader, when it returns
+// none, as it has them only once it signs the Zone, or when the read
 // fails, whatever the reason.
 func (m *Model) keyReadFor(zoneID int64) func(ctx context.Context) (keys []dns.SigningKey, ok bool) {
 	z, found := m.zoneByID[zoneID]
@@ -106,7 +107,7 @@ func (m *Model) keyReadFor(zoneID int64) func(ctx context.Context) (keys []dns.S
 		}
 
 		keys, err := p.(dnsprovider.KeyReader).SigningKeys(ctx, provider.ModuleZone(z))
-		if err != nil {
+		if err != nil || len(keys) == 0 {
 			return nil, false
 		}
 
