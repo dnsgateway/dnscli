@@ -26,7 +26,7 @@ func (s *System) SOAAt(ctx context.Context, zone string, servers []string) (uint
 	var errs []error
 
 	for _, server := range servers {
-		addrs, err := serverAddrs(ctx, server, s.portOr("53"))
+		addrs, err := serverAddrs(ctx, server, s.queryPort("53"))
 		if err != nil {
 			errs = append(errs, err)
 
@@ -55,14 +55,12 @@ func (s *System) SOAAt(ctx context.Context, zone string, servers []string) (uint
 }
 
 // serverAddrs returns the addresses, with ports, to reach a nameserver at;
-// on port when server names none.
-func serverAddrs(ctx context.Context, server, port string) ([]string, error) {
-	host, p, err := net.SplitHostPort(server)
+// on defaultPort when server names none.
+func serverAddrs(ctx context.Context, server, defaultPort string) ([]string, error) {
+	host, port, err := net.SplitHostPort(server)
 	if err != nil {
-		host, p = strings.TrimSuffix(server, "."), port
+		host, port = strings.TrimSuffix(server, "."), defaultPort
 	}
-
-	port = p
 
 	if net.ParseIP(host) != nil {
 		return []string{net.JoinHostPort(host, port)}, nil

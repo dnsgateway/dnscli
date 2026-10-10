@@ -40,6 +40,7 @@ type dsQuery struct {
 	rd      bool
 }
 
+// dsRR builds a DS record for zone with the given TTL, key tag and digest.
 func dsRR(zone string, ttl uint32, tag uint16, digest string) *mdns.DS {
 	return &mdns.DS{
 		Hdr:        mdns.RR_Header{Name: mdns.Fqdn(zone), Rrtype: mdns.TypeDS, Class: mdns.ClassINET, Ttl: ttl},

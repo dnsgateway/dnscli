@@ -137,7 +137,7 @@ func (s *System) exchange(ctx context.Context, q *mdns.Msg) (*mdns.Msg, error) {
 	var errs []error
 
 	for _, server := range config.Servers {
-		r, err := exchangeAt(ctx, net.JoinHostPort(server, s.portOr(config.Port)), q)
+		r, err := exchangeAt(ctx, net.JoinHostPort(server, s.queryPort(config.Port)), q)
 
 		switch {
 		case err != nil:
@@ -203,13 +203,14 @@ func (s *System) load() (*mdns.ClientConfig, error) {
 	return s.config, s.err
 }
 
-// portOr is the port queries go to: port unless the System overrides it.
-func (s *System) portOr(port string) string {
+// queryPort is the port queries go to: the System's override when set,
+// else defaultPort.
+func (s *System) queryPort(defaultPort string) string {
 	if s.port != "" {
 		return s.port
 	}
 
-	return port
+	return defaultPort
 }
 
 func (s *System) path() string {

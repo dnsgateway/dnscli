@@ -39,7 +39,7 @@ func (s *System) DSAt(ctx context.Context, zone string) ([]string, time.Duration
 	for _, ns := range servers {
 		addrs := ns.addrs
 		if len(addrs) == 0 {
-			addrs, err = serverAddrs(ctx, ns.host, s.portOr("53"))
+			addrs, err = serverAddrs(ctx, ns.host, s.queryPort("53"))
 			if err != nil {
 				errs = append(errs, err)
 
@@ -92,7 +92,7 @@ func (s *System) parentOf(ctx context.Context, zone string) (string, []nameserve
 			return "", nil, fmt.Errorf("find the parent zone of %s: %w", strings.TrimSuffix(zone, "."), err)
 		}
 
-		if servers := nameserversOf(r, name, s.portOr("53")); len(servers) > 0 {
+		if servers := nameserversOf(r, name, s.queryPort("53")); len(servers) > 0 {
 			return name, servers, nil
 		}
 	}
