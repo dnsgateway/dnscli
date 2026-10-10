@@ -3,6 +3,7 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -25,6 +26,9 @@ type keyCheck struct {
 	servers []string
 	keys    []dns.SigningKey
 	err     error
+	// again looks the keys up again once the lookup in flight answers,
+	// as what it asked about changed meanwhile.
+	again bool
 }
 
 // keysCheckedMsg carries the result of one key lookup.
@@ -73,18 +77,58 @@ func (m *Model) checkSigningKeys(z dns.Zone) tea.Cmd {
 }
 
 // recordKeysCheck records what a key lookup found, unless its Zone is no
-// longer tracked.
-func (m *Model) recordKeysCheck(msg keysCheckedMsg) {
+// longer tracked, and looks the keys up again when asked to meanwhile.
+func (m *Model) recordKeysCheck(msg keysCheckedMsg) tea.Cmd {
 	c, ok := m.signingKeys[msg.zoneID]
 	if !ok {
-		return
+		return nil
 	}
 
+	again := c.again
+
 	if msg.err != nil {
-		c.state, c.keys, c.err = lookupFailed, nil, msg.err
+		*c = keyCheck{state: lookupFailed, zone: c.zone, servers: c.servers, err: msg.err}
 	} else {
-		c.state, c.keys, c.err = lookupDone, msg.keys, nil
+		*c = keyCheck{state: lookupDone, zone: c.zone, servers: c.servers, keys: msg.keys}
 	}
+
+	if z, ok := m.zoneByID[msg.zoneID]; ok && again {
+		return m.checkSigningKeys(z)
+	}
+
+	return nil
+}
+
+// signingKeysChanged looks the open Zone's keys up again when what they
+// are worked out from changed since: its nameservers became known, such
+// as when its Delegation resolved after it was opened, or a Refresh
+// changed them or its DNSSEC state, such as turning it on. A lookup in
+// flight is followed by another once it answers.
+func (m *Model) signingKeysChanged(before dns.Zone) tea.Cmd {
+	if m.open == nil || m.open.ID != before.ID {
+		return nil
+	}
+
+	z := *m.open
+
+	c, ok := m.signingKeys[z.ID]
+
+	switch {
+	case !ok:
+		return m.checkSigningKeys(z)
+	case before.Status.DNSSEC == z.Status.DNSSEC && slices.Equal(c.servers, m.nameserversOf(z)):
+		return nil
+	case c.state == lookupResolving:
+		c.again = true
+
+		return nil
+	case c.state == lookupQueued:
+		c.zone, c.servers = z.Name, m.nameserversOf(z)
+
+		return nil
+	}
+
+	return m.checkSigningKeys(z)
 }
 
 // keysOf returns the key-signing keys this session read for a Zone; none

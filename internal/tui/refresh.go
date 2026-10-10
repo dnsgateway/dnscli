@@ -461,9 +461,10 @@ func (m *Model) zoneRefreshed(msg zoneRefreshedMsg) tea.Cmd {
 
 	// A rate-limited Zone Status read holds back the next Refresh too.
 	*r = zoneRefresh{validated: true, retryAt: m.retryAt(msg.statusErr), caps: msg.caps}
+	before := m.zoneByID[msg.zoneID]
 	m.updateZone(msg.zone)
 
-	cmds := []tea.Cmd{m.startRefreshes()}
+	cmds := []tea.Cmd{m.startRefreshes(), m.signingKeysChanged(before)}
 	if m.open != nil && m.open.ID == msg.zoneID {
 		cmds = append(cmds, m.reloadRecords(msg.zoneID))
 	}

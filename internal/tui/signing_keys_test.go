@@ -148,6 +148,66 @@ func TestAFailedDSCheckWithKeysShowsUnknown(t *testing.T) {
 	h.assertHides("DNSSEC: On", "does not match", "publish the DS")
 }
 
+func TestTheKeysAreLookedUpOnceTheDelegationNamesTheNameservers(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	// example.com has no nameservers cached: its Delegation names them.
+	r := &fakeResolver{ns: map[string][]string{"example.com": cruzDee}}
+	r.setKeys("example.com", ecKey)
+	r.setDS("example.com")
+	h, startup := newHarnessHoldingStartup(t, s, tui.Deps{Resolver: r})
+
+	h.press("space")
+
+	if q := r.keysQueries(); len(q) != 0 {
+		t.Fatalf("DNSKEY queries = %+v, want none before the nameservers are known", q)
+	}
+
+	h.run(startup)
+
+	if q := r.keysQueries(); len(q) != 1 || q[0].zone != "example.com" || !slices.Equal(q[0].servers, cruzDee) {
+		t.Fatalf("DNSKEY queries = %+v, want example.com asked at its delegated nameservers %v", q, cruzDee)
+	}
+
+	h.assertStatusBarShows("DNSSEC: publish the DS")
+}
+
+func TestARefreshThatTurnsDNSSECOnLooksUpTheKeysAgain(t *testing.T) {
+	r := &fakeResolver{}
+	r.setKeys(rfcZone)
+	r.setDS(rfcZone)
+
+	f := newFake().AddZone(dns.Zone{Name: rfcZone, ProviderID: "zd1", Nameservers: cruzDee})
+	f.SetZoneStatus("zd1", dnsprovider.ZoneStatus{DNSSEC: dnsprovider.On})
+
+	r.ns = map[string][]string{rfcZone: cruzDee}
+
+	s, _ := openStore(t)
+	h := newHarnessWith(t, s, tui.Deps{Providers: f.registry(), UnsealMethod: fastPassphrase(), Resolver: r})
+	h.fillAddAccount("work", token)
+	h.typeText(passphrase)
+	h.press("tab")
+	h.typeText(passphrase)
+	h.press("enter")
+	h.assertShows(rfcZone, "unsealed")
+
+	// The keys are read before the Refresh says DNSSEC is on, while the
+	// nameservers serve none yet; they serve the key by the time it does.
+	msgs := runOnce(h.step(h.pressHolding("space")))
+	if q := r.keysQueries(); len(q) != 1 {
+		t.Fatalf("DNSKEY queries = %+v, want one sent on opening the Zone", q)
+	}
+
+	r.setKeys(rfcZone, ecKey)
+
+	for _, msg := range msgs {
+		h.send(msg)
+	}
+
+	h.assertStatusBarShows("DNSSEC: publish the DS")
+}
+
 func TestAParentDSForAZoneThatServesNoKeysSaysItDoesNotMatch(t *testing.T) {
 	for _, dnssec := range []dnsprovider.Setting{dnsprovider.Off, dnsprovider.Unknown, dnsprovider.On} {
 		t.Run(dnssec.String(), func(t *testing.T) {

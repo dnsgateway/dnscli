@@ -322,15 +322,20 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case delegationMsg:
 		m.recordDelegation(msg.name, msg.ns, msg.err)
 
-		return m, m.lookupAnswered()
+		var keys tea.Cmd
+		if m.open != nil && nameKey(m.open.Name) == msg.name {
+			keys = m.signingKeysChanged(*m.open)
+		}
+
+		return m, tea.Batch(keys, m.lookupAnswered())
 	case dsCheckedMsg:
 		m.recordDSCheck(msg)
 
 		return m, m.lookupAnswered()
 	case keysCheckedMsg:
-		m.recordKeysCheck(msg)
+		again := m.recordKeysCheck(msg)
 
-		return m, m.lookupAnswered()
+		return m, tea.Batch(again, m.lookupAnswered())
 	case serialCheckedMsg:
 		return m, m.serialChecked(msg)
 	case zoneRefreshedMsg:
