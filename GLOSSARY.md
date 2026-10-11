@@ -42,6 +42,10 @@ _Avoid_: nameserver settings
 A record in the parent zone, part of the Delegation, that fixes which DNSKEY signs the zone.
 _Avoid_: DS key, DNSSEC record
 
+**Unsign**:
+Turning DNSSEC off for a signed Zone at its Provider, so its nameservers stop serving its keys. dnscli unsigns a Zone only once its parent serves no Delegation Signer and resolvers may have flushed the one it served.
+_Avoid_: disable DNSSEC
+
 **Live Zone**:
 The Zone, among those sharing a zone name, whose Account's nameservers match the Delegation.
 
