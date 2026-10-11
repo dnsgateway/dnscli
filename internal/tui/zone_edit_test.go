@@ -377,7 +377,7 @@ func TestAZoneSettingWrittenBeforeTheProviderFailsIsCachedWithTheError(t *testin
 	h.assertShows("DNSSEC       pending")
 }
 
-func TestTurningDNSSECOffWithoutCheckingTheDSAtTheParentStillWarnsOfIt(t *testing.T) {
+func TestTurningDNSSECOffWithoutCheckingTheDSAtTheParentWarnsOfItAndRefuses(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
 	status := dnsprovider.ZoneStatus{DNSSEC: dnsprovider.On, HSTS: dnsprovider.On}
 	withZoneStatus(t, s, "work.example", status)
@@ -388,12 +388,13 @@ func TestTurningDNSSECOffWithoutCheckingTheDSAtTheParentStillWarnsOfIt(t *testin
 	h.press("e", "enter")
 	h.unsealWith(passphrase)
 
-	// The hint warns as soon as off is picked, and the confirmation again.
+	// The hint warns as soon as off is picked; Save then refuses.
 	h.press("right")
 	h.assertShows("could not tell whether")
 
 	h.press(saveFromDNSSEC...)
-	h.assertShows("Turn DNSSEC off for work.example", "could not tell whether")
+	h.assertShows("DNSSEC stays on: dnscli could not tell whether")
+	h.assertHides("Turn DNSSEC off for work.example")
 }
 
 func TestTurningHSTSOnWarnsThatBrowsersWillPinHTTPS(t *testing.T) {

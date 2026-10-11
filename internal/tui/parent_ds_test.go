@@ -187,7 +187,7 @@ func TestRefreshingTheZoneChecksTheDSAtItsParentAgain(t *testing.T) {
 	}
 }
 
-func TestTurningDNSSECOffWhileTheDSCheckRunsSaysItIsChecking(t *testing.T) {
+func TestTurningDNSSECOffWhileTheDSCheckRunsSaysItIsCheckingAndRefuses(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
 	status := dnsprovider.ZoneStatus{DNSSEC: dnsprovider.On, HSTS: dnsprovider.On}
 	withZoneStatus(t, s, "work.example", status)
@@ -213,7 +213,8 @@ func TestTurningDNSSECOffWhileTheDSCheckRunsSaysItIsChecking(t *testing.T) {
 	h.assertShows("is checking whether the parent")
 	h.assertHides("could not tell")
 
+	// Save refuses until the check answers.
 	h.press(saveFromDNSSEC...)
-	h.assertShows("Turn DNSSEC off for work.example", "is checking whether the parent")
-	h.assertHides("could not tell")
+	h.assertShows("DNSSEC stays on: dnscli is checking whether the parent")
+	h.assertHides("Turn DNSSEC off for work.example", "could not tell")
 }

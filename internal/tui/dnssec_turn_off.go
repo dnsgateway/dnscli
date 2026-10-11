@@ -43,12 +43,21 @@ func (m *Model) markTurningOff(zoneID int64) {
 // While its parent serves a DS, unsigning makes validating resolvers fail
 // to resolve it: the DS is removed first.
 func (m *Model) unsignRefusal(z dns.Zone) string {
-	if m.dsPresenceOf(z.Name) == dsServed {
+	switch m.dsPresenceOf(z.Name) {
+	case dsServed:
 		return "DNSSEC stays on: remove the DS record for " + z.Name + " at the registrar first. " +
 			"dnscli watches the parent zone for it to go."
+	case dsNone:
+		return ""
+	case dsChecking:
+		return "DNSSEC stays on: dnscli is checking whether the parent zone serves a DS record for " + z.Name +
+			". It unsigns the Zone only once it sees none there."
 	}
 
-	return ""
+	// A DS Check that failed, or has not answered, is never taken as no
+	// DS.
+	return "DNSSEC stays on: dnscli could not tell whether the parent zone serves a DS record for " + z.Name +
+		". It unsigns the Zone only once it sees none there: Refresh to check again."
 }
 
 // turnOffStep is the next step of a signed Zone being turned off, given
