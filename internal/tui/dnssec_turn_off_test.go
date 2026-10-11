@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/dnsgateway/dnsprovider"
+	"github.com/dnsgateway/dnsprovider/providertest"
 )
 
 // pickDNSSECOff opens the Edit Zone dialog of the highlighted Zone, picks
@@ -146,6 +147,45 @@ func TestADSThatReappearsRestartsTheWaitOnceItIsGoneAgain(t *testing.T) {
 	r.setDS(rfcZone)
 	h.press("r")
 	h.assertStatusBarShows("DNSSEC: unsign after 13:30")
+}
+
+func TestAStaleZoneIsNotUnsignedEvenOnceItsDSTTLHasPassed(t *testing.T) {
+	c := &testClock{now: testNow}
+	r := &fakeResolver{}
+	r.setKeys(rfcZone, rfcKey)
+	r.setDS(rfcZone, rfcDS)
+	f := turnOnFake(dnsprovider.On)
+
+	h, _ := newTurnOnHarness(t, f, r, c)
+	pickDNSSECOff(h)
+	h.press("esc")
+
+	r.setDS(rfcZone)
+	h.passTime(2 * time.Hour)
+	h.assertStatusBarShows("DNSSEC: DS gone, ready to unsign (S turns it off)")
+
+	// A Refresh that fails leaves the Zone Stale.
+	f.Fail(providertest.OpRecords, errors.New("api.cloudflare.com: i/o timeout"))
+	h.press("right", "r")
+	h.assertHides("validated this session")
+	h.assertStatusBarShows("DNSSEC: DS gone, ready to unsign")
+	h.assertHides("turns it off")
+
+	stale := "example.net is a Stale Zone: it can be edited once a Refresh validates it"
+
+	h.press("S")
+	h.assertHides("Turn DNSSEC off for example.net at")
+	h.assertShows(stale)
+
+	// Nor from the Edit Zone dialog, as for any Zone write (ADR-0001).
+	h.press("left")
+	pickDNSSECOff(h)
+	h.assertHides("Turn DNSSEC off for example.net at")
+	h.assertShows("example.net is a Stale Zone")
+
+	if calls := updateZoneCalls(f); len(calls) != 0 {
+		t.Fatalf("UpdateZone calls = %+v, want none for a Stale Zone", calls)
+	}
 }
 
 func TestAFailedDSCheckBlocksUnsigning(t *testing.T) {

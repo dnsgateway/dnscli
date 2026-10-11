@@ -44,7 +44,8 @@ func (m *Model) markTurningOff(zoneID int64) {
 }
 
 // unsignRefusal says why z may not be unsigned now; empty when it may.
-// While its parent serves a DS, unsigning makes validating resolvers fail
+// Once its DS allows it, it may still not be written while the session
+// is sealed or the Zone Stale, as for any Zone write. While its parent serves a DS, unsigning makes validating resolvers fail
 // to resolve it: the DS is removed first, and the Zone unsigned only once
 // resolvers may have flushed it.
 func (m *Model) unsignRefusal(z dns.Zone) string {
@@ -58,7 +59,8 @@ func (m *Model) unsignRefusal(z dns.Zone) string {
 				z.Name + " until then."
 		}
 
-		return ""
+		// Unsigning is a Zone write: it passes the write gate (ADR-0001).
+		return m.writeRefusal(z)
 	case dsChecking:
 		return "DNSSEC stays on: dnscli is checking whether the parent zone serves a DS record for " + z.Name +
 			". It unsigns the Zone only once it sees none there."
