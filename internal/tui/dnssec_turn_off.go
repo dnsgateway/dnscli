@@ -96,10 +96,11 @@ func (m *Model) dnssecTurned(zoneID int64, v string) {
 }
 
 // unsignRefusal says why z may not be unsigned now; empty when it may.
-// Once its DS allows it, it may still not be written while the session
-// is sealed or the Zone Stale, as for any Zone write. While its parent serves a DS, unsigning makes validating resolvers fail
-// to resolve it: the DS is removed first, and the Zone unsigned only once
-// resolvers may have flushed it.
+// While its parent serves a DS, unsigning makes validating resolvers
+// fail to resolve it: the DS is removed first, and the Zone unsigned only
+// once resolvers may have flushed it. Once its DS allows it, it may still
+// not be written while the session is sealed or the Zone Stale, as for
+// any Zone write.
 func (m *Model) unsignRefusal(z dns.Zone) string {
 	switch m.dsPresenceOf(z.Name) {
 	case dsServed:

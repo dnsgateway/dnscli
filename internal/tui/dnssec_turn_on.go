@@ -22,8 +22,8 @@ type signingSeenMsg struct {
 // changes what the cache holds: the time it was first seen signed, its
 // keys read, or that it was seen unsigned, serving no keys while its
 // Provider does not report it signed, which also forgets when its DS was
-// first seen gone. A failed lookup, or keys the
-// nameservers do not agree on yet, say neither.
+// first seen gone. A failed lookup, or keys the nameservers do not agree
+// on yet, say neither.
 func (m *Model) noteSigning(z dns.Zone) tea.Cmd {
 	c, ok := m.keyLookups[z.ID]
 	if !ok || c.state != lookupDone {

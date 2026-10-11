@@ -26,8 +26,8 @@ import (
 // A changed Provider zone ID is another zone at the Provider, so it
 // forgets, in the same transaction, everything cached of the old one: its
 // Records, serial, last Refresh time, nameservers, Zone Status, when it
-// was first seen signed and what was seen of its DS. Only what z itself sets is stored. replaced
-// reports that it did so.
+// was first seen signed and what was seen of its DS. Only what z itself
+// sets is stored. replaced reports that it did so.
 func (s *Store) PutZone(ctx context.Context, z dns.Zone) (stored dns.Zone, replaced bool, err error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
