@@ -211,6 +211,9 @@ type zoneEditForm struct {
 	// choice is, for each of settings, the index of the value picked
 	// among its options.
 	choice []int
+	// dnssecPicked is set once the user picks a DNSSEC value, rather
+	// than keeping the one the Zone has.
+	dnssecPicked bool
 	// picker lists a setting's values; nil when closed.
 	picker *picker
 	// confirming is set once Save is pressed with changes, until they are
@@ -265,6 +268,26 @@ func (f *zoneEditForm) rebase(z dns.Zone) {
 		if j := slices.Index(f.options(i), picked[i]); j >= 0 {
 			f.choice[i] = j
 		}
+	}
+}
+
+// picked is the value s's field holds; empty when the dialog has no
+// such setting.
+func (f *zoneEditForm) picked(s *zoneSetting) string {
+	i := slices.Index(f.settings, s)
+	if i < 0 {
+		return ""
+	}
+
+	return f.options(i)[f.choice[i]]
+}
+
+// pick picks option j of setting i, as the user does.
+func (f *zoneEditForm) pick(i, j int) {
+	f.choice[i] = j
+
+	if f.settings[i] == dnssecSetting {
+		f.dnssecPicked = true
 	}
 }
 
@@ -553,9 +576,13 @@ func (m *Model) zoneEditKey(msg tea.KeyMsg) tea.Cmd {
 				step = n - 1
 			}
 
-			f.choice[i] = (f.choice[i] + step) % n
+			f.pick(i, (f.choice[i]+step)%n)
 		}
 	case ActionSelect:
+		if f.field == f.saveField() && f.p != nil {
+			m.cancelTurningOff(f)
+		}
+
 		switch {
 		case f.field == f.saveField() && (f.p == nil || len(f.changes()) == 0):
 			// Like an Account saved unchanged, nothing to make closes it.
@@ -567,7 +594,7 @@ func (m *Model) zoneEditKey(msg tea.KeyMsg) tea.Cmd {
 				title:   f.settings[i].name,
 				options: f.options(i),
 				cursor:  f.choice[i],
-				pick:    func(j int) { f.choice[i] = j },
+				pick:    func(j int) { f.pick(i, j) },
 			}
 		case onSetting && f.unseal:
 			// The dialog opens again, its settings to change, once the

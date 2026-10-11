@@ -69,6 +69,15 @@ func (m *Model) markTurningOff(zoneID int64) {
 	}
 }
 
+// cancelTurningOff ends turning DNSSEC off for the Zone of the Edit Zone
+// dialog when the user picks it on again and saves: its Provider has not
+// turned it off yet, so nothing is written.
+func (m *Model) cancelTurningOff(f *zoneEditForm) {
+	if f.dnssecPicked && f.picked(dnssecSetting) == "on" && m.turningOff[f.zone.ID] == turnOffAsked {
+		delete(m.turningOff, f.zone.ID)
+	}
+}
+
 // dnssecTurned notes DNSSEC turned "on" or "off" for a Zone by its
 // Provider: off is then waited on until its nameservers stop serving the
 // keys; on ends any turning off.

@@ -43,6 +43,32 @@ func TestUnsigningIsRefusedWhileTheParentServesADS(t *testing.T) {
 	h.assertStatusBarShows("DNSSEC: remove the DS at the registrar to turn it off")
 }
 
+func TestPickingDNSSECOnAgainCancelsTurningItOff(t *testing.T) {
+	c := &testClock{now: testNow}
+	r := &fakeResolver{}
+	r.setKeys(rfcZone, rfcKey)
+	r.setDS(rfcZone, rfcDS)
+	f := turnOnFake(dnsprovider.On)
+
+	h, _ := newTurnOnHarness(t, f, r, c)
+	pickDNSSECOff(h)
+	h.assertShows("DNSSEC stays on")
+
+	// Back on the DNSSEC row, on is picked again and saved: the Zone is
+	// signed, so nothing is written, and it is no longer turned off.
+	h.press("down", "down", "left")
+	h.assertShows("‹ on ›")
+	h.press(saveFromDNSSEC...)
+	h.assertHides("Edit Zone example.net")
+
+	if calls := updateZoneCalls(f); len(calls) != 0 {
+		t.Fatalf("UpdateZone calls = %+v, want none to keep DNSSEC on", calls)
+	}
+
+	h.assertStatusBarShows("DNSSEC: On")
+	h.assertHides("remove the DS at the registrar")
+}
+
 func TestOnceTheDSIsGoneUnsigningWaitsForItsTTLThenIsOfferedAndSent(t *testing.T) {
 	c := &testClock{now: testNow}
 	r := &fakeResolver{}
