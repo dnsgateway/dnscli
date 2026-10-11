@@ -36,6 +36,10 @@ const caFileEnv = "DNSCLI_CA_FILE"
 // A build with the fakeprovider tag adds an in-memory fake for trying the UI.
 var registry = providers.Registry()
 
+// dnsResolver is the resolver the session asks. A build with the
+// fakeprovider tag answers for the fake's Zones itself.
+var dnsResolver tui.Resolver = &resolver.System{}
+
 // unsealMethods are the Unseal Methods a build supports, by name: the
 // passphrase everywhere, and the Keychain where the platform has one.
 func unsealMethods(kc vault.KeychainBackend) map[string]vault.Method {
@@ -195,7 +199,7 @@ func run(opts options) error {
 		Store:        s,
 		Clock:        time.Now,
 		Providers:    providers,
-		Resolver:     &resolver.System{},
+		Resolver:     dnsResolver,
 		SerialChecks: opts.serialChecks,
 		UnsealMethod: opts.unseal,
 		Keychain:     opts.keychain,
