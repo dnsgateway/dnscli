@@ -126,8 +126,8 @@ func dsWriteKindOf(step dnssecStep, keys []dns.SigningKey) dsWriteKind {
 // dsWrite writes the open Zone's DS at its registrar: the Account, among
 // those holding a Zone of the same name, whose Provider is a Registrar
 // Adapter and registers the domain. It publishes the keys, replaces a DS
-// that matches none of them, or removes the DS before the Zone is
-// unsigned, as its kind says. The user confirms the Account and the set
+// that matches none of them, or removes the DS: before the Zone is
+// unsigned, or when it serves no keys; as its kind says. The user confirms the Account and the set
 // sent first, as it is a Delegation write (ADR-0007).
 type dsWrite struct {
 	// zone is the Live Zone whose DS is written.
