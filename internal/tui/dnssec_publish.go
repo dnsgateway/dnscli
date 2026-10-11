@@ -153,11 +153,12 @@ func askRegistrar(ctx context.Context, s *store.Store, key *vault.Key, providers
 }
 
 // registrarsFound takes the Registrations found for a Zone whose DS is
-// to be published, unless the user moved on meanwhile: it asks to
-// confirm publishing at the one found, or shows the keys to copy when
-// none was.
+// to be published, unless the user moved on meanwhile, or it is no longer
+// to be published, such as once the parent serves it: it asks to confirm
+// publishing at the one found, lets the user pick one when several were,
+// or shows the keys to copy when none was.
 func (m *Model) registrarsFound(msg registrarsFoundMsg) {
-	if m.open == nil || m.open.ID != msg.zoneID || m.dialogOpen() {
+	if m.open == nil || m.open.ID != msg.zoneID || m.dialogOpen() || m.dnssecStepOf(*m.open) != stepPublish {
 		return
 	}
 
