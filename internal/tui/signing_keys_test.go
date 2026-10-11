@@ -101,7 +101,7 @@ func TestAParentDSThatMatchesNoKeySaysItDoesNotMatch(t *testing.T) {
 	h := newSignedZoneHarness(t, r)
 
 	h.assertStatusBarShows("DNSSEC: DS does not match")
-	h.assertBadges(map[string]string{"DNSSEC: DS does not match": red})
+	h.assertBadges(map[string]string{"DNSSEC: DS does not match (S replaces it, s shows the keys)": red})
 	h.assertHides("DNSSEC: On")
 }
 

@@ -159,9 +159,9 @@ func (m *Model) turnRefusal(z dns.Zone, v string) (why string, inPanel bool) {
 
 // takeDNSSECStep takes the open Zone's next DNSSEC step: turning signing
 // on or off asks to confirm it in the Edit Zone dialog, once its Provider
-// can and the Zone passes the write gate; publishing the DS asks to
-// confirm it at the registrar, or shows the keys to copy. Any other step
-// is only waited for.
+// can and the Zone passes the write gate; publishing, replacing or
+// removing the DS asks to confirm it at the registrar, or says how to do
+// it by hand. Any other step is only waited for.
 func (m *Model) takeDNSSECStep() tea.Cmd {
 	if m.open == nil {
 		m.notice = notice{text: "Open a Zone first.", err: true}
@@ -173,13 +173,13 @@ func (m *Model) takeDNSSECStep() tea.Cmd {
 
 	var v string
 
-	switch m.dnssecStepOf(z) {
+	switch step := m.dnssecStepOf(z); step {
 	case stepTurnOn:
 		v = "on"
 	case stepUnsign:
 		v = "off"
-	case stepPublish:
-		return m.publishDS(z)
+	case stepPublish, stepMismatch, stepRemoveDS:
+		return m.writeDS(z, step)
 	default:
 		m.notice = notice{text: "No DNSSEC step to take for " + z.Name + " now."}
 
@@ -209,12 +209,15 @@ var dnssecRecheckWaits = []time.Duration{
 	time.Minute, 2 * time.Minute, 5 * time.Minute, 10 * time.Minute, 15 * time.Minute, 30 * time.Minute,
 }
 
-// waits reports whether the step waits on something outside dnscli, and
-// so is re-checked.
-func (s dnssecStep) waits() bool {
-	switch s {
+// waits reports whether z, at step, waits on something outside dnscli, and
+// so is re-checked: a DS that matches no key does once it was replaced
+// this session, until the parent zone serves the new one.
+func (m *Model) waits(z dns.Zone, step dnssecStep) bool {
+	switch step {
 	case stepWaitKeys, stepWaitTTL, stepPublish, stepRemoveDS, stepWaitUnsign, stepWaitUnsigned:
 		return true
+	case stepMismatch:
+		return m.dsSentAt(z, stepMismatch)
 	}
 
 	return false
@@ -263,7 +266,7 @@ func (m *Model) watchDNSSEC() tea.Cmd {
 	}
 
 	step := m.dnssecStepOf(z)
-	if !step.waits() {
+	if !m.waits(z, step) {
 		return nil
 	}
 
@@ -329,7 +332,7 @@ func (m *Model) dnssecWatched(msg dnssecWatchMsg) tea.Cmd {
 	z := *m.open
 
 	switch step := m.dnssecStepOf(z); {
-	case !step.waits():
+	case !m.waits(z, step):
 		return nil
 	case step == stepWaitKeys, step == stepWaitUnsigned:
 		return tea.Batch(m.checkParentDS(z), m.lookUpSigningKeys(z))

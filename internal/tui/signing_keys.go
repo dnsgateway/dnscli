@@ -325,9 +325,9 @@ func (m *Model) dnssecState(z dns.Zone) (string, lipgloss.Style) {
 	case stepOn:
 		return "DNSSEC: On", badgeOnStyle
 	case stepMismatch:
-		return "DNSSEC: DS does not match", errorStyle
+		return m.mismatchText(z)
 	case stepRemoveDS:
-		return "DNSSEC: remove the DS at the registrar to turn it off", badgePendingStyle
+		return m.removeDSText(z), badgePendingStyle
 	case stepWaitUnsign:
 		return "DNSSEC: unsign after " + clockText(m.unsignAfter(z.DSSeen), m.deps.now()), badgePendingStyle
 	case stepUnsign:
