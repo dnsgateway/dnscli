@@ -106,7 +106,7 @@ func (m *Model) unsignRefusal(z dns.Zone) string {
 		return "DNSSEC stays on: remove the DS record for " + z.Name + " at the registrar first. " +
 			"dnscli watches the parent zone for it to go."
 	case dsNone:
-		if end := m.unsignAfter(z); m.deps.now().Before(end) {
+		if end := m.unsignAfter(z.DSSeen); m.deps.now().Before(end) {
 			return "DNSSEC stays on until " + clockText(end, m.deps.now()) + ": resolvers may still hold the DS record of " +
 				z.Name + " until then."
 		}
@@ -129,17 +129,17 @@ func (m *Model) unsignRefusal(z dns.Zone) string {
 // the TTL of the DS records of the largest TLDs, such as .com.
 const dsTTLUnknown = 24 * time.Hour
 
-// unsignAfter is when z may be unsigned: once the TTL its DS was last
-// served with has passed since it was first seen gone, so resolvers no
-// longer hold it. A DS whose being gone is being stored counts as seen
-// gone now.
-func (m *Model) unsignAfter(z dns.Zone) time.Time {
-	gone := z.DSGoneAt
+// unsignAfter is when a Zone, its DS seen as seen says, may be unsigned:
+// once the TTL its DS was last served with has passed since it was first
+// seen gone, so resolvers no longer hold it. A DS whose being gone is
+// being stored counts as seen gone now.
+func (m *Model) unsignAfter(seen dns.DSSeen) time.Time {
+	gone := seen.GoneAt
 	if gone.IsZero() {
 		gone = m.deps.now()
 	}
 
-	ttl := z.DSTTL
+	ttl := seen.TTL
 	if ttl <= 0 {
 		ttl = dsTTLUnknown
 	}
@@ -157,7 +157,7 @@ func (m *Model) turnOffStep(z dns.Zone, ds dsPresence) dnssecStep {
 	case dsUnknown:
 		return stepUnknown
 	case dsNone:
-		if m.deps.now().Before(m.unsignAfter(z)) {
+		if m.deps.now().Before(m.unsignAfter(z.DSSeen)) {
 			return stepWaitUnsign
 		}
 
@@ -181,8 +181,7 @@ func (m *Model) unsignText(z dns.Zone) string {
 // serves.
 type dsSeenMsg struct {
 	zoneID int64
-	goneAt time.Time
-	ttl    time.Duration
+	seen   dns.DSSeen
 	err    error
 }
 
@@ -212,18 +211,18 @@ func (m *Model) noteDS(z dns.Zone) tea.Cmd {
 	served := len(c.ds) > 0
 
 	switch {
-	case served && z.DSGoneAt.IsZero() && z.DSTTL == c.ttl.Truncate(time.Second):
+	case served && z.DSSeen.GoneAt.IsZero() && z.DSSeen.TTL == c.ttl.Truncate(time.Second):
 		return nil
-	case !served && (!z.DSGoneAt.IsZero() || !m.seenSigned(z)):
+	case !served && (!z.DSSeen.GoneAt.IsZero() || !m.seenSigned(z)):
 		return nil
 	}
 
 	ctx, s, at, ttl := m.ctx, m.deps.Store, m.deps.now(), c.ttl
 
 	return func() tea.Msg {
-		gone, stored, err := s.SaveDSSeen(ctx, z, served, ttl, at)
+		seen, err := s.SaveDSSeen(ctx, z, served, ttl, at)
 
-		return dsSeenMsg{zoneID: z.ID, goneAt: gone, ttl: stored, err: err}
+		return dsSeenMsg{zoneID: z.ID, seen: seen, err: err}
 	}
 }
 
@@ -242,7 +241,7 @@ func (m *Model) dsSeen(msg dsSeenMsg) {
 	}
 
 	if z, ok := m.zoneByID[msg.zoneID]; ok {
-		z.DSGoneAt, z.DSTTL = msg.goneAt, msg.ttl
+		z.DSSeen = msg.seen
 		m.updateZone(z)
 	}
 }

@@ -307,7 +307,10 @@ func (s *Store) SaveRefresh(ctx context.Context, z dns.Zone, records []dns.Recor
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	var refreshed, statusAt, signingSeen, dsGone, dsTTL int64
+	var (
+		refreshed, statusAt, signingSeen int64
+		ds                               dsSeenScan
+	)
 
 	err = tx.QueryRowContext(ctx, `
 		UPDATE zones SET
@@ -321,7 +324,7 @@ func (s *Store) SaveRefresh(ctx context.Context, z dns.Zone, records []dns.Recor
 		RETURNING soa_serial, refreshed_at, dnssec, hsts, min_tls, status_at, signing_seen_at, ds_gone_at, ds_ttl`,
 		serial, unixOrZero(at), z.ID, z.AccountID, z.Name, z.ProviderID,
 		unixOrZero(z.StatusAt), z.Status.DNSSEC, z.Status.HSTS, z.Status.MinTLS,
-	).Scan(&z.Serial, &refreshed, &z.Status.DNSSEC, &z.Status.HSTS, &z.Status.MinTLS, &statusAt, &signingSeen, &dsGone, &dsTTL)
+	).Scan(&z.Serial, &refreshed, &z.Status.DNSSEC, &z.Status.HSTS, &z.Status.MinTLS, &statusAt, &signingSeen, &ds.goneAt, &ds.ttl)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrZoneNotCached
 	}
@@ -333,8 +336,7 @@ func (s *Store) SaveRefresh(ctx context.Context, z dns.Zone, records []dns.Recor
 	z.RefreshedAt = timeOrZero(refreshed)
 	z.StatusAt = timeOrZero(statusAt)
 	z.SigningSeenAt = timeOrZero(signingSeen)
-	z.DSGoneAt = timeOrZero(dsGone)
-	z.DSTTL = durationOf(dsTTL)
+	z.DSSeen = ds.seen()
 
 	if err := replaceRecords(ctx, tx, z.ID, records); err != nil {
 		return dns.Zone{}, fmt.Errorf("save refresh: %w", err)
@@ -415,28 +417,28 @@ func (s *Store) SaveSigningSeen(ctx context.Context, z dns.Zone, signed bool, at
 // SaveDSSeen records what dnscli saw of the DS a signed Zone's parent
 // serves at at: a DS served stores the TTL of its set and clears when it
 // was first seen gone; none sets that, unless it was already. It returns
-// the Zone's DSGoneAt and DSTTL as stored. Like SaveRefresh, it returns
+// the Zone's DSSeen as stored. Like SaveRefresh, it returns
 // ErrZoneNotCached unless the cache still has that very Zone.
-func (s *Store) SaveDSSeen(ctx context.Context, z dns.Zone, served bool, ttl time.Duration, at time.Time) (goneAt time.Time, dsTTL time.Duration, err error) {
-	var gone, secs int64
+func (s *Store) SaveDSSeen(ctx context.Context, z dns.Zone, served bool, ttl time.Duration, at time.Time) (dns.DSSeen, error) {
+	var ds dsSeenScan
 
-	err = s.db.QueryRowContext(ctx, `
+	err := s.db.QueryRowContext(ctx, `
 		UPDATE zones SET
 			ds_gone_at = IIF(?1, 0, IIF(ds_gone_at = 0, ?2, ds_gone_at)),
 			ds_ttl     = IIF(?1, ?3, ds_ttl)
 		WHERE id = ?4 AND account_id = ?5 AND name = ?6 AND provider_zone_id = ?7
 		RETURNING ds_gone_at, ds_ttl`,
 		served, unixOrZero(at), secondsOf(ttl), z.ID, z.AccountID, z.Name, z.ProviderID,
-	).Scan(&gone, &secs)
+	).Scan(&ds.goneAt, &ds.ttl)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrZoneNotCached
 	}
 
 	if err != nil {
-		return time.Time{}, 0, fmt.Errorf("save DS seen: %w", err)
+		return dns.DSSeen{}, fmt.Errorf("save DS seen: %w", err)
 	}
 
-	return timeOrZero(gone), durationOf(secs), nil
+	return ds.seen(), nil
 }
 
 // ErrNoRecordID is returned by SaveApply for a change whose Record has no
@@ -642,14 +644,14 @@ const zoneStateColumns = `soa_serial, refreshed_at, dnssec, hsts, min_tls, statu
 type zoneScan struct {
 	z                                *dns.Zone
 	refreshed, statusAt, signingSeen int64
-	dsGone, dsTTL                    int64
+	ds                               dsSeenScan
 	ns, state                        string
 }
 
 // dests are the Scan destinations of zoneStateColumns, after any before.
 func (s *zoneScan) dests(before ...any) []any {
 	return append(before, &s.z.Serial, &s.refreshed, &s.z.Status.DNSSEC, &s.z.Status.HSTS, &s.z.Status.MinTLS,
-		&s.statusAt, &s.ns, &s.state, &s.signingSeen, &s.dsGone, &s.dsTTL)
+		&s.statusAt, &s.ns, &s.state, &s.signingSeen, &s.ds.goneAt, &s.ds.ttl)
 }
 
 // fill sets the Zone's state from what was scanned.
@@ -659,8 +661,15 @@ func (s *zoneScan) fill() {
 	s.z.Nameservers = splitNames(s.ns)
 	s.z.State = hostingStateOf(s.state)
 	s.z.SigningSeenAt = timeOrZero(s.signingSeen)
-	s.z.DSGoneAt = timeOrZero(s.dsGone)
-	s.z.DSTTL = durationOf(s.dsTTL)
+	s.z.DSSeen = s.ds.seen()
+}
+
+// dsSeenScan reads ds_gone_at and ds_ttl, in that order, into a DSSeen.
+type dsSeenScan struct{ goneAt, ttl int64 }
+
+// seen is the DSSeen scanned.
+func (s dsSeenScan) seen() dns.DSSeen {
+	return dns.DSSeen{GoneAt: timeOrZero(s.goneAt), TTL: durationOf(s.ttl)}
 }
 
 // joinNames stores a list of DNS names, such as nameservers, in one column.

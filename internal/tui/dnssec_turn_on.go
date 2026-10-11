@@ -35,7 +35,7 @@ func (m *Model) noteSigning(z dns.Zone) tea.Cmd {
 	switch {
 	case signed && !z.SigningSeenAt.IsZero():
 		return nil
-	case !signed && ((z.SigningSeenAt.IsZero() && z.DSGoneAt.IsZero()) || signingReported(z)):
+	case !signed && ((z.SigningSeenAt.IsZero() && z.DSSeen.GoneAt.IsZero()) || signingReported(z)):
 		return nil
 	}
 
@@ -66,7 +66,7 @@ func (m *Model) signingSeen(msg signingSeenMsg) {
 		z.SigningSeenAt = msg.at
 		if msg.at.IsZero() {
 			// Seen unsigned: it no longer waits on its DS.
-			z.DSGoneAt = time.Time{}
+			z.DSSeen.GoneAt = time.Time{}
 		}
 
 		m.updateZone(z)
@@ -293,7 +293,7 @@ func (m *Model) waitEnd(z dns.Zone, step dnssecStep) (end time.Time, known bool)
 	case stepWaitTTL:
 		return m.publishAfter(z, m.recordsOf(z))
 	case stepWaitUnsign:
-		return m.unsignAfter(z), true
+		return m.unsignAfter(z.DSSeen), true
 	}
 
 	return time.Time{}, false
