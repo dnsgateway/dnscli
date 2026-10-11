@@ -143,7 +143,7 @@ func TestTurningDNSSECOnAsksToConfirmThenCachesThePendingStatusTheProviderReturn
 
 	// The cache is updated from the answer, without a Refresh.
 	for _, c := range f.Calls()[before:] {
-		if c.Op == providertest.OpRecords || c.Op == providertest.OpZoneStatus {
+		if c.Op == providertest.OpRecords || c.Op == providertest.OpZoneDetails {
 			t.Fatalf("a Refresh followed the change: %+v", f.Calls()[before:])
 		}
 	}
@@ -359,15 +359,8 @@ func TestAZoneSettingChangedButNotCachedClosesTheDialogNamingTheZone(t *testing.
 	h.assertShows("Edit Zone work.example")
 }
 
-// statusProvider is a Provider that reads the Zone Status, as a Refresh
-// does before a Zone may be written.
-type statusProvider interface {
-	dnsprovider.Provider
-	dnsprovider.ZoneStatusReader
-}
-
-// partialUpdater is a ZoneUpdater that writes DNSSEC, then fails.
-type partialUpdater struct{ statusProvider }
+// partialUpdater is a Provider whose UpdateZone writes DNSSEC, then fails.
+type partialUpdater struct{ dnsprovider.Provider }
 
 func (partialUpdater) UpdateZone(context.Context, dnsprovider.Zone, dnsprovider.ZoneUpdate) (dnsprovider.ZoneStatus, error) {
 	return dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Pending, HSTS: dnsprovider.Unknown}, errors.New("a later write failed")
@@ -380,12 +373,10 @@ func TestAZoneSettingWrittenBeforeTheProviderFailsIsCachedWithTheError(t *testin
 
 	fake := settingsFake(status, true).Factory()
 	h := newHarnessWith(t, s, tui.Deps{
-		Providers: dnsprovider.Registry{"cloudflare": {Fields: fake.Fields, Capabilities: []dnsprovider.Capability{dnsprovider.CapZoneUpdater}, New: func(m map[string]string, opts ...dnsprovider.Option) (dnsprovider.Provider, error) {
+		Providers: dnsprovider.Registry{"cloudflare": {Fields: fake.Fields, Traits: dnsprovider.Traits{Capabilities: []dnsprovider.Capability{dnsprovider.CapZoneUpdater}}, New: func(m map[string]string, opts ...dnsprovider.Option) (dnsprovider.Provider, error) {
 			p, err := fake.New(m, opts...)
 
-			sp, _ := p.(statusProvider)
-
-			return partialUpdater{sp}, err
+			return partialUpdater{p}, err
 		}}},
 		UnsealMethod: fastPassphrase(),
 	})
@@ -682,9 +673,9 @@ func TestEditZoneSaysWhyItsDelegationAndNameserversAreUnknown(t *testing.T) {
 	h.assertShows("not cached: re-list the Account (L) to read them")
 }
 
-// tlsFailsAfterDNSSEC is a ZoneUpdater that turns DNSSEC on, then fails
-// to set the minimum TLS version, which it returns unknown.
-type tlsFailsAfterDNSSEC struct{ statusProvider }
+// tlsFailsAfterDNSSEC is a Provider whose UpdateZone turns DNSSEC on, then
+// fails to set the minimum TLS version, which it returns unknown.
+type tlsFailsAfterDNSSEC struct{ dnsprovider.Provider }
 
 func (tlsFailsAfterDNSSEC) UpdateZone(context.Context, dnsprovider.Zone, dnsprovider.ZoneUpdate) (dnsprovider.ZoneStatus, error) {
 	return dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Pending, HSTS: dnsprovider.On}, errors.New("TLS refused")
@@ -697,12 +688,10 @@ func TestASettingThatFailsAfterAnotherIsMadeKeepsItsCachedValueAndItsPick(t *tes
 
 	fake := settingsFake(status, true).Factory()
 	h := newHarnessWith(t, s, tui.Deps{
-		Providers: dnsprovider.Registry{"cloudflare": {Fields: fake.Fields, Capabilities: []dnsprovider.Capability{dnsprovider.CapZoneUpdater}, New: func(m map[string]string, opts ...dnsprovider.Option) (dnsprovider.Provider, error) {
+		Providers: dnsprovider.Registry{"cloudflare": {Fields: fake.Fields, Traits: dnsprovider.Traits{Capabilities: []dnsprovider.Capability{dnsprovider.CapZoneUpdater}}, New: func(m map[string]string, opts ...dnsprovider.Option) (dnsprovider.Provider, error) {
 			p, err := fake.New(m, opts...)
 
-			sp, _ := p.(statusProvider)
-
-			return tlsFailsAfterDNSSEC{sp}, err
+			return tlsFailsAfterDNSSEC{p}, err
 		}}},
 		UnsealMethod: fastPassphrase(),
 	})

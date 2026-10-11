@@ -466,7 +466,7 @@ func (m *Model) zoneEditOpened(msg zoneEditOpenedMsg) {
 		return
 	}
 
-	up, ok := msg.p, msg.err == nil && msg.p != nil && dnsprovider.CanUpdateZone(msg.p)
+	up, ok := msg.p, msg.err == nil && msg.p != nil && dnsprovider.Can(msg.p, dnsprovider.CapZoneUpdater)
 	switch {
 	case msg.turnDNSSEC != keepDNSSEC && msg.err != nil:
 		m.notice = notice{text: msg.openFailedText(), err: true}

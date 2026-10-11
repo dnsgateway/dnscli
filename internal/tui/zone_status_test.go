@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -166,7 +167,7 @@ func TestAFailedZoneStatusReadKeepsTheCachedOneAndSaysHowOldItIs(t *testing.T) {
 
 	now = testNow.Add(2 * time.Hour)
 	f.SetZoneStatus("zw1", dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Off, HSTS: dnsprovider.On})
-	f.Fail(providertest.OpZoneStatus, errors.New("connection reset by peer"))
+	f.Fail(providertest.OpZoneDetails, errors.New("connection reset by peer"))
 	h.press("right", "r", "left")
 
 	h.assertShows("validated this session", "last Refresh just now")
@@ -177,7 +178,7 @@ func TestAFailedZoneStatusReadKeepsTheCachedOneAndSaysHowOldItIs(t *testing.T) {
 		t.Fatalf("cached zone = %+v, want the first Zone Status kept", z)
 	}
 
-	f.Fail(providertest.OpZoneStatus, nil)
+	f.Fail(providertest.OpZoneDetails, nil)
 	h.press("right", "r", "left")
 
 	h.assertBadges(map[string]string{"DNSSEC": red, "HSTS": green})
@@ -299,14 +300,14 @@ func TestARateLimitedZoneStatusReadStillSavesTheRecordsButHoldsTheNextRefresh(t 
 	now := testNow
 	h, _, _ := newRefreshHarnessWith(t, f, tui.Deps{Clock: func() time.Time { return now }})
 
-	f.Fail(providertest.OpZoneStatus, &dnsprovider.APIError{Provider: "cloudflare", StatusCode: http.StatusTooManyRequests, RetryAfter: 90 * time.Second})
+	f.Fail(providertest.OpZoneDetails, &dnsprovider.APIError{Provider: "cloudflare", StatusCode: http.StatusTooManyRequests, RetryAfter: 90 * time.Second})
 	h.press("space")
 
 	h.assertShows("validated this session", "203.0.113.20")
 	h.assertStatusBarShows("DNSSEC ?", "HSTS ?")
 
 	// The Provider asked not to be called again yet.
-	f.Fail(providertest.OpZoneStatus, nil)
+	f.Fail(providertest.OpZoneDetails, nil)
 	h.press("right", "r")
 
 	retryAt := testNow.Add(90 * time.Second).Local().Format(time.TimeOnly)
@@ -328,12 +329,13 @@ type statusFirst struct {
 	dnsprovider.Provider
 
 	statusAsked chan struct{}
+	asked       sync.Once
 }
 
-func (p *statusFirst) ZoneStatus(ctx context.Context, z dnsprovider.Zone) (dnsprovider.ZoneStatus, error) {
-	close(p.statusAsked)
+func (p *statusFirst) ZoneDetails(ctx context.Context, z dnsprovider.Zone, request dnsprovider.ZoneDetailRequest) (dnsprovider.ZoneDetails, error) {
+	p.asked.Do(func() { close(p.statusAsked) })
 
-	return dnsprovider.ZoneStatusOf(ctx, p.Provider, z)
+	return p.Provider.ZoneDetails(ctx, z, request)
 }
 
 func (p *statusFirst) ListRecords(ctx context.Context, z dnsprovider.Zone, rf dnsprovider.RecordFilter) (dnsprovider.RecordSet, error) {

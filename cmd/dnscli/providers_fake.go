@@ -112,7 +112,7 @@ func (r *fakeResolver) DSAt(ctx context.Context, zone string) ([]string, time.Du
 		return nil, 0, err
 	}
 
-	keys, err := p.(dnsprovider.DSRegistrar).DelegationSigners(ctx, z)
+	keys, err := p.(dnsprovider.DSRegistrar).ListDelegationSigners(ctx, z)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -137,7 +137,7 @@ func (r *fakeResolver) DNSKEYAt(ctx context.Context, zone string, servers []stri
 		return nil, err
 	}
 
-	keys, err := dnsprovider.SigningKeysOf(ctx, p, z)
+	details, err := p.ZoneDetails(ctx, z, dnsprovider.ZoneDetailRequest{SigningKeys: true})
 
-	return provider.SigningKeys(keys), err
+	return provider.SigningKeys(details.SigningKeys), err
 }

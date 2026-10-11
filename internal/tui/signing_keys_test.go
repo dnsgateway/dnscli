@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/dnsgateway/dnsprovider"
-	"github.com/dnsgateway/dnsprovider/providertest"
 
 	"github.com/sergelogvinov/dnscli/internal/dns"
 	"github.com/sergelogvinov/dnscli/internal/tui"
@@ -275,7 +274,7 @@ func TestTheKeysAProviderReturnsAreUsedWithoutAskingTheNameservers(t *testing.T)
 		t.Fatalf("DNSKEY queries = %+v, want none when the Provider returns the keys", q)
 	}
 
-	if n := f.count(providertest.OpSigningKeys); n == 0 {
+	if n := f.keyReads(); n == 0 {
 		t.Fatal("the Provider was not asked for the signing keys")
 	}
 }
@@ -287,8 +286,15 @@ func TestKeysAProviderFailsToReturnAreAskedOfTheNameservers(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newKeysFake(dnsprovider.On)
-			f.SetSigningKeys("zd1", rfcProviderKey)
-			f.Fail(providertest.OpSigningKeys, err)
+			read := dnsprovider.PropertyResult{State: dnsprovider.PropertyRead}
+			f.SetZoneDetails("zd1", dnsprovider.ZoneDetails{
+				Status:      dnsprovider.ZoneStatus{DNSSEC: dnsprovider.On},
+				SigningKeys: []dnsprovider.SigningKey{rfcProviderKey},
+				Properties: dnsprovider.ZoneDetailProperties{
+					DNSSEC: read, HSTS: read, MinTLS: read,
+					SigningKeys: dnsprovider.PropertyResult{State: dnsprovider.PropertyFailed, Err: err},
+				},
+			})
 
 			r := &fakeResolver{}
 			r.setKeys(rfcZone, ecKey)
@@ -310,7 +316,7 @@ func TestKeysAProviderFailsToReturnAreAskedOfTheNameservers(t *testing.T) {
 	}
 }
 
-func TestTheKeysOfAProviderWithoutAKeyReaderAreAskedOfTheNameservers(t *testing.T) {
+func TestTheKeysOfAProviderThatDoesNotReadThemAreAskedOfTheNameservers(t *testing.T) {
 	f := newKeysFake(dnsprovider.On)
 
 	r := &fakeResolver{}
@@ -322,10 +328,6 @@ func TestTheKeysOfAProviderWithoutAKeyReaderAreAskedOfTheNameservers(t *testing.
 
 	if q := r.keysQueries(); len(q) == 0 || q[0].zone != rfcZone {
 		t.Fatalf("DNSKEY queries = %+v, want %s asked at its nameservers", q, rfcZone)
-	}
-
-	if n := f.count(providertest.OpSigningKeys); n != 0 {
-		t.Fatalf("the Provider was asked for the signing keys %d times without a KeyReader", n)
 	}
 }
 
@@ -340,7 +342,7 @@ func TestTheKeysAProviderReturnsNoneOfAreAskedOfTheNameservers(t *testing.T) {
 
 	h.assertStatusBarShows("DNSSEC: On")
 
-	if n := f.count(providertest.OpSigningKeys); n == 0 {
+	if n := f.keyReads(); n == 0 {
 		t.Fatal("the Provider was not asked for the signing keys")
 	}
 

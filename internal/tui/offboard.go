@@ -298,7 +298,7 @@ func (m *Model) offboardOpened(msg offboardOpenedMsg) {
 		m.notice = notice{text: "Could not open " + msg.account.Label() + ": " + msg.err.Error(), err: true}
 
 		return
-	case !dnsprovider.CanDeleteZone(msg.reach.own):
+	case !dnsprovider.Can(msg.reach.own, dnsprovider.CapZoneDeleter):
 		m.notice = notice{text: cannotOffboard(msg.account), err: true}
 
 		return

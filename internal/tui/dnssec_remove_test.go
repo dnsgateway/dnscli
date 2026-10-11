@@ -137,7 +137,7 @@ func TestAStaleZoneIsToldToRemoveTheDSByHandAndAsksNoRegistrar(t *testing.T) {
 	h.assertHides("Remove the DS of")
 	h.assertStatusLineShows("Remove the DS record for example.net at the registrar first")
 
-	if n := f.count(providertest.OpDelegationSigners); n != 0 {
+	if n := f.count(providertest.OpListDelegationSigners); n != 0 {
 		t.Fatalf("DelegationSigners asked %d times for a Stale Zone", n)
 	}
 }

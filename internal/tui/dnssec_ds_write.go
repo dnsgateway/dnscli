@@ -256,7 +256,7 @@ func (m *Model) writeDS(z dns.Zone, step dnssecStep) tea.Cmd {
 		for _, c := range candidates {
 			// The Account registers the domain when it reads its DS.
 			err := withRegistrar(ctx, s, key, providers, c.account, func(ctx context.Context, r dnsprovider.DSRegistrar) error {
-				_, err := r.DelegationSigners(ctx, provider.ModuleZone(c.zone))
+				_, err := r.ListDelegationSigners(ctx, provider.ModuleZone(c.zone))
 
 				return err
 			})
@@ -457,6 +457,10 @@ func (m *Model) sendDS(d *dsWrite) tea.Cmd {
 
 	return func() tea.Msg {
 		err := withRegistrar(ctx, s, key, providers, a, func(ctx context.Context, r dnsprovider.DSRegistrar) error {
+			if len(keys) == 0 {
+				return r.DeleteDelegationSigners(ctx, provider.ModuleZone(z))
+			}
+
 			return r.SetDelegationSigners(ctx, provider.ModuleZone(z), keys)
 		})
 

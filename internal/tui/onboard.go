@@ -322,7 +322,7 @@ func (m *Model) onboardOpened(msg onboardOpenedMsg) tea.Cmd {
 		d.tenants = choice.Tenants
 	case msg.err != nil:
 		d.refused = "Could not open " + msg.account.Label() + ": " + msg.err.Error()
-	case !dnsprovider.CanCreateZone(msg.p):
+	case !dnsprovider.Can(msg.p, dnsprovider.CapZoneCreator):
 		d.refused = cannotOnboard(msg.account)
 	case m.unscoped(msg.account, msg.fields):
 		d.refused = noTenantToOnboard(msg.account)
@@ -605,7 +605,7 @@ func (m *Model) createZone(d *onboardDialog) tea.Cmd {
 			switch {
 			case err != nil:
 				within.tenantErr = err
-			case !dnsprovider.CanCreateZone(opened):
+			case !dnsprovider.Can(opened, dnsprovider.CapZoneCreator):
 				within.tenantErr = errors.New("its Provider cannot Onboard a zone")
 			case fields[field] != tenant.ID:
 				within.tenantErr = errors.New("its credentials were saved meanwhile")

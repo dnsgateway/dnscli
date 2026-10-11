@@ -2,6 +2,10 @@ module github.com/sergelogvinov/dnscli
 
 go 1.27
 
+replace github.com/dnsgateway/dnsprovider => ../dnsprovider
+
+replace github.com/dnsgateway/dnsgate-go => ../dnsgate-go
+
 require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
@@ -54,7 +58,3 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
-
-replace github.com/dnsgateway/dnsprovider => ../dnsprovider
-
-replace github.com/dnsgateway/dnsgate-go => ../dnsgate-go

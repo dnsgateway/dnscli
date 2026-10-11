@@ -206,6 +206,20 @@ func (f *fakeProvider) count(op providertest.Op) int {
 	return n
 }
 
+// keyReads is how many times the Provider was asked for a Zone's
+// Signing Keys: a ZoneDetails read that requested them.
+func (f *fakeProvider) keyReads() int {
+	n := 0
+
+	for _, c := range f.Calls() {
+		if c.Op == providertest.OpZoneDetails && c.ZoneDetailRequest.SigningKeys {
+			n++
+		}
+	}
+
+	return n
+}
+
 // fieldBuilds keeps the field map of each Provider built through a
 // realFieldsRegistry.
 type fieldBuilds struct {

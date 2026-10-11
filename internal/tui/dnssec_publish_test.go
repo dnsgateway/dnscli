@@ -25,7 +25,7 @@ func setDSCalls(f *fakeProvider) []providertest.Call {
 	var out []providertest.Call
 
 	for _, c := range f.Calls() {
-		if c.Op == providertest.OpSetDelegationSigners {
+		if c.Op == providertest.OpSetDelegationSigners || c.Op == providertest.OpDeleteDelegationSigners {
 			out = append(out, c)
 		}
 	}
@@ -204,7 +204,7 @@ func TestARegistrarAccountThatDoesNotRegisterTheDomainIsSkipped(t *testing.T) {
 	h.assertShows("Publish the DS of example.net at porkbun.home?")
 	h.assertHides("cloudflare.work?")
 
-	if f.count(providertest.OpDelegationSigners) == 0 {
+	if f.count(providertest.OpListDelegationSigners) == 0 {
 		t.Fatal("cloudflare.work was not asked whether it registers example.net")
 	}
 
@@ -333,7 +333,7 @@ func TestASealedSessionIsShownTheKeysToCopyAndAsksNoRegistrar(t *testing.T) {
 	h.assertShows("DNSSEC keys for example.net", rfcDS)
 	h.assertHides("Publish the DS of")
 
-	if n := f.count(providertest.OpDelegationSigners); n != 0 {
+	if n := f.count(providertest.OpListDelegationSigners); n != 0 {
 		t.Fatalf("DelegationSigners asked %d times in a sealed session", n)
 	}
 }
@@ -375,7 +375,7 @@ func TestAnAccountThatCouldNotBeAskedIsNamedBeforeConfirmingAnother(t *testing.T
 
 	// porkbun.home may register it too: the user is told it could not
 	// be asked, not steered to cloudflare.work silently.
-	g.Fail(providertest.OpDelegationSigners, fmt.Errorf("porkbun: invalid API key: %w", dnsprovider.ErrUnauthorized))
+	g.Fail(providertest.OpListDelegationSigners, fmt.Errorf("porkbun: invalid API key: %w", dnsprovider.ErrUnauthorized))
 
 	h.press("S")
 	h.assertShows("Publish the DS of example.net at cloudflare.work?", "Could not ask porkbun.home", "invalid API key")

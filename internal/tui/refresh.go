@@ -293,8 +293,8 @@ func refresh(ctx context.Context, s *store.Store, key *vault.Key, providers *pro
 	readFrom := now()
 
 	go func() {
-		status, err := dnsprovider.ZoneStatusOf(statusCtx, p, provider.ModuleZone(z))
-		read <- zoneStatusRead{status: status, err: err}
+		details, err := p.ZoneDetails(statusCtx, provider.ModuleZone(z), dnsprovider.ZoneDetailRequest{})
+		read <- zoneStatusRead{status: details.Status, err: err}
 	}()
 
 	// The serial query bounds itself by serialQueryTimeout.
