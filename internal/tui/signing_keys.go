@@ -255,10 +255,7 @@ func (m *Model) dnssecStepOf(z dns.Zone) dnssecStep {
 	}
 
 	ds := m.dsPresenceOf(z.Name)
-
-	// A Zone turned off this session may still be reported pending: it
-	// is being unsigned, not signed.
-	unsigning := m.turningOff[z.ID] == turnOffSent
+	off := m.turningOff[z.ID]
 
 	if len(c.keys) == 0 {
 		switch {
@@ -266,7 +263,9 @@ func (m *Model) dnssecStepOf(z dns.Zone) dnssecStep {
 			// A DS at the parent of a Zone that serves no keys fails
 			// validation, whatever its Provider reports.
 			return stepMismatch
-		case signingReported(z) && !unsigning:
+		case signingReported(z) && off != turnOffSent:
+			// A Zone turned off this session may still be reported
+			// pending: it is being unsigned, not signed.
 			return stepWaitKeys
 		case ds == dsNone:
 			return stepTurnOn
@@ -277,7 +276,7 @@ func (m *Model) dnssecStepOf(z dns.Zone) dnssecStep {
 		return stepSilent
 	}
 
-	switch m.turningOff[z.ID] {
+	switch off {
 	case turnOffSent:
 		return stepWaitUnsigned
 	case turnOffAsked:
