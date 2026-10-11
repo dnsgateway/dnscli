@@ -600,6 +600,34 @@ func (m *Model) zoneEditKey(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
+// confirmZoneEdit asks to confirm the changes the Edit Zone dialog holds,
+// unless one of them may not be made now, and the dialog then says why:
+// turning DNSSEC on is a Zone write, which passes the write gate
+// (ADR-0001), and turning it off is refused while unsigning would break
+// resolution.
+func (m *Model) confirmZoneEdit(f *zoneEditForm) {
+	f.confirming, f.err = false, ""
+
+	for _, c := range f.changes() {
+		if c.setting != dnssecSetting {
+			continue
+		}
+
+		why := m.writeRefusal(f.zone)
+		if c.value == "off" {
+			why = m.askTurnOff(f.zone)
+		}
+
+		if why != "" {
+			f.err = why
+
+			return
+		}
+	}
+
+	f.confirming = true
+}
+
 // changeZoneSettings makes the changes picked, in one update, and caches
 // the settings the Provider made, as its Zone Status has them, written
 // now. When the update fails, a change the Provider returns known was

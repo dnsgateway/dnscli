@@ -8,43 +8,6 @@ import (
 	"github.com/sergelogvinov/dnscli/internal/dns"
 )
 
-// confirmZoneEdit asks to confirm the changes the Edit Zone dialog holds,
-// unless one of them may not be made now: turning DNSSEC off is refused
-// while unsigning would break resolution, and the dialog then says why.
-// Asking to turn it off marks the Zone as being turned off this session,
-// so the Zone page shows the steps towards it.
-func (m *Model) confirmZoneEdit(f *zoneEditForm) {
-	f.confirming, f.err = false, ""
-
-	for _, c := range f.changes() {
-		if c.setting != dnssecSetting {
-			continue
-		}
-
-		if c.value != "off" {
-			// Turning it on is a Zone write: it passes the write gate
-			// (ADR-0001).
-			if why := m.writeRefusal(f.zone); why != "" {
-				f.err = why
-
-				return
-			}
-
-			continue
-		}
-
-		m.markTurningOff(f.zone.ID)
-
-		if why := m.unsignRefusal(f.zone); why != "" {
-			f.err = why
-
-			return
-		}
-	}
-
-	f.confirming = true
-}
-
 // turnOff is how far turning DNSSEC off for a Zone went this session.
 type turnOff int
 
@@ -55,6 +18,15 @@ const (
 	// turnOffSent is its Provider turning it off.
 	turnOffSent
 )
+
+// askTurnOff takes the user asking to turn DNSSEC off for z: it marks z
+// as being turned off this session, so the Zone page shows the steps
+// towards it, and says why z may not be unsigned now; empty when it may.
+func (m *Model) askTurnOff(z dns.Zone) string {
+	m.markTurningOff(z.ID)
+
+	return m.unsignRefusal(z)
+}
 
 // markTurningOff notes that the user asked to turn DNSSEC off for a Zone,
 // unless its Provider already did. It is held for this session only: no
