@@ -327,9 +327,14 @@ type zoneEditOpenedMsg struct {
 	p       dnsprovider.Provider
 	err     error
 	// turnDNSSEC opens the dialog asking to confirm turning DNSSEC "on"
-	// or "off", the DNSSEC step taken from the Zone page; empty for none.
+	// or "off", the DNSSEC step taken from the Zone page; keepDNSSEC
+	// opens it as it is.
 	turnDNSSEC string
 }
+
+// keepDNSSEC opens the Edit Zone dialog without asking to turn DNSSEC on
+// or off.
+const keepDNSSEC = ""
 
 // zoneSettingsSavedMsg reports changes of a Zone's settings: the Zone as
 // cached with the Zone Status its Provider returned when cached is set,
@@ -379,7 +384,7 @@ func (m *Model) editZone() tea.Cmd {
 	case m.key == nil:
 		m.openZoneEdit(z, a, nil, "The session is sealed: Enter on a setting Unseals it, to change the settings.", true)
 	default:
-		return tea.Batch(checkDS, m.editZoneOf(z.ID, ""))
+		return tea.Batch(checkDS, m.editZoneOf(z.ID, keepDNSSEC))
 	}
 
 	return checkDS
@@ -462,11 +467,11 @@ func (m *Model) zoneEditOpened(msg zoneEditOpenedMsg) {
 	}
 
 	switch up, ok := msg.p.(dnsprovider.ZoneUpdater); {
-	case msg.turnDNSSEC != "" && msg.err != nil:
+	case msg.turnDNSSEC != keepDNSSEC && msg.err != nil:
 		m.notice = notice{text: msg.openFailedText(), err: true}
-	case msg.turnDNSSEC != "" && !ok:
+	case msg.turnDNSSEC != keepDNSSEC && !ok:
 		m.notice = notice{text: cannotTurnDNSSEC(msg.account, msg.turnDNSSEC), err: true}
-	case msg.turnDNSSEC != "":
+	case msg.turnDNSSEC != keepDNSSEC:
 		m.openZoneEdit(z, msg.account, up, "", false)
 		m.zoneEdit.pickDNSSEC(msg.turnDNSSEC)
 
@@ -591,7 +596,7 @@ func (m *Model) zoneEditKey(msg tea.KeyMsg) tea.Cmd {
 			m.zoneEdit = nil
 			id := f.zone.ID
 
-			return m.withSecrets(func() tea.Cmd { return m.editZoneOf(id, "") })
+			return m.withSecrets(func() tea.Cmd { return m.editZoneOf(id, keepDNSSEC) })
 		default:
 			f.field++
 		}
