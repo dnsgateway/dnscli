@@ -364,7 +364,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.dsSeen(msg)
 	case dnssecWatchMsg:
 		return m, m.dnssecWatched(msg)
-	case registrarsFoundMsg, dsPublishedMsg:
+	case registrationsFoundMsg, dsPublishedMsg:
 		return m, m.dsPublishUpdate(msg)
 	case serialCheckedMsg:
 		return m, m.serialChecked(msg)

@@ -26,9 +26,9 @@ type dsPublish struct {
 	// zone is the Live Zone whose keys are published.
 	zone dns.Zone
 	keys []dns.SigningKey
-	// registrar is the Registration the keys are published at, once
+	// registration is the Registration the keys are published at, once
 	// picked.
-	registrar dns.Zone
+	registration dns.Zone
 	// picker lists the Registrations found to pick from, when several
 	// were; nil once one is picked.
 	picker *picker
@@ -40,9 +40,9 @@ type dsPublish struct {
 	err     string
 }
 
-// registrarsFoundMsg reports which Zones of a Live Zone's name are held
+// registrationsFoundMsg reports which Zones of a Live Zone's name are held
 // by an Account that registers the domain and can publish its DS.
-type registrarsFoundMsg struct {
+type registrationsFoundMsg struct {
 	zoneID int64
 	keys   []dns.SigningKey
 	found  []dns.Zone
@@ -58,11 +58,11 @@ type dsPublishedMsg struct {
 	err    error
 }
 
-// registrarCandidates are the Zones of z's name that may be its
+// registrationCandidates are the Zones of z's name that may be its
 // Registration, in the order they are tried: z itself, as one company
 // often both hosts and registers a domain; then the Zones known to be
 // registration only; then any other.
-func (m *Model) registrarCandidates(z dns.Zone) []dns.Zone {
+func (m *Model) registrationCandidates(z dns.Zone) []dns.Zone {
 	var live, regOnly, other []dns.Zone
 
 	for _, c := range m.zones {
@@ -82,9 +82,9 @@ func (m *Model) registrarCandidates(z dns.Zone) []dns.Zone {
 	return append(append(live, regOnly...), other...)
 }
 
-// registrarTimeout bounds asking one Account whether it registers a
+// registrationTimeout bounds asking one Account whether it registers a
 // domain, and publishing its DS there.
-const registrarTimeout = 30 * time.Second
+const registrationTimeout = 30 * time.Second
 
 // publishDS takes the step of publishing z's DS: it looks for the
 // Registration of its name, to publish the keys there once the user
@@ -92,6 +92,10 @@ const registrarTimeout = 30 * time.Second
 // to copy into the registrar's panel.
 func (m *Model) publishDS(z dns.Zone) tea.Cmd {
 	keys := m.signingKeysOf(z)
+
+	// The write gate is the Live Zone's: the DS is written at its
+	// Registration, but a registration-only Zone can never be Validated,
+	// as its Provider serves no Records for it.
 	if m.writeRefusal(z) != "" || len(keys) == 0 {
 		m.openSigningKeys()
 
@@ -105,7 +109,7 @@ func (m *Model) publishDS(z dns.Zone) tea.Cmd {
 
 	var candidates []candidate
 
-	for _, c := range m.registrarCandidates(z) {
+	for _, c := range m.registrationCandidates(z) {
 		if a, ok := m.account(c.AccountID); ok {
 			candidates = append(candidates, candidate{zone: c, account: a})
 		}
@@ -115,10 +119,15 @@ func (m *Model) publishDS(z dns.Zone) tea.Cmd {
 	ctx, s, key, providers := m.ctx, m.deps.Store, m.key, m.providers
 
 	return func() tea.Msg {
-		msg := registrarsFoundMsg{zoneID: z.ID, keys: keys}
+		msg := registrationsFoundMsg{zoneID: z.ID, keys: keys}
 
 		for _, c := range candidates {
-			err := askRegistrar(ctx, s, key, providers, c.account, c.zone)
+			// The Account registers the domain when it reads its DS.
+			err := withRegistrar(ctx, s, key, providers, c.account, func(ctx context.Context, r dnsprovider.DSRegistrar) error {
+				_, err := r.DelegationSigners(ctx, provider.ModuleZone(c.zone))
+
+				return err
+			})
 
 			switch {
 			case err == nil:
@@ -136,11 +145,13 @@ func (m *Model) publishDS(z dns.Zone) tea.Cmd {
 // errNoRegistrar is an Account whose Provider is no Registrar Adapter.
 var errNoRegistrar = errors.New("no Registrar Adapter")
 
-// askRegistrar asks an Account whether it registers the domain of its
-// Zone z and can publish its DS: errNoRegistrar when its Provider cannot,
-// dnsprovider.ErrNotFound when it does not register it.
-func askRegistrar(ctx context.Context, s *store.Store, key *vault.Key, providers *provider.Opener, a dns.Account, z dns.Zone) error {
-	ctx, cancel := context.WithTimeout(ctx, registrarTimeout)
+// withRegistrar opens an Account's Provider as a Registrar Adapter and
+// runs use on it, within registrationTimeout: errNoRegistrar when its
+// Provider is none.
+func withRegistrar(ctx context.Context, s *store.Store, key *vault.Key, providers *provider.Opener, a dns.Account,
+	use func(ctx context.Context, r dnsprovider.DSRegistrar) error,
+) error {
+	ctx, cancel := context.WithTimeout(ctx, registrationTimeout)
 	defer cancel()
 
 	p, _, err := accountProvider(ctx, s, key, providers, a)
@@ -153,17 +164,15 @@ func askRegistrar(ctx context.Context, s *store.Store, key *vault.Key, providers
 		return errNoRegistrar
 	}
 
-	_, err = r.DelegationSigners(ctx, provider.ModuleZone(z))
-
-	return err
+	return use(ctx, r)
 }
 
 // dsPublishUpdate takes a result of publishing the DS: the Registrations
 // found, or the write.
 func (m *Model) dsPublishUpdate(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
-	case registrarsFoundMsg:
-		m.registrarsFound(msg)
+	case registrationsFoundMsg:
+		m.registrationsFound(msg)
 	case dsPublishedMsg:
 		return m.dsPublished(msg)
 	}
@@ -171,12 +180,12 @@ func (m *Model) dsPublishUpdate(msg tea.Msg) tea.Cmd {
 	return nil
 }
 
-// registrarsFound takes the Registrations found for a Zone whose DS is
+// registrationsFound takes the Registrations found for a Zone whose DS is
 // to be published, unless the user moved on meanwhile, or it is no longer
 // to be published, such as once the parent serves it: it asks to confirm
 // publishing at the one found, lets the user pick one when several were,
 // or shows the keys to copy when none was.
-func (m *Model) registrarsFound(msg registrarsFoundMsg) {
+func (m *Model) registrationsFound(msg registrationsFoundMsg) {
 	if m.open == nil || m.open.ID != msg.zoneID || m.dialogOpen() || m.dnssecStepOf(*m.open) != stepPublish {
 		return
 	}
@@ -197,7 +206,7 @@ func (m *Model) registrarsFound(msg registrarsFoundMsg) {
 	}
 
 	m.notice = notice{}
-	d := &dsPublish{zone: z, keys: msg.keys, registrar: msg.found[0], unasked: msg.failed}
+	d := &dsPublish{zone: z, keys: msg.keys, registration: msg.found[0], unasked: msg.failed}
 	m.dsPublish = d
 
 	if len(msg.found) == 1 {
@@ -218,7 +227,7 @@ func (m *Model) registrarsFound(msg registrarsFoundMsg) {
 	d.picker = &picker{
 		title:   "Publish the DS of " + z.Name + " at",
 		options: labels,
-		pick:    func(i int) { d.registrar = msg.found[i] },
+		pick:    func(i int) { d.registration = msg.found[i] },
 	}
 }
 
@@ -261,7 +270,7 @@ func (m *Model) dsPublishKey(msg tea.KeyMsg) tea.Cmd {
 // sendDS publishes the keys of d at its Registration, replacing the DS
 // the registry held.
 func (m *Model) sendDS(d *dsPublish) tea.Cmd {
-	a, ok := m.account(d.registrar.AccountID)
+	a, ok := m.account(d.registration.AccountID)
 	if !ok {
 		m.dsPublish = nil
 
@@ -270,24 +279,15 @@ func (m *Model) sendDS(d *dsPublish) tea.Cmd {
 
 	d.busy, d.err = true, ""
 	ctx, s, key, providers := m.ctx, m.deps.Store, m.key, m.providers
-	z, keys := d.registrar, provider.ModuleSigningKeys(d.keys)
+	z, keys := d.registration, provider.ModuleSigningKeys(d.keys)
 	zoneID := d.zone.ID
 
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(ctx, registrarTimeout)
-		defer cancel()
+		err := withRegistrar(ctx, s, key, providers, a, func(ctx context.Context, r dnsprovider.DSRegistrar) error {
+			return r.SetDelegationSigners(ctx, provider.ModuleZone(z), keys)
+		})
 
-		p, _, err := accountProvider(ctx, s, key, providers, a)
-		if err != nil {
-			return dsPublishedMsg{zoneID: zoneID, err: err}
-		}
-
-		r, ok := p.(dnsprovider.DSRegistrar)
-		if !ok {
-			return dsPublishedMsg{zoneID: zoneID, err: errNoRegistrar}
-		}
-
-		return dsPublishedMsg{zoneID: zoneID, err: r.SetDelegationSigners(ctx, provider.ModuleZone(z), keys)}
+		return dsPublishedMsg{zoneID: zoneID, err: err}
 	}
 }
 
@@ -300,7 +300,7 @@ func (m *Model) dsPublished(msg dsPublishedMsg) tea.Cmd {
 		return nil
 	}
 
-	a, _ := m.account(d.registrar.AccountID)
+	a, _ := m.account(d.registration.AccountID)
 
 	if msg.err != nil {
 		d.busy = false
@@ -344,7 +344,7 @@ func (m *Model) dsPublishView() string {
 		return d.picker.view(m.height)
 	}
 
-	a, _ := m.account(d.registrar.AccountID)
+	a, _ := m.account(d.registration.AccountID)
 
 	notes := wrapNote(lipgloss.NewStyle(), "Publish the DS of "+d.zone.Name+" at "+a.Label()+"?", noteWidth)
 	notes = append(notes, wrapNote(hintStyle, "It changes the Delegation: the parent zone serves it once the registry publishes it.", noteWidth)...)
