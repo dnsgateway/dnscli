@@ -1,6 +1,7 @@
 package tui_test
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -360,4 +361,38 @@ func TestThePublishConfirmationShowsEveryKeyAndDSItSends(t *testing.T) {
 	if len(calls) != 1 || len(calls[0].Keys) != 2 || len(calls[0].Keys[0].DS) != 2 || calls[0].Keys[1].DNSKEY != ecKey.DNSKEY {
 		t.Fatalf("SetDelegationSigners calls = %+v, want both keys, the first with both DS", calls)
 	}
+}
+
+func TestAnAccountThatCouldNotBeAskedIsNamedBeforeConfirmingAnother(t *testing.T) {
+	c := &testClock{now: testNow}
+	r := &fakeResolver{}
+	f := turnOnFake(dnsprovider.On)
+	f.SetRegistration("zd1")
+
+	g := registrarFake()
+
+	h := newRegistrarHarness(t, f, g, r, c)
+
+	// porkbun.home may register it too: the user is told it could not
+	// be asked, not steered to cloudflare.work silently.
+	g.Fail(providertest.OpDelegationSigners, fmt.Errorf("porkbun: invalid API key: %w", dnsprovider.ErrUnauthorized))
+
+	h.press("S")
+	h.assertShows("Publish the DS of example.net at cloudflare.work?", "Could not ask porkbun.home", "invalid API key")
+}
+
+func TestAnAccountThatCannotBeOpenedFallsBackToTheKeysToCopyNamingIt(t *testing.T) {
+	c := &testClock{now: testNow}
+	r := &fakeResolver{}
+	f := turnOnFake(dnsprovider.On)
+	g := registrarFake()
+
+	h := newRegistrarHarness(t, f, g, r, c)
+
+	g.Fail(providertest.OpNew, errors.New("porkbun: no API key"))
+
+	h.press("S")
+	h.assertShows("DNSSEC keys for example.net", rfcDS)
+	h.assertStatusLineShows("Could not ask porkbun.home", "no API key")
+	h.assertHides("Publish the DS of")
 }

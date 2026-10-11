@@ -32,8 +32,12 @@ type dsPublish struct {
 	// picker lists the Registrations found to pick from, when several
 	// were; nil once one is picked.
 	picker *picker
-	busy   bool
-	err    string
+	// unasked names the Accounts that could not be asked whether they
+	// register the domain, and why: one may be its Registration too, so
+	// the user is told before confirming another.
+	unasked []string
+	busy    bool
+	err     string
 }
 
 // registrarsFoundMsg reports which Zones of a Live Zone's name are held
@@ -42,8 +46,9 @@ type registrarsFoundMsg struct {
 	zoneID int64
 	keys   []dns.SigningKey
 	found  []dns.Zone
-	// failed says why asking an Account failed, other than that it does
-	// not register the domain.
+	// failed names each Account that could not be asked, other than
+	// one that does not register the domain, and why: "porkbun.home
+	// (porkbun: invalid API key)".
 	failed []string
 }
 
@@ -120,7 +125,7 @@ func (m *Model) publishDS(z dns.Zone) tea.Cmd {
 				msg.found = append(msg.found, c.zone)
 			case errors.Is(err, errNoRegistrar), errors.Is(err, dnsprovider.ErrNotFound):
 			default:
-				msg.failed = append(msg.failed, "could not ask "+c.account.Label()+": "+err.Error())
+				msg.failed = append(msg.failed, c.account.Label()+" ("+err.Error()+")")
 			}
 		}
 
@@ -179,9 +184,11 @@ func (m *Model) registrarsFound(msg registrarsFoundMsg) {
 	z := *m.open
 
 	if len(msg.found) == 0 {
-		m.notice = notice{text: "No Account in dnscli publishes the DS of " + z.Name + ": copy it into the registrar's panel."}
+		none := "Account in dnscli publishes the DS of " + z.Name + ": copy it into the registrar's panel."
+
+		m.notice = notice{text: "No " + none}
 		if len(msg.failed) > 0 {
-			m.notice = notice{text: "No Account in dnscli publishes the DS of " + z.Name + " (" + strings.Join(msg.failed, "; ") + ").", err: true}
+			m.notice = notice{text: "Could not ask " + strings.Join(msg.failed, ", ") + ", and no other " + none, err: true}
 		}
 
 		m.openSigningKeys()
@@ -190,7 +197,7 @@ func (m *Model) registrarsFound(msg registrarsFoundMsg) {
 	}
 
 	m.notice = notice{}
-	d := &dsPublish{zone: z, keys: msg.keys, registrar: msg.found[0]}
+	d := &dsPublish{zone: z, keys: msg.keys, registrar: msg.found[0], unasked: msg.failed}
 	m.dsPublish = d
 
 	if len(msg.found) == 1 {
@@ -360,6 +367,11 @@ func (m *Model) dsPublishView() string {
 			notes = append(notes, helpKeyStyle.Render("DS"))
 			notes = append(notes, strings.Split(ansi.Hardwrap(ds, valueW, false), "\n")...)
 		}
+	}
+
+	for _, u := range d.unasked {
+		notes = append(notes, "")
+		notes = append(notes, wrapNote(errorStyle, "Could not ask "+u+" whether it registers "+d.zone.Name+" too.", noteWidth)...)
 	}
 
 	if d.err != "" {
