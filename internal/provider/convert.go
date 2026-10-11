@@ -41,6 +41,17 @@ func SigningKeys(keys []dnsprovider.SigningKey) []dns.SigningKey {
 	return out
 }
 
+// ModuleSigningKeys converts key-signing keys for a registrar adapter to
+// publish.
+func ModuleSigningKeys(keys []dns.SigningKey) []dnsprovider.SigningKey {
+	out := make([]dnsprovider.SigningKey, len(keys))
+	for i, k := range keys {
+		out[i] = dnsprovider.SigningKey{DNSKEY: k.DNSKEY, KeyTag: k.KeyTag, DS: slices.Clone(k.DS)}
+	}
+
+	return out
+}
+
 // ModuleRecord is a cached Record as the module takes it. The Extras, such
 // as Cloudflare's proxy flag, keep their keys.
 func ModuleRecord(r dns.Record) dnsprovider.Record {

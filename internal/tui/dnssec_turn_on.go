@@ -159,8 +159,9 @@ func (m *Model) turnRefusal(z dns.Zone, v string) (why string, inPanel bool) {
 
 // takeDNSSECStep takes the open Zone's next DNSSEC step: turning signing
 // on or off asks to confirm it in the Edit Zone dialog, once its Provider
-// can and the Zone passes the write gate; publishing the DS shows the
-// keys to copy. Any other step is only waited for.
+// can and the Zone passes the write gate; publishing the DS asks to
+// confirm it at the registrar, or shows the keys to copy. Any other step
+// is only waited for.
 func (m *Model) takeDNSSECStep() tea.Cmd {
 	if m.open == nil {
 		m.notice = notice{text: "Open a Zone first.", err: true}
@@ -178,9 +179,7 @@ func (m *Model) takeDNSSECStep() tea.Cmd {
 	case stepUnsign:
 		v = "off"
 	case stepPublish:
-		m.openSigningKeys()
-
-		return nil
+		return m.publishDS(z)
 	default:
 		m.notice = notice{text: "No DNSSEC step to take for " + z.Name + " now."}
 

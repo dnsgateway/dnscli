@@ -116,6 +116,8 @@ func (m *Model) View() string {
 		}
 	case m.offboard != nil:
 		view = overlay(view, m.offboardView(), m.width, m.height)
+	case m.dsPublish != nil:
+		view = overlay(view, m.dsPublishView(), m.width, m.height)
 	case m.recordForm != nil:
 		view = overlay(view, m.recordFormView(), m.width, m.height)
 		if m.recordForm.picker != nil {

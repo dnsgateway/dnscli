@@ -250,7 +250,7 @@ func TestTurningDNSSECOnStepsThroughEachStateToOnWithoutARefresh(t *testing.T) {
 	h.assertStatusBarShows("DNSSEC: DS can be published after 13:01")
 
 	h.passTime(time.Hour)
-	h.assertStatusBarShows("DNSSEC: publish the DS (s shows it)")
+	h.assertStatusBarShows("DNSSEC: publish the DS (S publishes it, s shows it)")
 
 	// The DS is pasted at the registrar by hand.
 	r.setDS(rfcZone, rfcDS)

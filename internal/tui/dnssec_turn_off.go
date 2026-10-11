@@ -59,6 +59,8 @@ func (m *Model) cancelTurningOff(f *zoneEditForm) {
 // Provider: off is then waited on until its nameservers stop serving the
 // keys; on ends any turning off.
 func (m *Model) dnssecTurned(zoneID int64, v string) {
+	delete(m.dsSent, zoneID)
+
 	if v != "off" {
 		delete(m.turningOff, zoneID)
 

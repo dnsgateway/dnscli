@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"errors"
-	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -322,7 +321,7 @@ func (m *Model) dnssecState(z dns.Zone) (string, lipgloss.Style) {
 
 		return "DNSSEC: DS can be published after " + clockText(end, m.deps.now()), badgePendingStyle
 	case stepPublish:
-		return fmt.Sprintf("DNSSEC: publish the DS (%s shows it)", m.keys.keysFor(ActionShowKeys)), badgePendingStyle
+		return m.publishText(z), badgePendingStyle
 	case stepOn:
 		return "DNSSEC: On", badgeOnStyle
 	case stepMismatch:

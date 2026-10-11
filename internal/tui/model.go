@@ -111,6 +111,13 @@ type Model struct {
 	// Zones the user asked to, by Zone ID: their Zone page shows the steps
 	// towards unsigning them.
 	turningOff map[int64]turnOff
+	// dsPublish asks to publish the open Zone's DS at its registrar; nil
+	// when closed.
+	dsPublish *dsPublish
+	// dsSent holds the IDs of the Zones whose DS this session
+	// published at their registrar, until DNSSEC is turned on or off
+	// again: they wait for the parent zone to serve it.
+	dsSent map[int64]bool
 
 	// addForm is the add-Account dialog; nil when closed.
 	addForm *addAccountForm
@@ -357,6 +364,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.dsSeen(msg)
 	case dnssecWatchMsg:
 		return m, m.dnssecWatched(msg)
+	case registrarsFoundMsg:
+		m.registrarsFound(msg)
+	case dsPublishedMsg:
+		return m, m.dsPublished(msg)
 	case serialCheckedMsg:
 		return m, m.serialChecked(msg)
 	case zoneRefreshedMsg:
@@ -453,6 +464,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.offboard != nil {
 			return m, m.offboardKey(msg)
+		}
+
+		if m.dsPublish != nil {
+			return m, m.dsPublishKey(msg)
 		}
 
 		if m.recordForm != nil {
