@@ -17,7 +17,19 @@ func (m *Model) confirmZoneEdit(f *zoneEditForm) {
 	f.confirming, f.err = false, ""
 
 	for _, c := range f.changes() {
-		if c.setting != dnssecSetting || c.value != "off" {
+		if c.setting != dnssecSetting {
+			continue
+		}
+
+		if c.value != "off" {
+			// Turning it on is a Zone write: it passes the write gate
+			// (ADR-0001).
+			if why := m.writeRefusal(f.zone); why != "" {
+				f.err = why
+
+				return
+			}
+
 			continue
 		}
 

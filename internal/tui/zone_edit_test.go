@@ -60,6 +60,18 @@ var (
 	saveFromMinTLS = []string{"up", "up", "up", "up", "enter"}
 )
 
+// editValidated Unseals the session, Refreshes the highlighted Zone, so it
+// is a Validated Zone that may be written (ADR-0001), and opens its Edit
+// Zone dialog.
+func editValidated(h *harness) {
+	h.t.Helper()
+
+	h.press("space")
+	h.unsealWith(passphrase)
+	h.assertShows("validated this session")
+	h.press("left", "e")
+}
+
 func TestEnterOnAZoneOpensItsSettings(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
 	status := dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Off, HSTS: dnsprovider.On}
@@ -95,6 +107,12 @@ func TestTurningDNSSECOnAsksToConfirmThenCachesThePendingStatusTheProviderReturn
 	// The dialog opens on DNSSEC, showing each setting as it is.
 	h.assertShows("Edit Zone work.example", "Account", "cloudflare.work", "‹ off ›", "HSTS", "[ Save ]")
 
+	// Turning DNSSEC on is a Zone write: the Zone is Refreshed first, to
+	// be a Validated Zone (ADR-0001).
+	h.press("esc", "space")
+	h.assertShows("validated this session")
+	h.press("left", "e")
+
 	h.press("right")
 	h.assertShows("‹ off → on ›")
 
@@ -104,6 +122,8 @@ func TestTurningDNSSECOnAsksToConfirmThenCachesThePendingStatusTheProviderReturn
 	if calls := updateZoneCalls(f); len(calls) != 0 {
 		t.Fatalf("UpdateZone before confirming: %+v", calls)
 	}
+
+	before := len(f.Calls())
 
 	h.press("enter")
 
@@ -122,9 +142,9 @@ func TestTurningDNSSECOnAsksToConfirmThenCachesThePendingStatusTheProviderReturn
 	}
 
 	// The cache is updated from the answer, without a Refresh.
-	for _, c := range f.Calls() {
+	for _, c := range f.Calls()[before:] {
 		if c.Op == providertest.OpRecords || c.Op == providertest.OpZoneStatus {
-			t.Fatalf("a Refresh followed the change: %+v", f.Calls())
+			t.Fatalf("a Refresh followed the change: %+v", f.Calls()[before:])
 		}
 	}
 }
@@ -210,8 +230,7 @@ func TestAZoneSettingTheProviderRefusesKeepsTheDialogOpenWithTheErrorAndTheCache
 
 	h := newAccountHarness(t, s, f)
 
-	h.press("e", "enter")
-	h.unsealWith(passphrase)
+	editValidated(h)
 	h.press("right")
 	h.press(saveFromDNSSEC...)
 	h.press("enter")
@@ -289,14 +308,16 @@ func TestZoneSettingsOfAnUpgradedAccountReachingSeveralTenantsAskForOneThenOpen(
 
 func TestChangingOneZoneSettingKeepsTheOtherAsCachedWhenTheProviderCannotReadIt(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
-	withZoneStatus(t, s, "work.example", dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Off, HSTS: dnsprovider.On})
+	status := dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Off, HSTS: dnsprovider.On}
+	withZoneStatus(t, s, "work.example", status)
 
-	// The Provider cannot read HSTS again after turning DNSSEC on.
-	f := settingsFake(dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Off, HSTS: dnsprovider.Unknown}, true)
+	f := settingsFake(status, true)
 	h := newAccountHarness(t, s, f)
 
-	h.press("e", "enter")
-	h.unsealWith(passphrase)
+	editValidated(h)
+
+	// The Provider cannot read HSTS again after turning DNSSEC on.
+	f.SetZoneStatus("zw1", dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Off, HSTS: dnsprovider.Unknown})
 	h.press("right")
 	h.press(saveFromDNSSEC...)
 	h.press("enter")
@@ -317,8 +338,7 @@ func TestAZoneSettingChangedButNotCachedClosesTheDialogNamingTheZone(t *testing.
 	f := settingsFake(status, true)
 	h := newAccountHarness(t, s, f)
 
-	h.press("e", "enter")
-	h.unsealWith(passphrase)
+	editValidated(h)
 	h.press("right")
 	h.press(saveFromDNSSEC...)
 
@@ -339,8 +359,15 @@ func TestAZoneSettingChangedButNotCachedClosesTheDialogNamingTheZone(t *testing.
 	h.assertShows("Edit Zone work.example")
 }
 
+// statusProvider is a Provider that reads the Zone Status, as a Refresh
+// does before a Zone may be written.
+type statusProvider interface {
+	dnsprovider.Provider
+	dnsprovider.ZoneStatusReader
+}
+
 // partialUpdater is a ZoneUpdater that writes DNSSEC, then fails.
-type partialUpdater struct{ dnsprovider.Provider }
+type partialUpdater struct{ statusProvider }
 
 func (partialUpdater) UpdateZone(context.Context, dnsprovider.Zone, dnsprovider.ZoneUpdate) (dnsprovider.ZoneStatus, error) {
 	return dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Pending, HSTS: dnsprovider.Unknown}, errors.New("a later write failed")
@@ -348,20 +375,22 @@ func (partialUpdater) UpdateZone(context.Context, dnsprovider.Zone, dnsprovider.
 
 func TestAZoneSettingWrittenBeforeTheProviderFailsIsCachedWithTheError(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
-	withZoneStatus(t, s, "work.example", dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Off, HSTS: dnsprovider.On})
+	status := dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Off, HSTS: dnsprovider.On}
+	withZoneStatus(t, s, "work.example", status)
 
-	fake := workZones().Factory()
+	fake := settingsFake(status, true).Factory()
 	h := newHarnessWith(t, s, tui.Deps{
 		Providers: dnsprovider.Registry{"cloudflare": {Fields: fake.Fields, Capabilities: []dnsprovider.Capability{dnsprovider.CapZoneUpdater}, New: func(m map[string]string, opts ...dnsprovider.Option) (dnsprovider.Provider, error) {
 			p, err := fake.New(m, opts...)
 
-			return partialUpdater{p}, err
+			sp, _ := p.(statusProvider)
+
+			return partialUpdater{sp}, err
 		}}},
 		UnsealMethod: fastPassphrase(),
 	})
 
-	h.press("e", "enter")
-	h.unsealWith(passphrase)
+	editValidated(h)
 	h.press("right")
 	h.press(saveFromDNSSEC...)
 	h.press("enter")
@@ -395,6 +424,31 @@ func TestTurningDNSSECOffWithoutCheckingTheDSAtTheParentWarnsOfItAndRefuses(t *t
 	h.press(saveFromDNSSEC...)
 	h.assertShows("DNSSEC stays on: dnscli could not tell whether")
 	h.assertHides("Turn DNSSEC off for work.example")
+}
+
+func TestTurningDNSSECOnFromTheDialogIsRefusedForAStaleZone(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	status := dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Off, HSTS: dnsprovider.On}
+	withZoneStatus(t, s, "work.example", status)
+
+	f := settingsFake(status, true)
+	h := newAccountHarness(t, s, f)
+
+	// Unsealed, but work.example is not Refreshed this session: turning
+	// DNSSEC on is a Zone write, refused as any other (ADR-0001).
+	h.press("e", "enter")
+	h.unsealWith(passphrase)
+	h.press("right")
+	h.press(saveFromDNSSEC...)
+
+	h.assertShows("work.example is a Stale Zone")
+	h.assertHides("Turn DNSSEC on for work.example at")
+
+	h.press("enter")
+
+	if calls := updateZoneCalls(f); len(calls) != 0 {
+		t.Fatalf("UpdateZone calls = %+v, want none for a Stale Zone", calls)
+	}
 }
 
 func TestTurningHSTSOnWarnsThatBrowsersWillPinHTTPS(t *testing.T) {
@@ -436,8 +490,7 @@ func TestBothZoneSettingsChangedAreMadeInOneUpdateOnceConfirmed(t *testing.T) {
 	f := settingsFake(status, true)
 	h := newAccountHarness(t, s, f)
 
-	h.press("e", "enter")
-	h.unsealWith(passphrase)
+	editValidated(h)
 	h.press("right", "down", "right")
 	h.press(saveFromHSTS...)
 
@@ -631,7 +684,7 @@ func TestEditZoneSaysWhyItsDelegationAndNameserversAreUnknown(t *testing.T) {
 
 // tlsFailsAfterDNSSEC is a ZoneUpdater that turns DNSSEC on, then fails
 // to set the minimum TLS version, which it returns unknown.
-type tlsFailsAfterDNSSEC struct{ dnsprovider.Provider }
+type tlsFailsAfterDNSSEC struct{ statusProvider }
 
 func (tlsFailsAfterDNSSEC) UpdateZone(context.Context, dnsprovider.Zone, dnsprovider.ZoneUpdate) (dnsprovider.ZoneStatus, error) {
 	return dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Pending, HSTS: dnsprovider.On}, errors.New("TLS refused")
@@ -639,20 +692,22 @@ func (tlsFailsAfterDNSSEC) UpdateZone(context.Context, dnsprovider.Zone, dnsprov
 
 func TestASettingThatFailsAfterAnotherIsMadeKeepsItsCachedValueAndItsPick(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
-	withZoneStatus(t, s, "work.example", dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Off, HSTS: dnsprovider.On, MinTLS: dnsprovider.TLS10})
+	status := dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Off, HSTS: dnsprovider.On, MinTLS: dnsprovider.TLS10}
+	withZoneStatus(t, s, "work.example", status)
 
-	fake := workZones().Factory()
+	fake := settingsFake(status, true).Factory()
 	h := newHarnessWith(t, s, tui.Deps{
 		Providers: dnsprovider.Registry{"cloudflare": {Fields: fake.Fields, Capabilities: []dnsprovider.Capability{dnsprovider.CapZoneUpdater}, New: func(m map[string]string, opts ...dnsprovider.Option) (dnsprovider.Provider, error) {
 			p, err := fake.New(m, opts...)
 
-			return tlsFailsAfterDNSSEC{p}, err
+			sp, _ := p.(statusProvider)
+
+			return tlsFailsAfterDNSSEC{sp}, err
 		}}},
 		UnsealMethod: fastPassphrase(),
 	})
 
-	h.press("e", "enter")
-	h.unsealWith(passphrase)
+	editValidated(h)
 	h.press("right", "down", "down", "right", "right")
 	h.press(saveFromMinTLS...)
 	h.press("enter")
