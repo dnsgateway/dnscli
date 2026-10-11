@@ -230,7 +230,7 @@ func TestTwoAccountsThatRegisterTheDomainAreOfferedToPickFromEachTime(t *testing
 	h.press("j", "enter")
 	h.assertShows("Publish the DS of example.net at porkbun.home?")
 
-	// Cancelled, the pick is not kept: the next time asks again.
+	// Canceled, the pick is not kept: the next time asks again.
 	h.press("esc")
 	h.press("S")
 	h.assertShows("Publish the DS of example.net at")
@@ -290,7 +290,7 @@ func TestCancellingThePublishConfirmationWritesNothing(t *testing.T) {
 	h.assertStatusBarShows("DNSSEC: publish the DS (S publishes it, s shows it)")
 
 	if calls := setDSCalls(f); len(calls) != 0 {
-		t.Fatalf("SetDelegationSigners once cancelled: %+v", calls)
+		t.Fatalf("SetDelegationSigners once canceled: %+v", calls)
 	}
 }
 

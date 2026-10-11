@@ -152,6 +152,19 @@ func askRegistrar(ctx context.Context, s *store.Store, key *vault.Key, providers
 	return err
 }
 
+// dsPublishUpdate takes a result of publishing the DS: the Registrations
+// found, or the write.
+func (m *Model) dsPublishUpdate(msg tea.Msg) tea.Cmd {
+	switch msg := msg.(type) {
+	case registrarsFoundMsg:
+		m.registrarsFound(msg)
+	case dsPublishedMsg:
+		return m.dsPublished(msg)
+	}
+
+	return nil
+}
+
 // registrarsFound takes the Registrations found for a Zone whose DS is
 // to be published, unless the user moved on meanwhile, or it is no longer
 // to be published, such as once the parent serves it: it asks to confirm
