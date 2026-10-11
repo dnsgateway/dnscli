@@ -122,30 +122,36 @@ func clockText(t, now time.Time) string {
 	return t.Format("15:04")
 }
 
-// turnOnText says an unsigned Zone is off, and how to turn it on: through
-// the DNSSEC step where its Provider can and the Zone may be written, in
-// the Provider's own panel where it cannot.
+// turnOnText says an unsigned Zone is off, and how to turn it on.
 func (m *Model) turnOnText(z dns.Zone) string {
-	switch why, inPanel := m.turnOnRefusal(z); {
+	return "DNSSEC: off" + m.turnHint(z, "on")
+}
+
+// turnHint says, after a DNSSEC state, how to turn DNSSEC v, "on" or
+// "off", for z: through the DNSSEC step where its Provider can and the
+// Zone may be written, in the Provider's own panel where it cannot.
+// Empty while the Zone may not be written.
+func (m *Model) turnHint(z dns.Zone, v string) string {
+	switch why, inPanel := m.turnRefusal(z, v); {
 	case inPanel:
 		a, _ := m.account(z.AccountID)
 
-		return "DNSSEC: off (turn it on in " + a.Label() + "'s panel)"
+		return " (turn it " + v + " in " + a.Label() + "'s panel)"
 	case why != "":
-		return "DNSSEC: off"
+		return ""
 	}
 
-	return "DNSSEC: off (" + m.keys.keysFor(ActionDNSSECStep) + " turns it on)"
+	return " (" + m.keys.keysFor(ActionDNSSECStep) + " turns it " + v + ")"
 }
 
-// turnOnRefusal says why DNSSEC cannot be turned on for z from the Zone
-// page now: its Provider cannot through its API, which inPanel reports,
-// or z may not be written, as for any Zone write (ADR-0001). Empty when
-// it can.
-func (m *Model) turnOnRefusal(z dns.Zone) (why string, inPanel bool) {
+// turnRefusal says why DNSSEC cannot be turned v, "on" or "off", for z
+// from the Zone page now: its Provider cannot through its API, which
+// inPanel reports, or z may not be written, as for any Zone write
+// (ADR-0001). Empty when it can.
+func (m *Model) turnRefusal(z dns.Zone, v string) (why string, inPanel bool) {
 	a, _ := m.account(z.AccountID)
 	if !m.accountCan(a, dnsprovider.CapZoneUpdater) {
-		return cannotTurnDNSSEC(a, "on"), true
+		return cannotTurnDNSSEC(a, v), true
 	}
 
 	return m.writeRefusal(z), false
@@ -164,27 +170,24 @@ func (m *Model) takeDNSSECStep() tea.Cmd {
 
 	z := *m.open
 
+	var v string
+
 	switch m.dnssecStepOf(z) {
 	case stepTurnOn:
+		v = "on"
+	case stepUnsign:
+		v = "off"
 	case stepPublish:
 		m.openSigningKeys()
 
 		return nil
-	case stepUnsign:
-		if m.writeRefusal(z) != "" {
-			_, cmd, _ := m.writeGate()
-
-			return cmd
-		}
-
-		return m.editZoneOf(z.ID, "off")
 	default:
 		m.notice = notice{text: "No DNSSEC step to take for " + z.Name + " now."}
 
 		return nil
 	}
 
-	switch why, inPanel := m.turnOnRefusal(z); {
+	switch why, inPanel := m.turnRefusal(z, v); {
 	case inPanel:
 		m.notice = notice{text: why, err: true}
 
@@ -195,7 +198,7 @@ func (m *Model) takeDNSSECStep() tea.Cmd {
 		return cmd
 	}
 
-	return m.editZoneOf(z.ID, "on")
+	return m.editZoneOf(z.ID, v)
 }
 
 // dnssecRecheckWaits are the waits between re-checks of the open Zone

@@ -139,14 +139,9 @@ func (m *Model) turnOffStep(z dns.Zone, ds dsPresence) dnssecStep {
 	return stepSilent
 }
 
-// unsignText says a Zone being turned off may be unsigned, and how: through
-// the DNSSEC step where the Zone may be written.
+// unsignText says a Zone being turned off may be unsigned, and how.
 func (m *Model) unsignText(z dns.Zone) string {
-	if m.writeRefusal(z) != "" {
-		return "DNSSEC: DS gone, ready to unsign"
-	}
-
-	return "DNSSEC: DS gone, ready to unsign (" + m.keys.keysFor(ActionDNSSECStep) + " turns it off)"
+	return "DNSSEC: DS gone, ready to unsign" + m.turnHint(z, "off")
 }
 
 // dsSeenMsg reports what was stored of the DS a signed Zone's parent
