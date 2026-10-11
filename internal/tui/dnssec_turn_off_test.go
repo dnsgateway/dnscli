@@ -92,6 +92,14 @@ func TestOnceTheDSIsGoneUnsigningWaitsForItsTTLThenIsOfferedAndSent(t *testing.T
 	if len(calls) != 1 || calls[0].Zone.ID != "zd1" || calls[0].ZoneUpdate.DNSSEC == nil || *calls[0].ZoneUpdate.DNSSEC {
 		t.Fatalf("UpdateZone calls = %+v, want one turning DNSSEC off for zd1", calls)
 	}
+	// The nameservers stop serving the keys over time, seen at a
+	// re-check within half an hour.
+	// The nameservers stop serving the keys over time, seen at a re-check within half an hour.
+	h.assertStatusBarShows("DNSSEC: off, waiting for nameservers to stop serving the keys")
+
+	r.setKeys(rfcZone)
+	h.passTime(30 * time.Minute)
+	h.assertStatusBarShows("DNSSEC: off (S turns it on)")
 }
 
 func TestTheWaitBeforeUnsigningKeepsWhenTheDSWasFirstSeenGoneAcrossARestart(t *testing.T) {

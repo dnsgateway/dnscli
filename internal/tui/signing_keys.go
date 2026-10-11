@@ -228,6 +228,9 @@ const (
 	stepWaitUnsign
 	// stepUnsign is a signed Zone being turned off that may be unsigned.
 	stepUnsign
+	// stepWaitUnsigned is a Zone turned off whose nameservers still serve
+	// its keys.
+	stepWaitUnsigned
 )
 
 // dnssecStepOf works out z's DNSSEC step: On when the parent serves a DS
@@ -253,13 +256,17 @@ func (m *Model) dnssecStepOf(z dns.Zone) dnssecStep {
 
 	ds := m.dsPresenceOf(z.Name)
 
+	// A Zone turned off this session may still be reported pending: it
+	// is being unsigned, not signed.
+	unsigning := m.turningOff[z.ID] == turnOffSent
+
 	if len(c.keys) == 0 {
 		switch {
 		case ds == dsServed:
 			// A DS at the parent of a Zone that serves no keys fails
 			// validation, whatever its Provider reports.
 			return stepMismatch
-		case signingReported(z):
+		case signingReported(z) && !unsigning:
 			return stepWaitKeys
 		case ds == dsNone:
 			return stepTurnOn
@@ -270,7 +277,10 @@ func (m *Model) dnssecStepOf(z dns.Zone) dnssecStep {
 		return stepSilent
 	}
 
-	if m.turningOff[z.ID] {
+	switch m.turningOff[z.ID] {
+	case turnOffSent:
+		return stepWaitUnsigned
+	case turnOffAsked:
 		return m.turnOffStep(z, ds)
 	}
 
@@ -324,6 +334,8 @@ func (m *Model) dnssecState(z dns.Zone) (string, lipgloss.Style) {
 		return "DNSSEC: unsign after " + clockText(m.unsignAfter(z), m.deps.now()), badgePendingStyle
 	case stepUnsign:
 		return m.unsignText(z), badgePendingStyle
+	case stepWaitUnsigned:
+		return "DNSSEC: off, waiting for nameservers to stop serving the keys", badgePendingStyle
 	}
 
 	return "", statusStyle

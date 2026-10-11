@@ -67,7 +67,6 @@ func (m *Model) signingSeen(msg signingSeenMsg) {
 		if msg.at.IsZero() {
 			// Seen unsigned: it no longer waits on its DS.
 			z.DSGoneAt = time.Time{}
-			delete(m.turningOff, z.ID)
 		}
 
 		m.updateZone(z)
@@ -212,7 +211,7 @@ var dnssecRecheckWaits = []time.Duration{
 // so is re-checked.
 func (s dnssecStep) waits() bool {
 	switch s {
-	case stepWaitKeys, stepWaitTTL, stepPublish, stepRemoveDS, stepWaitUnsign:
+	case stepWaitKeys, stepWaitTTL, stepPublish, stepRemoveDS, stepWaitUnsign, stepWaitUnsigned:
 		return true
 	}
 
@@ -330,7 +329,7 @@ func (m *Model) dnssecWatched(msg dnssecWatchMsg) tea.Cmd {
 	switch step := m.dnssecStepOf(z); {
 	case !step.waits():
 		return nil
-	case step == stepWaitKeys:
+	case step == stepWaitKeys, step == stepWaitUnsigned:
 		return tea.Batch(m.checkParentDS(z), m.lookUpSigningKeys(z))
 	}
 

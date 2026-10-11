@@ -640,6 +640,12 @@ func (m *Model) zoneSettingsSaved(msg zoneSettingsSavedMsg) tea.Cmd {
 		keys = m.signingKeysChanged(before)
 	}
 
+	for _, c := range msg.done {
+		if c.setting == dnssecSetting {
+			m.dnssecTurned(msg.zone.ID, c.value)
+		}
+	}
+
 	switch {
 	case msg.saveErr != nil:
 		if f != nil {
