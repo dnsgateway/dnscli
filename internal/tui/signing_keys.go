@@ -219,6 +219,9 @@ const (
 	// stepMismatch is a parent DS that matches none of the Zone's keys,
 	// or a DS for a Zone that serves none: it fails validation.
 	stepMismatch
+	// stepRemoveDS is a signed Zone being turned off whose parent still
+	// serves a DS: it is removed at the registrar first.
+	stepRemoveDS
 )
 
 // dnssecStepOf works out z's DNSSEC step: On when the parent serves a DS
@@ -259,6 +262,10 @@ func (m *Model) dnssecStepOf(z dns.Zone) dnssecStep {
 		}
 
 		return stepSilent
+	}
+
+	if m.turningOff[z.ID] {
+		return m.turnOffStep(z, ds)
 	}
 
 	switch ds {
@@ -305,6 +312,8 @@ func (m *Model) dnssecState(z dns.Zone) (string, lipgloss.Style) {
 		return "DNSSEC: On", badgeOnStyle
 	case stepMismatch:
 		return "DNSSEC: DS does not match", errorStyle
+	case stepRemoveDS:
+		return "DNSSEC: remove the DS at the registrar to turn it off", badgePendingStyle
 	}
 
 	return "", statusStyle

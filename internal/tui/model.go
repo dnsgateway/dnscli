@@ -107,6 +107,10 @@ type Model struct {
 	// dnssecWatch re-checks the open Zone's DNSSEC while it waits; nil
 	// when no Zone is open, or it is to start afresh.
 	dnssecWatch *dnssecWatch
+	// turningOff marks the Zones the user asked to turn DNSSEC off for
+	// this session, by Zone ID: their Zone page shows the steps towards
+	// unsigning them.
+	turningOff map[int64]bool
 
 	// addForm is the add-Account dialog; nil when closed.
 	addForm *addAccountForm

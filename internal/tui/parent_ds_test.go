@@ -146,11 +146,12 @@ func TestTurningDNSSECOffWarnsToRemoveTheDSFirstWhenTheParentServesOne(t *testin
 	r.setDS("work.example", dsOne)
 	h := editDNSSECOff(t, r)
 
-	// The hint warns as soon as off is picked, and the confirmation again.
+	// The hint warns as soon as off is picked; Save then refuses.
 	h.assertShows("Remove the DS record")
 
 	h.press(saveFromDNSSEC...)
-	h.assertShows("Turn DNSSEC off for work.example", "Remove the DS record")
+	h.assertShows("DNSSEC stays on: remove the DS record for work.example")
+	h.assertHides("Turn DNSSEC off for work.example")
 }
 
 func TestTurningDNSSECOffDoesNotWarnWhenTheParentServesNoDS(t *testing.T) {

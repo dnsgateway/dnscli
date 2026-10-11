@@ -511,6 +511,11 @@ func (m *Model) zoneEditKey(msg tea.KeyMsg) tea.Cmd {
 		case ActionClose:
 			f.confirming = false
 		case ActionSelect:
+			// What allowed it may have changed while it was confirmed.
+			if m.confirmZoneEdit(f); !f.confirming {
+				return nil
+			}
+
 			f.busy = true
 
 			return m.changeZoneSettings(f)
@@ -547,8 +552,7 @@ func (m *Model) zoneEditKey(msg tea.KeyMsg) tea.Cmd {
 			// Like an Account saved unchanged, nothing to make closes it.
 			m.zoneEdit = nil
 		case f.field == f.saveField():
-			f.confirming = true
-			f.err = ""
+			m.confirmZoneEdit(f)
 		case changeable:
 			f.picker = &picker{
 				title:   f.settings[i].name,
