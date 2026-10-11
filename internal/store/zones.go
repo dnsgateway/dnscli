@@ -334,7 +334,7 @@ func (s *Store) SaveRefresh(ctx context.Context, z dns.Zone, records []dns.Recor
 	z.StatusAt = timeOrZero(statusAt)
 	z.SigningSeenAt = timeOrZero(signingSeen)
 	z.DSGoneAt = timeOrZero(dsGone)
-	z.DSTTL = time.Duration(dsTTL) * time.Second
+	z.DSTTL = durationOf(dsTTL)
 
 	if err := replaceRecords(ctx, tx, z.ID, records); err != nil {
 		return dns.Zone{}, fmt.Errorf("save refresh: %w", err)
@@ -426,7 +426,7 @@ func (s *Store) SaveDSSeen(ctx context.Context, z dns.Zone, served bool, ttl tim
 			ds_ttl     = IIF(?1, ?3, ds_ttl)
 		WHERE id = ?4 AND account_id = ?5 AND name = ?6 AND provider_zone_id = ?7
 		RETURNING ds_gone_at, ds_ttl`,
-		served, unixOrZero(at), int64(ttl/time.Second), z.ID, z.AccountID, z.Name, z.ProviderID,
+		served, unixOrZero(at), secondsOf(ttl), z.ID, z.AccountID, z.Name, z.ProviderID,
 	).Scan(&gone, &secs)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrZoneNotCached
@@ -436,7 +436,7 @@ func (s *Store) SaveDSSeen(ctx context.Context, z dns.Zone, served bool, ttl tim
 		return time.Time{}, 0, fmt.Errorf("save DS seen: %w", err)
 	}
 
-	return timeOrZero(gone), time.Duration(secs) * time.Second, nil
+	return timeOrZero(gone), durationOf(secs), nil
 }
 
 // ErrNoRecordID is returned by SaveApply for a change whose Record has no
@@ -623,6 +623,16 @@ func timeOrZero(unix int64) time.Time {
 	return time.Unix(unix, 0).UTC()
 }
 
+// secondsOf stores a duration, such as a TTL, in whole seconds.
+func secondsOf(d time.Duration) int64 {
+	return int64(d / time.Second)
+}
+
+// durationOf is a duration stored in whole seconds.
+func durationOf(secs int64) time.Duration {
+	return time.Duration(secs) * time.Second
+}
+
 // zoneStateColumns are the columns of a cached Zone's state, in the order
 // a zoneScan reads them.
 const zoneStateColumns = `soa_serial, refreshed_at, dnssec, hsts, min_tls, status_at, nameservers, hosting_state, signing_seen_at, ds_gone_at, ds_ttl`
@@ -650,7 +660,7 @@ func (s *zoneScan) fill() {
 	s.z.State = hostingStateOf(s.state)
 	s.z.SigningSeenAt = timeOrZero(s.signingSeen)
 	s.z.DSGoneAt = timeOrZero(s.dsGone)
-	s.z.DSTTL = time.Duration(s.dsTTL) * time.Second
+	s.z.DSTTL = durationOf(s.dsTTL)
 }
 
 // joinNames stores a list of DNS names, such as nameservers, in one column.
