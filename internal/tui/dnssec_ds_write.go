@@ -431,8 +431,18 @@ func (m *Model) dsWriteKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 // sendDS sends the keys of d to its Registration, replacing the DS the
-// registry held: none removes it.
+// registry held: none removes it. It sends nothing once the Zone may no
+// longer be written, or no longer takes the write asked, as when its DS
+// went meanwhile: the user confirmed what was shown, and only that is
+// sent (ADR-0007).
 func (m *Model) sendDS(d *dsWrite) tea.Cmd {
+	if why := m.dsWriteRefusal(d); why != "" {
+		m.dsWrite = nil
+		m.notice = notice{text: "The DS of " + d.zone.Name + " was not " + dsWrites[d.kind].done + ": " + why, err: true}
+
+		return nil
+	}
+
 	a, ok := m.account(d.registration.AccountID)
 	if !ok {
 		m.dsWrite = nil
@@ -452,6 +462,27 @@ func (m *Model) sendDS(d *dsWrite) tea.Cmd {
 
 		return dsWrittenMsg{zoneID: zoneID, err: err}
 	}
+}
+
+// dsWriteRefusal says why d may not be sent now that the user confirmed
+// it; empty when it may: the Zone passes the write gate and still takes
+// the same DS write.
+func (m *Model) dsWriteRefusal(d *dsWrite) string {
+	z, ok := m.zoneByID[d.zone.ID]
+	if !ok {
+		return d.zone.Name + " is no longer listed."
+	}
+
+	if why := m.writeRefusal(z); why != "" {
+		return why
+	}
+
+	step := m.dnssecStepOf(z)
+	if step != d.step || dsWriteKindOf(step, m.signingKeysOf(z)) != d.kind {
+		return "its DNSSEC changed while it was asked about; the Zone Status bar shows its next step."
+	}
+
+	return ""
 }
 
 // dsWritten takes the result of writing a Zone's DS: once written, the

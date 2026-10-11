@@ -259,3 +259,28 @@ func TestADSForAZoneThatServesNoKeysIsOfferedForRemoval(t *testing.T) {
 	h.passTime(time.Minute)
 	h.assertStatusBarShows("DNSSEC: off")
 }
+
+func TestADSWriteIsNotSentOnceItsStepPassedWhileTheConfirmationWasOpen(t *testing.T) {
+	c := &testClock{now: testNow}
+	r := &fakeResolver{}
+	f := turnOnFake(dnsprovider.On)
+	f.SetRegistration("zd1", rfcModuleKey)
+
+	h := newRemoveHarness(t, f, r, c)
+
+	h.press("S")
+	h.assertShows("Remove the DS of example.net at cloudflare.work?")
+
+	// Removed by hand meanwhile: the re-check sees it gone.
+	r.setDS(rfcZone)
+	h.passTime(time.Minute)
+	h.press("enter")
+
+	if calls := setDSCalls(f); len(calls) != 0 {
+		t.Fatalf("SetDelegationSigners once the DS was gone: %+v", calls)
+	}
+
+	h.assertHides("Remove the DS of")
+	h.assertStatusLineShows("The DS of example.net was not removed")
+	h.assertStatusBarShows("DNSSEC: unsign after 13:01")
+}
