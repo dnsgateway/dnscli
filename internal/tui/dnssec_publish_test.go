@@ -44,12 +44,16 @@ func assertPublishedOnce(t *testing.T, f *fakeProvider, zoneID string) {
 }
 
 // newPublishHarness is newTurnOnHarness with example.net signed and its
-// keys served, but no DS at the parent, once its wait has passed: the DS
-// is to be published.
-func newPublishHarness(t *testing.T, f *fakeProvider, r *fakeResolver, c *testClock) *harness {
+// keys served, the RFC 6605 key unless keys are given, but no DS at the
+// parent, once its wait has passed: the DS is to be published.
+func newPublishHarness(t *testing.T, f *fakeProvider, r *fakeResolver, c *testClock, keys ...dns.SigningKey) *harness {
 	t.Helper()
 
-	r.setKeys(rfcZone, rfcKey)
+	if len(keys) == 0 {
+		keys = []dns.SigningKey{rfcKey}
+	}
+
+	r.setKeys(rfcZone, keys...)
 	r.setDS(rfcZone)
 
 	h, _ := newTurnOnHarness(t, f, r, c)
@@ -330,5 +334,30 @@ func TestASealedSessionIsShownTheKeysToCopyAndAsksNoRegistrar(t *testing.T) {
 
 	if n := f.count(providertest.OpDelegationSigners); n != 0 {
 		t.Fatalf("DelegationSigners asked %d times in a sealed session", n)
+	}
+}
+
+func TestThePublishConfirmationShowsEveryKeyAndDSItSends(t *testing.T) {
+	c := &testClock{now: testNow}
+	r := &fakeResolver{}
+	f := turnOnFake(dnsprovider.On)
+	f.SetRegistration("zd1")
+
+	// The RFC 6605 key with a second DS, and a key with none: each is
+	// sent whole, so each shows whole.
+	sha384 := "55648 13 4 D4FCD1A5B5E0B1E6E58A1CF1CB2B0A0B0C0D0E0F101112131415161718191A1B1C1D1E1F202122232425262728292A2B2C2D2E2F"
+	bare := dns.SigningKey{DNSKEY: ecKey.DNSKEY, KeyTag: ecKey.KeyTag}
+
+	h := newPublishHarness(t, f, r, c, dns.SigningKey{DNSKEY: rfcDNSKEY, KeyTag: 55648, DS: []string{rfcDS, sha384}}, bare)
+	h.send(tea.WindowSizeMsg{Width: 200, Height: 40})
+
+	h.press("S")
+	h.assertShows("Publish the DS of example.net at cloudflare.work?", rfcDNSKEY, rfcDS, sha384, ecKey.DNSKEY)
+
+	h.press("enter")
+
+	calls := setDSCalls(f)
+	if len(calls) != 1 || len(calls[0].Keys) != 2 || len(calls[0].Keys[0].DS) != 2 || calls[0].Keys[1].DNSKEY != ecKey.DNSKEY {
+		t.Fatalf("SetDelegationSigners calls = %+v, want both keys, the first with both DS", calls)
 	}
 }

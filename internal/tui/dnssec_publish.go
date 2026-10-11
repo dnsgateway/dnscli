@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/dnsgateway/dnsprovider"
 
@@ -329,21 +330,35 @@ func publishError(zone string, a dns.Account, err error) string {
 }
 
 // dsPublishView asks to confirm publishing the DS, naming the Account and
-// the keys.
+// the exact set of keys sent.
 func (m *Model) dsPublishView() string {
 	d := m.dsPublish
 	if d.picker != nil {
 		return d.picker.view(m.height)
 	}
+
 	a, _ := m.account(d.registrar.AccountID)
 
 	notes := wrapNote(lipgloss.NewStyle(), "Publish the DS of "+d.zone.Name+" at "+a.Label()+"?", noteWidth)
 	notes = append(notes, wrapNote(hintStyle, "It changes the Delegation: the parent zone serves it once the registry publishes it.", noteWidth)...)
 	notes = append(notes, "")
 
-	for _, k := range d.keys {
-		if len(k.DS) > 0 {
-			notes = append(notes, helpKeyStyle.Render("DS")+" "+k.DS[0])
+	// Every key shows as it is sent, its DNSKEY and each of its DS
+	// records, whichever form the registrar takes (ADR-0007). The values
+	// wrap only when the terminal cannot hold them.
+	valueW := max(m.width-16, 20)
+
+	for i, k := range d.keys {
+		if i > 0 {
+			notes = append(notes, "")
+		}
+
+		notes = append(notes, helpKeyStyle.Render("DNSKEY"))
+		notes = append(notes, strings.Split(ansi.Hardwrap(k.DNSKEY, valueW, false), "\n")...)
+
+		for _, ds := range k.DS {
+			notes = append(notes, helpKeyStyle.Render("DS"))
+			notes = append(notes, strings.Split(ansi.Hardwrap(ds, valueW, false), "\n")...)
 		}
 	}
 
