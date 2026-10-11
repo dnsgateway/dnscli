@@ -391,12 +391,6 @@ func cannotTurnDNSSEC(a dns.Account, v string) string {
 	return a.Label() + " cannot turn DNSSEC " + v + " through its API: turn it " + v + " in its own panel."
 }
 
-// cannotTurnDNSSECOn says an Account's Provider cannot turn DNSSEC on
-// through its API.
-func cannotTurnDNSSECOn(a dns.Account) string {
-	return cannotTurnDNSSEC(a, "on")
-}
-
 // pickDNSSEC picks DNSSEC v, "on" or "off", and moves to the Save button.
 func (f *zoneEditForm) pickDNSSEC(v string) {
 	for i, s := range f.settings {

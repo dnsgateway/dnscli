@@ -145,7 +145,7 @@ func (m *Model) turnOnText(z dns.Zone) string {
 func (m *Model) turnOnRefusal(z dns.Zone) (why string, inPanel bool) {
 	a, _ := m.account(z.AccountID)
 	if !m.accountCan(a, dnsprovider.CapZoneUpdater) {
-		return cannotTurnDNSSECOn(a), true
+		return cannotTurnDNSSEC(a, "on"), true
 	}
 
 	return m.writeRefusal(z), false
