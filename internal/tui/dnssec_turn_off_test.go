@@ -93,6 +93,61 @@ func TestOnceTheDSIsGoneUnsigningWaitsForItsTTLThenIsOfferedAndSent(t *testing.T
 	}
 }
 
+func TestTheWaitBeforeUnsigningKeepsWhenTheDSWasFirstSeenGoneAcrossARestart(t *testing.T) {
+	c := &testClock{now: testNow}
+	r := &fakeResolver{}
+	r.setKeys(rfcZone, rfcKey)
+	r.setDS(rfcZone, rfcDS)
+	f := turnOnFake(dnsprovider.On)
+
+	h, s := newTurnOnHarness(t, f, r, c)
+
+	// The DS, served with an hour-long TTL, is seen gone at 12:00.
+	r.setDS(rfcZone)
+	h.press("right", "r")
+	h.assertStatusBarShows("DNSSEC: DS can be published")
+
+	// Half an hour later, after a restart, unsigning still waits for 13:00.
+	c.now = testNow.Add(30 * time.Minute)
+	h = restart(t, s, f, r, c)
+	h.press("right", "r")
+	h.unsealWith(passphrase)
+	h.assertShows("validated this session")
+
+	h.press("left")
+	pickDNSSECOff(h)
+	h.assertShows("DNSSEC stays on until 13:00")
+}
+
+func TestADSThatReappearsRestartsTheWaitOnceItIsGoneAgain(t *testing.T) {
+	c := &testClock{now: testNow}
+	r := &fakeResolver{}
+	r.setKeys(rfcZone, rfcKey)
+	r.setDS(rfcZone, rfcDS)
+	f := turnOnFake(dnsprovider.On)
+
+	h, _ := newTurnOnHarness(t, f, r, c)
+	pickDNSSECOff(h)
+	h.press("esc", "right")
+
+	// Seen gone at a Refresh at 12:10...
+	c.now = testNow.Add(10 * time.Minute)
+	r.setDS(rfcZone)
+	h.press("r")
+	h.assertStatusBarShows("DNSSEC: unsign after 13:10")
+
+	// ...back at 12:20, and gone again at 12:30: the wait starts then.
+	c.now = testNow.Add(20 * time.Minute)
+	r.setDS(rfcZone, rfcDS)
+	h.press("r")
+	h.assertStatusBarShows("DNSSEC: remove the DS at the registrar to turn it off")
+
+	c.now = testNow.Add(30 * time.Minute)
+	r.setDS(rfcZone)
+	h.press("r")
+	h.assertStatusBarShows("DNSSEC: unsign after 13:30")
+}
+
 func TestAFailedDSCheckBlocksUnsigning(t *testing.T) {
 	c := &testClock{now: testNow}
 	r := &fakeResolver{}
