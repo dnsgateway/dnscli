@@ -25,10 +25,14 @@ type dsPublish struct {
 	// zone is the Live Zone whose keys are published.
 	zone dns.Zone
 	keys []dns.SigningKey
-	// registrar is the Registration the keys are published at.
+	// registrar is the Registration the keys are published at, once
+	// picked.
 	registrar dns.Zone
-	busy      bool
-	err       string
+	// picker lists the Registrations found to pick from, when several
+	// were; nil once one is picked.
+	picker *picker
+	busy   bool
+	err    string
 }
 
 // registrarsFoundMsg reports which Zones of a Live Zone's name are held
@@ -171,7 +175,29 @@ func (m *Model) registrarsFound(msg registrarsFoundMsg) {
 	}
 
 	m.notice = notice{}
-	m.dsPublish = &dsPublish{zone: z, keys: msg.keys, registrar: msg.found[0]}
+	d := &dsPublish{zone: z, keys: msg.keys, registrar: msg.found[0]}
+	m.dsPublish = d
+
+	if len(msg.found) == 1 {
+		return
+	}
+
+	// Several Accounts register it: the user picks one, each time.
+	labels := make([]string, len(msg.found))
+	for i, c := range msg.found {
+		a, _ := m.account(c.AccountID)
+
+		labels[i] = a.Label()
+		if m.refreshOf(c.ID).notServed {
+			labels[i] += " (" + registrationOnly + ")"
+		}
+	}
+
+	d.picker = &picker{
+		title:   "Publish the DS of " + z.Name + " at",
+		options: labels,
+		pick:    func(i int) { d.registrar = msg.found[i] },
+	}
 }
 
 // dsPublishKey handles a key while publishing the DS is asked about:
@@ -185,6 +211,18 @@ func (m *Model) dsPublishKey(msg tea.KeyMsg) tea.Cmd {
 	}
 
 	if d.busy {
+		return nil
+	}
+
+	if d.picker != nil {
+		if d.picker.key(a) {
+			if a == ActionClose {
+				m.dsPublish = nil
+			}
+
+			d.picker = nil
+		}
+
 		return nil
 	}
 
@@ -244,7 +282,7 @@ func (m *Model) dsPublished(msg dsPublishedMsg) tea.Cmd {
 
 	if msg.err != nil {
 		d.busy = false
-		d.err = "Could not publish the DS at " + a.Label() + ": " + msg.err.Error()
+		d.err = publishError(d.zone.Name, a, msg.err)
 
 		return nil
 	}
@@ -263,10 +301,26 @@ func (m *Model) dsPublished(msg dsPublishedMsg) tea.Cmd {
 	return m.checkParentDS(d.zone)
 }
 
+// publishError says why publishing the DS of zone at a failed: a
+// registry that refuses the keys is named as such, as no retry helps.
+func publishError(zone string, a dns.Account, err error) string {
+	switch {
+	case errors.Is(err, dnsprovider.ErrUnsupported):
+		return "The registry of " + zone + " refuses this key's algorithm or form, which is not a dnscli error: " + err.Error()
+	case errors.Is(err, dnsprovider.ErrNotFound):
+		return a.Label() + " does not register " + zone + ": " + err.Error()
+	}
+
+	return "Could not publish the DS at " + a.Label() + ": " + err.Error()
+}
+
 // dsPublishView asks to confirm publishing the DS, naming the Account and
 // the keys.
 func (m *Model) dsPublishView() string {
 	d := m.dsPublish
+	if d.picker != nil {
+		return d.picker.view(m.height)
+	}
 	a, _ := m.account(d.registrar.AccountID)
 
 	notes := wrapNote(lipgloss.NewStyle(), "Publish the DS of "+d.zone.Name+" at "+a.Label()+"?", noteWidth)

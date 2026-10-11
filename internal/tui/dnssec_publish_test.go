@@ -1,12 +1,19 @@
 package tui_test
 
 import (
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/dnsgateway/dnsprovider"
 	"github.com/dnsgateway/dnsprovider/providertest"
+
+	"github.com/sergelogvinov/dnscli/internal/dns"
+	"github.com/sergelogvinov/dnscli/internal/tui"
 )
 
 // rfcModuleKey is the RFC 6605 key as a registrar adapter takes it.
@@ -78,4 +85,226 @@ func TestTheDSIsPublishedAtTheLiveZonesOwnAccountWhenItRegistersTheDomain(t *tes
 	r.setDS(rfcZone, rfcDS)
 	h.passTime(time.Minute)
 	h.assertStatusBarShows("DNSSEC: On")
+}
+
+// registrarFake is a Provider registering example.net as zp1, which it
+// serves no DNS for: a registration-only Zone, its DS records as given.
+func registrarFake(ds ...dnsprovider.SigningKey) *fakeProvider {
+	g := newFake().AddZone(dns.Zone{Name: rfcZone, ProviderID: "zp1"})
+	g.SetRegistration("zp1", ds...)
+	g.Fail(providertest.OpRecords, dnsprovider.ErrNotServed)
+
+	return g
+}
+
+// newRegistrarHarness starts an unsealed session with cloudflare.work at
+// f, which hosts example.net as the Live Zone on cruzDee, signed with its
+// keys served but no DS at the parent, and porkbun.home at g; it Refreshes
+// porkbun.home's example.net, then opens cloudflare.work's once its wait
+// has passed: the DS is to be published.
+func newRegistrarHarness(t *testing.T, f, g *fakeProvider, r *fakeResolver, c *testClock) *harness {
+	t.Helper()
+
+	r.ns = map[string][]string{rfcZone: cruzDee}
+	r.setKeys(rfcZone, rfcKey)
+	r.setDS(rfcZone)
+
+	s, _ := openStore(t)
+	h := newHarnessAt(t, s, tui.Deps{
+		Providers:    dnsprovider.Registry{"cloudflare": f.Factory(), "porkbun": g.Factory()},
+		UnsealMethod: fastPassphrase(),
+		Resolver:     r,
+	}, c)
+	// Wide enough for the Domains rows to name their Accounts.
+	h.send(tea.WindowSizeMsg{Width: 160, Height: 30})
+	h.fillAddAccount("work", token)
+	h.typeText(passphrase)
+	h.press("tab")
+	h.typeText(passphrase)
+	h.press("enter")
+	h.assertShows("unsealed")
+
+	h.fillAccountFields("porkbun", "home", token)
+	h.assertShows(rfcZone + " · porkbun.home")
+
+	h.openZone(rfcZone + " · porkbun.home")
+	h.openZone(rfcZone + " · cloudflare.work")
+	h.assertShows("validated this session")
+
+	h.passTime(time.Hour)
+	h.assertStatusBarShows("DNSSEC: publish the DS")
+
+	return h
+}
+
+func TestTheDSIsPublishedAtARegistrationOnlyZoneInAnotherAccount(t *testing.T) {
+	c := &testClock{now: testNow}
+	r := &fakeResolver{}
+	f := turnOnFake(dnsprovider.On)
+	g := registrarFake()
+
+	h := newRegistrarHarness(t, f, g, r, c)
+
+	h.press("S")
+	h.assertShows("Publish the DS of example.net at porkbun.home?", rfcDS)
+
+	h.press("enter")
+	assertPublishedOnce(t, g, "zp1")
+	h.assertStatusBarShows("DNSSEC: DS published, waiting for the parent zone")
+}
+
+// openZone opens the Zone whose Domains row shows row, from the Domains
+// pane.
+func (h *harness) openZone(row string) {
+	h.t.Helper()
+
+	for range 4 {
+		if strings.Contains(h.view(), "┏━ Domains") {
+			break
+		}
+
+		h.press("tab")
+	}
+
+	for range 10 {
+		h.press("k")
+	}
+
+	for range 10 {
+		if h.highlighted(row) {
+			h.press("space")
+
+			return
+		}
+
+		h.press("j")
+	}
+
+	h.t.Fatalf("no Domains row %q:\n%s", row, h.view())
+}
+
+func TestARegistrarAccountThatDoesNotRegisterTheDomainIsSkipped(t *testing.T) {
+	c := &testClock{now: testNow}
+	r := &fakeResolver{}
+
+	// cloudflare.work's Provider registers domains, but not example.net.
+	f := turnOnFake(dnsprovider.On)
+	f.SetRegistration("elsewhere")
+
+	g := registrarFake()
+
+	h := newRegistrarHarness(t, f, g, r, c)
+
+	h.press("S")
+	h.assertShows("Publish the DS of example.net at porkbun.home?")
+	h.assertHides("cloudflare.work?")
+
+	if f.count(providertest.OpDelegationSigners) == 0 {
+		t.Fatal("cloudflare.work was not asked whether it registers example.net")
+	}
+
+	h.press("enter")
+	assertPublishedOnce(t, g, "zp1")
+
+	if calls := setDSCalls(f); len(calls) != 0 {
+		t.Fatalf("SetDelegationSigners at the Account that does not register it: %+v", calls)
+	}
+}
+
+func TestTwoAccountsThatRegisterTheDomainAreOfferedToPickFromEachTime(t *testing.T) {
+	c := &testClock{now: testNow}
+	r := &fakeResolver{}
+	f := turnOnFake(dnsprovider.On)
+	f.SetRegistration("zd1")
+
+	g := registrarFake()
+
+	h := newRegistrarHarness(t, f, g, r, c)
+
+	// The Live Zone's own Account is listed first, then the
+	// registration-only Zone's.
+	h.press("S")
+	h.assertShows("Publish the DS of example.net at")
+	h.assertRowsInOrder("cloudflare.work", "porkbun.home (registration only)")
+
+	h.press("j", "enter")
+	h.assertShows("Publish the DS of example.net at porkbun.home?")
+
+	// Cancelled, the pick is not kept: the next time asks again.
+	h.press("esc")
+	h.press("S")
+	h.assertShows("Publish the DS of example.net at")
+	h.assertRowsInOrder("cloudflare.work", "porkbun.home (registration only)")
+
+	h.press("j", "enter", "enter")
+	assertPublishedOnce(t, g, "zp1")
+
+	if calls := setDSCalls(f); len(calls) != 0 {
+		t.Fatalf("SetDelegationSigners at the Account not picked: %+v", calls)
+	}
+}
+
+// assertRowsInOrder checks that each text shows, on lines of their own,
+// in the order given.
+func (h *harness) assertRowsInOrder(texts ...string) {
+	h.t.Helper()
+
+	v := h.view()
+	at := 0
+
+	for _, s := range texts {
+		i := strings.Index(v[at:], s)
+		if i < 0 {
+			h.t.Fatalf("%q does not show after %q:\n%s", s, texts, v)
+		}
+
+		at += i + len(s)
+	}
+}
+
+func TestWithoutAnAccountThatRegistersTheDomainTheKeysAreShownToCopy(t *testing.T) {
+	c := &testClock{now: testNow}
+	r := &fakeResolver{}
+	f := turnOnFake(dnsprovider.On)
+
+	h := newPublishHarness(t, f, r, c)
+
+	h.press("S")
+	h.assertShows("DNSSEC keys for example.net", rfcDS, "No Account in dnscli publishes the DS of example.net")
+	h.assertHides("Publish the DS of")
+}
+
+func TestCancellingThePublishConfirmationWritesNothing(t *testing.T) {
+	c := &testClock{now: testNow}
+	r := &fakeResolver{}
+	f := turnOnFake(dnsprovider.On)
+	f.SetRegistration("zd1")
+
+	h := newPublishHarness(t, f, r, c)
+
+	h.press("S")
+	h.assertShows("Publish the DS of example.net at cloudflare.work?")
+
+	h.press("esc")
+	h.assertHides("Publish the DS of")
+	h.assertStatusBarShows("DNSSEC: publish the DS (S publishes it, s shows it)")
+
+	if calls := setDSCalls(f); len(calls) != 0 {
+		t.Fatalf("SetDelegationSigners once cancelled: %+v", calls)
+	}
+}
+
+func TestARegistryThatRefusesTheKeySaysSoClearly(t *testing.T) {
+	c := &testClock{now: testNow}
+	r := &fakeResolver{}
+	f := turnOnFake(dnsprovider.On)
+	f.SetRegistration("zd1")
+	f.Fail(providertest.OpSetDelegationSigners, fmt.Errorf("cloudflare: algorithm 13 is not supported for .net: %w", dnsprovider.ErrUnsupported))
+
+	h := newPublishHarness(t, f, r, c)
+
+	h.press("S", "enter")
+	h.assertShows("The registry of example.net refuses", "algorithm 13 is not supported", "not a dnscli error")
+	h.assertStatusBarShows("DNSSEC: publish the DS")
+	h.assertHides("DS published")
 }
