@@ -55,21 +55,16 @@ var (
 		// hedged, while it is checked or when whether it does is unknown:
 		// never taken as no DS.
 		warning: func(zone, _, v string, ds dsPresence) string {
+			breaks := "while it is there, validating resolvers fail to resolve " + zone + " once it is unsigned."
+
 			switch {
 			case v != "off" || ds == dsNone:
 				return ""
-			case ds == dsChecking:
-				return "dnscli is checking whether the parent zone serves a DS record for " + zone + ". If it does, " +
-					"remove it at the registrar first: while it is there, validating resolvers fail to resolve " +
-					zone + " once it is unsigned."
-			case ds == dsNotChecked, ds == dsUnknown:
-				return "dnscli could not tell whether the parent zone serves a DS record for " + zone + ". If it does, " +
-					"remove it at the registrar first: while it is there, validating resolvers fail to resolve " +
-					zone + " once it is unsigned."
+			case ds == dsServed:
+				return capitalise(removeDSFirst(zone)) + ": " + breaks
 			}
 
-			return "Remove the DS record for " + zone + " at the registrar first: while it is there, " +
-				"validating resolvers fail to resolve " + zone + " once it is unsigned."
+			return dsDoubt(zone, ds) + ". If it does, remove it at the registrar first: " + breaks
 		},
 	}
 	hstsSetting = &zoneSetting{

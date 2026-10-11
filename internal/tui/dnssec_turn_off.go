@@ -102,10 +102,9 @@ func (m *Model) dnssecTurned(zoneID int64, v string) {
 // not be written while the session is sealed or the Zone Stale, as for
 // any Zone write.
 func (m *Model) unsignRefusal(z dns.Zone) string {
-	switch m.dsPresenceOf(z.Name) {
+	switch ds := m.dsPresenceOf(z.Name); ds {
 	case dsServed:
-		return "DNSSEC stays on: remove the DS record for " + z.Name + " at the registrar first. " +
-			"dnscli watches the parent zone for it to go."
+		return "DNSSEC stays on: " + removeDSFirst(z.Name) + ". dnscli watches the parent zone for it to go."
 	case dsNone:
 		if end := m.unsignAfter(z.DSSeen); m.deps.now().Before(end) {
 			return "DNSSEC stays on until " + clockText(end, m.deps.now()) + ": resolvers may still hold the DS record of " +
@@ -115,14 +114,13 @@ func (m *Model) unsignRefusal(z dns.Zone) string {
 		// Unsigning is a Zone write: it passes the write gate (ADR-0001).
 		return m.writeRefusal(z)
 	case dsChecking:
-		return "DNSSEC stays on: dnscli is checking whether the parent zone serves a DS record for " + z.Name +
-			". It unsigns the Zone only once it sees none there."
+		return "DNSSEC stays on: " + dsDoubt(z.Name, ds) + ". It unsigns the Zone only once it sees none there."
+	default:
+		// A DS Check that failed, or has not answered, is never taken as
+		// no DS.
+		return "DNSSEC stays on: " + dsDoubt(z.Name, ds) +
+			". It unsigns the Zone only once it sees none there: Refresh to check again."
 	}
-
-	// A DS Check that failed, or has not answered, is never taken as no
-	// DS.
-	return "DNSSEC stays on: dnscli could not tell whether the parent zone serves a DS record for " + z.Name +
-		". It unsigns the Zone only once it sees none there: Refresh to check again."
 }
 
 // dsTTLUnknown is how long resolvers are taken to hold a DS whose TTL

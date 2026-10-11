@@ -110,6 +110,26 @@ func (m *Model) dsPresenceOf(zone string) dsPresence {
 	return dsServed
 }
 
+// dsDoubt says what this session cannot tell of the DS zone's parent
+// serves: that it is checking whether it serves one, or could not tell,
+// as when it was not checked; empty once it can tell.
+func dsDoubt(zone string, ds dsPresence) string {
+	switch ds {
+	case dsChecking:
+		return "dnscli is checking whether the parent zone serves a DS record for " + zone
+	case dsNotChecked, dsUnknown:
+		return "dnscli could not tell whether the parent zone serves a DS record for " + zone
+	}
+
+	return ""
+}
+
+// removeDSFirst says to remove the DS zone's parent serves before zone is
+// unsigned.
+func removeDSFirst(zone string) string {
+	return "remove the DS record for " + zone + " at the registrar first"
+}
+
 // parentDSText says, in a few words, what this session found of the DS
 // records z's parent serves, for the Zone Status bar.
 func (m *Model) parentDSText(z dns.Zone) string {
