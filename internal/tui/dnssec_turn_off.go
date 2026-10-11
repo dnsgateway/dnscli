@@ -60,13 +60,18 @@ const (
 // unless its Provider already did. It is held for this session only: no
 // step is stored.
 func (m *Model) markTurningOff(zoneID int64) {
+	if m.turningOff[zoneID] == turnOffNone {
+		m.setTurnOff(zoneID, turnOffAsked)
+	}
+}
+
+// setTurnOff notes how far turning DNSSEC off for a Zone went.
+func (m *Model) setTurnOff(zoneID int64, t turnOff) {
 	if m.turningOff == nil {
 		m.turningOff = map[int64]turnOff{}
 	}
 
-	if m.turningOff[zoneID] == turnOffNone {
-		m.turningOff[zoneID] = turnOffAsked
-	}
+	m.turningOff[zoneID] = t
 }
 
 // cancelTurningOff ends turning DNSSEC off for the Zone of the Edit Zone
@@ -88,11 +93,7 @@ func (m *Model) dnssecTurned(zoneID int64, v string) {
 		return
 	}
 
-	if m.turningOff == nil {
-		m.turningOff = map[int64]turnOff{}
-	}
-
-	m.turningOff[zoneID] = turnOffSent
+	m.setTurnOff(zoneID, turnOffSent)
 }
 
 // unsignRefusal says why z may not be unsigned now; empty when it may.
