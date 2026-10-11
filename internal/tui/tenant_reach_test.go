@@ -21,8 +21,8 @@ type otherTenants struct {
 	zones []dnsprovider.Zone
 }
 
-func (o otherTenants) Zones(ctx context.Context, f dnsprovider.ZoneFilter) (dnsprovider.ZoneSet, error) {
-	zones, err := o.Provider.Zones(ctx, f)
+func (o otherTenants) ListZones(ctx context.Context, f dnsprovider.ZoneFilter) (dnsprovider.ZoneSet, error) {
+	zones, err := o.Provider.ListZones(ctx, f)
 	if err != nil {
 		return dnsprovider.ZoneSet{}, err
 	}

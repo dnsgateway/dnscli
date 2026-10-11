@@ -35,10 +35,10 @@ type serialFirstRecords struct {
 	asked chan struct{}
 }
 
-func (p *serialFirstRecords) Records(ctx context.Context, z dnsprovider.Zone, rf dnsprovider.RecordFilter) (dnsprovider.RecordSet, error) {
+func (p *serialFirstRecords) ListRecords(ctx context.Context, z dnsprovider.Zone, rf dnsprovider.RecordFilter) (dnsprovider.RecordSet, error) {
 	select {
 	case <-p.asked:
-		return p.Provider.Records(ctx, z, rf)
+		return p.Provider.ListRecords(ctx, z, rf)
 	case <-time.After(5 * time.Second):
 		return dnsprovider.RecordSet{}, errors.New("the serial was not asked for alongside the Records")
 	}

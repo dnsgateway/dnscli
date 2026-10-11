@@ -981,7 +981,7 @@ func discover(ctx context.Context, s *store.Store, key *vault.Key, providers *pr
 		return 0, store.ZoneSync{}, fmt.Errorf("listing the Tenants its credentials reach: %w", reach.everyErr)
 	}
 
-	listed, err := reach.own.Zones(ctx, dnsprovider.ZoneFilter{})
+	listed, err := reach.own.ListZones(ctx, dnsprovider.ZoneFilter{})
 	if err != nil {
 		return 0, store.ZoneSync{}, err
 	}
@@ -997,7 +997,7 @@ func discover(ctx context.Context, s *store.Store, key *vault.Key, providers *pr
 	if reach.every != nil {
 		// The Account's Zones are those of every Tenant it reaches, its
 		// own Tenant's copy of a zone name kept over another's.
-		listed, err = reach.every.Zones(ctx, dnsprovider.ZoneFilter{})
+		listed, err = reach.every.ListZones(ctx, dnsprovider.ZoneFilter{})
 		if err != nil {
 			return 0, store.ZoneSync{}, err
 		}

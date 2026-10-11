@@ -244,7 +244,7 @@ func TestCredentialsTheProviderRefusesAreShownAndNothingIsSaved(t *testing.T) {
 		t.Fatalf("stored Accounts = %+v, want only cloudflare.work", accounts)
 	}
 
-	if n := f.count(providertest.OpZones); n != 0 {
+	if n := f.count(providertest.OpListZones); n != 0 {
 		t.Errorf("Zones listed %d times for refused credentials", n)
 	}
 

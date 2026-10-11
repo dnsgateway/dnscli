@@ -449,7 +449,7 @@ func TestOnboardingIsRefusedForAnAccountTheFakeBuildsWithinNoTenant(t *testing.T
 type unsaidCreator struct{ dnsprovider.Provider }
 
 func (u unsaidCreator) CreateZone(ctx context.Context, name string) (dnsprovider.Zone, error) {
-	z, err := u.Provider.(dnsprovider.ZoneCreator).CreateZone(ctx, name)
+	z, err := u.Provider.CreateZone(ctx, name)
 	if err != nil {
 		return z, err
 	}
@@ -521,7 +521,7 @@ func (l lostAnswer) CreateZone(ctx context.Context, name string) (dnsprovider.Zo
 	}
 
 	if l.take {
-		if _, err := l.Provider.(dnsprovider.ZoneCreator).CreateZone(ctx, name); err != nil {
+		if _, err := l.Provider.CreateZone(ctx, name); err != nil {
 			return dnsprovider.Zone{}, err
 		}
 	}

@@ -7,7 +7,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/x/ansi v0.10.2
 	github.com/dnsgateway/dnsgate-go v0.0.0-20261010111459-33c4ab444171
-	github.com/dnsgateway/dnsprovider v0.0.0-20261010135532-454b5a0d851c
+	github.com/dnsgateway/dnsprovider v0.0.0-20261011144035-7b19999c7d65
 	github.com/miekg/dns v1.1.72
 	github.com/muesli/termenv v0.16.0
 	github.com/spf13/pflag v1.0.10

@@ -79,7 +79,7 @@ func TestRelistingAddsNewZonesAndDropsGoneOnesKeepingTheCacheOfTheRest(t *testin
 
 	// The listed Zones carry no nameservers, so the Account's are asked for.
 	calls := f.Calls()
-	if len(calls) != 3 || calls[0].Op != providertest.OpNew || calls[0].Fields["token"] != token || calls[1].Op != providertest.OpZones || calls[2].Op != providertest.OpAccount {
+	if len(calls) != 3 || calls[0].Op != providertest.OpNew || calls[0].Fields["token"] != token || calls[1].Op != providertest.OpListZones || calls[2].Op != providertest.OpAccount {
 		t.Fatalf("provider calls = %+v", calls)
 	}
 }
@@ -88,7 +88,7 @@ func TestAFailedRelistingLeavesTheCacheAndShowsTheError(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
 
 	f := newFake().AddZone(dns.Zone{Name: "work.new", ProviderID: "zw3"})
-	f.Fail(providertest.OpZones, &dnsprovider.APIError{Provider: "cloudflare", StatusCode: 403, Messages: []string{"Authentication error"}})
+	f.Fail(providertest.OpListZones, &dnsprovider.APIError{Provider: "cloudflare", StatusCode: 403, Messages: []string{"Authentication error"}})
 
 	h := newAccountHarness(t, s, f)
 
@@ -196,7 +196,7 @@ func zonesCalls(f *fakeProvider) int {
 	n := 0
 
 	for _, c := range f.Calls() {
-		if c.Op == providertest.OpZones {
+		if c.Op == providertest.OpListZones {
 			n++
 		}
 	}
@@ -232,7 +232,7 @@ func TestReListingEveryAccountReportsEachFailureOnceAllAreBack(t *testing.T) {
 	h.fillAddAccount("home", "home-token")
 	h.unsealWith(passphrase)
 
-	f.Fail(providertest.OpZones, errors.New("connection reset by peer"))
+	f.Fail(providertest.OpListZones, errors.New("connection reset by peer"))
 	h.press("tab", "r")
 
 	h.assertShows("Re-listing cloudflare.home failed: connection reset by peer. Re-listing cloudflare.work failed")

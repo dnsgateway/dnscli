@@ -195,7 +195,7 @@ type zoneEditForm struct {
 	// settings are the Zone settings of the Account's Provider.
 	settings []*zoneSetting
 	// p is the Account's Provider; nil while the settings are read-only.
-	p dnsprovider.ZoneUpdater
+	p dnsprovider.Provider
 	// readOnly says why the settings cannot be changed; empty when p is
 	// set.
 	readOnly string
@@ -466,7 +466,8 @@ func (m *Model) zoneEditOpened(msg zoneEditOpenedMsg) {
 		return
 	}
 
-	switch up, ok := msg.p.(dnsprovider.ZoneUpdater); {
+	up, ok := msg.p, msg.err == nil && msg.p != nil && dnsprovider.CanUpdateZone(msg.p)
+	switch {
 	case msg.turnDNSSEC != keepDNSSEC && msg.err != nil:
 		m.notice = notice{text: msg.openFailedText(), err: true}
 	case msg.turnDNSSEC != keepDNSSEC && !ok:
@@ -489,7 +490,7 @@ func (m *Model) zoneEditOpened(msg zoneEditOpenedMsg) {
 
 // openZoneEdit opens the dialog for z, its settings changed through p, or
 // read-only for the reason given when p is nil.
-func (m *Model) openZoneEdit(z dns.Zone, a dns.Account, p dnsprovider.ZoneUpdater, readOnly string, unseal bool) {
+func (m *Model) openZoneEdit(z dns.Zone, a dns.Account, p dnsprovider.Provider, readOnly string, unseal bool) {
 	f := &zoneEditForm{
 		zone:     z,
 		account:  a,

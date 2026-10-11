@@ -116,7 +116,7 @@ func TestAddingTheFirstAccountEnrollsAPassphraseAndDiscoversItsZones(t *testing.
 	// verifying, are not asked again.
 	calls := f.Calls()
 	if len(calls) != 4 || calls[0].Op != providertest.OpNew || calls[0].Fields["token"] != token || calls[1].Op != providertest.OpAccount ||
-		calls[2].Op != providertest.OpNew || calls[2].Fields["token"] != token || calls[3].Op != providertest.OpZones {
+		calls[2].Op != providertest.OpNew || calls[2].Fields["token"] != token || calls[3].Op != providertest.OpListZones {
 		t.Fatalf("provider calls = %+v", calls)
 	}
 
@@ -282,7 +282,7 @@ func TestAnAccountAddedElsewhereMeanwhileIsReportedAsExisting(t *testing.T) {
 	h.assertHides("UNIQUE", "constraint")
 
 	// Its token was verified, but no Zones were discovered for it.
-	if n := f.count(providertest.OpZones); n != 0 {
+	if n := f.count(providertest.OpListZones); n != 0 {
 		t.Fatalf("Zones were listed for a duplicate Account: %+v", f.Calls())
 	}
 }
@@ -309,7 +309,7 @@ func TestDiscoveryForAnAccountWithoutAnAPITokenSaysSo(t *testing.T) {
 	h.assertHides("decrypt", "malformed")
 
 	// Only the typed token was verified before saving.
-	if n := f.count(providertest.OpZones); n != 0 {
+	if n := f.count(providertest.OpListZones); n != 0 {
 		t.Fatalf("Zones were listed without a token: %+v", f.Calls())
 	}
 }
@@ -362,7 +362,7 @@ func TestMismatchedPassphrasesAreNotEnrolled(t *testing.T) {
 func TestFailedZoneDiscoveryIsShownAndKeepsTheAccount(t *testing.T) {
 	s, _ := openStore(t)
 	f := workZones()
-	f.Fail(providertest.OpZones, errors.New("API is down"))
+	f.Fail(providertest.OpListZones, errors.New("API is down"))
 	h := newAccountHarness(t, s, f)
 
 	h.fillAddAccount("work", token)

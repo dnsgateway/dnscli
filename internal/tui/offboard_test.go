@@ -423,7 +423,7 @@ func (l lostDelete) DeleteZone(ctx context.Context, z dnsprovider.Zone) error {
 	}
 
 	if l.take {
-		if err := l.Provider.(dnsprovider.ZoneDeleter).DeleteZone(ctx, z); err != nil {
+		if err := l.Provider.DeleteZone(ctx, z); err != nil {
 			return err
 		}
 	}
@@ -506,7 +506,7 @@ func TestADeleteRunsWithADeadline(t *testing.T) {
 	}
 }
 
-func TestEscCancelsAnOffboardingInFlightWhichIsReadBack(t *testing.T) {
+func TestEscCancelsAnOffboardingBeforeTheDeleteIsSent(t *testing.T) {
 	s := offboardStore(t)
 	f := offboardFake()
 	h := newLostDeleteHarness(t, s, f, lostDelete{})
@@ -520,8 +520,35 @@ func TestEscCancelsAnOffboardingInFlightWhichIsReadBack(t *testing.T) {
 	h.press("esc")
 	h.run(del)
 
-	h.assertShows("Offboard work.test from cloudflare.work?", "Canceled Offboarding work.test", "cloudflare.work still")
+	h.assertShows("Offboard work.test from cloudflare.work?", "Canceled Offboarding work.test", "Nothing was sent to")
 	h.assertHides("is Offboarded", "offboarding…")
+
+	if calls := deleteZoneCalls(f); len(calls) != 0 {
+		t.Fatalf("DeleteZone calls = %q, want none", calls)
+	}
+
+	if !zoneCached(t, s, "work.test") {
+		t.Fatal("work.test left the cache")
+	}
+}
+
+func TestEscCancelsAnOffboardingInFlightWhichIsReadBack(t *testing.T) {
+	s := offboardStore(t)
+	f := offboardFake()
+
+	var h *harness
+
+	h = newLostDeleteHarness(t, s, f, lostDelete{then: func() {
+		// Cancel once DeleteZone is called, after the pre-delete checks.
+		h.press("esc")
+	}})
+
+	h.press("j", "d")
+	h.unsealWith(passphrase)
+	h.press("enter")
+
+	h.assertShows("Offboard work.test from cloudflare.work?", "Canceled Offboarding work.test", "cloudflare.work still")
+	h.assertHides("is Offboarded", "offboarding…", "Nothing was sent to")
 
 	if !zoneCached(t, s, "work.test") {
 		t.Fatal("work.test left the cache")
@@ -744,7 +771,7 @@ func TestTheOutcomeOfAnOffboardingStaysInTheStatusBarOnceTheDialogIsClosed(t *te
 	s := offboardStore(t)
 	f := offboardFake()
 	h := newLostDeleteHarness(t, s, f, lostDelete{take: true, then: func() {
-		f.Fail(providertest.OpZones, errConnectionReset)
+		f.Fail(providertest.OpListZones, errConnectionReset)
 	}})
 
 	h.press("j", "d")

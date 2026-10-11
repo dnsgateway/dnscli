@@ -51,9 +51,9 @@ type onboardDialog struct {
 	opening bool
 	attempt int
 	stop    context.CancelFunc
-	// p is the chosen Account's Provider, a dnsprovider.ZoneCreator; nil
+	// p is the chosen Account's Provider; nil
 	// until it is opened, or when it cannot Onboard.
-	p dnsprovider.ZoneCreator
+	p dnsprovider.Provider
 	// tenant names the Tenant the Account acts within; empty for a
 	// Provider type that takes none.
 	tenant string
@@ -164,7 +164,7 @@ type zoneOnboardedMsg struct {
 	// it is, and p is then the Provider opened within it.
 	tenant *dnsprovider.Tenant
 	saved  bool
-	p      dnsprovider.ZoneCreator
+	p      dnsprovider.Provider
 	// tenantErr is why the Tenant could not be saved, or the Account
 	// opened within it: nothing was Onboarded.
 	tenantErr error
@@ -327,7 +327,7 @@ func (m *Model) onboardOpened(msg onboardOpenedMsg) tea.Cmd {
 	case m.unscoped(msg.account, msg.fields):
 		d.refused = noTenantToOnboard(msg.account)
 	default:
-		d.p = msg.p.(dnsprovider.ZoneCreator)
+		d.p = msg.p
 
 		if field := provider.TenantField(m.deps.Providers[msg.account.Provider]); field != "" {
 			d.tenant = msg.fields[field]
@@ -615,7 +615,7 @@ func (m *Model) createZone(d *onboardDialog) tea.Cmd {
 				return within
 			}
 
-			p = opened.(dnsprovider.ZoneCreator)
+			p = opened
 			within.p = p
 		}
 
@@ -628,7 +628,7 @@ func (m *Model) createZone(d *onboardDialog) tea.Cmd {
 
 // onboard Onboards name in Account a through p, its Provider, and caches
 // the Zone it returns: see createZone.
-func onboard(ctx, parent context.Context, s *store.Store, p dnsprovider.ZoneCreator, a dns.Account, name string) zoneOnboardedMsg {
+func onboard(ctx, parent context.Context, s *store.Store, p dnsprovider.Provider, a dns.Account, name string) zoneOnboardedMsg {
 	mz, err := p.CreateZone(ctx, name)
 	if err != nil {
 		if !answerLost(err) {
@@ -678,11 +678,11 @@ func answerLost(err error) bool {
 // create whose answer was lost or that was refused as held already: the
 // Zone the Account holds, Pending or Active, which it Onboarded, else
 // none (no ID). err is why the read failed.
-func readBack(parent context.Context, p dnsprovider.ZoneCreator, name string) (dnsprovider.Zone, error) {
+func readBack(parent context.Context, p dnsprovider.Provider, name string) (dnsprovider.Zone, error) {
 	ctx, cancel := context.WithTimeout(parent, onboardTimeout)
 	defer cancel()
 
-	z, err := p.(dnsprovider.Provider).Zone(ctx, name)
+	z, err := p.GetZone(ctx, name)
 
 	switch {
 	case errors.Is(err, dnsprovider.ErrNotFound):

@@ -29,7 +29,7 @@ import (
 type offboardDialog struct {
 	zone    dns.Zone
 	account dns.Account
-	// reach is the Account's Provider, a dnsprovider.ZoneDeleter, within
+	// reach is the Account's Provider, within
 	// its own Tenant, which the Zone is Offboarded within, and the one the
 	// Zone is found with among those of every Tenant it reaches.
 	reach accountReach
@@ -442,7 +442,7 @@ func (m *Model) deleteZone(d *offboardDialog) tea.Cmd {
 
 		msg.sent = true
 
-		err = p.(dnsprovider.ZoneDeleter).DeleteZone(ctx, held)
+		err = p.DeleteZone(ctx, held)
 		if err != nil {
 			// Whatever the failure, the delete was sent, and the
 			// module retries it: an earlier try may have taken it.
@@ -473,7 +473,7 @@ func (m *Model) deleteZone(d *offboardDialog) tea.Cmd {
 // among the Zones of its name: ok is false when the Provider no longer
 // has it.
 func heldZone(ctx context.Context, p dnsprovider.Provider, z dns.Zone) (dnsprovider.Zone, bool, error) {
-	zones, err := p.Zones(ctx, dnsprovider.ZoneFilter{Contains: z.Name})
+	zones, err := p.ListZones(ctx, dnsprovider.ZoneFilter{Contains: z.Name})
 	if err != nil {
 		return dnsprovider.Zone{}, false, err
 	}

@@ -308,7 +308,7 @@ func refresh(ctx context.Context, s *store.Store, key *vault.Key, providers *pro
 		queried <- serialRead{serial: serial, failed: failed}
 	}()
 
-	rs, err := p.Records(ctx, provider.ModuleZone(z), dnsprovider.RecordFilter{})
+	rs, err := p.ListRecords(ctx, provider.ModuleZone(z), dnsprovider.RecordFilter{})
 	if err != nil {
 		res.err = err
 

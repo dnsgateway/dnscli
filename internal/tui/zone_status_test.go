@@ -336,10 +336,10 @@ func (p *statusFirst) ZoneStatus(ctx context.Context, z dnsprovider.Zone) (dnspr
 	return dnsprovider.ZoneStatusOf(ctx, p.Provider, z)
 }
 
-func (p *statusFirst) Records(ctx context.Context, z dnsprovider.Zone, rf dnsprovider.RecordFilter) (dnsprovider.RecordSet, error) {
+func (p *statusFirst) ListRecords(ctx context.Context, z dnsprovider.Zone, rf dnsprovider.RecordFilter) (dnsprovider.RecordSet, error) {
 	select {
 	case <-p.statusAsked:
-		return p.Provider.Records(ctx, z, rf)
+		return p.Provider.ListRecords(ctx, z, rf)
 	case <-time.After(5 * time.Second):
 		return dnsprovider.RecordSet{}, errors.New("the Zone Status was not read alongside the Records")
 	}
