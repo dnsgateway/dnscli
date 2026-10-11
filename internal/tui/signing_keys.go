@@ -258,9 +258,13 @@ func (m *Model) dnssecStepOf(z dns.Zone) dnssecStep {
 
 	if len(c.keys) == 0 {
 		switch {
+		case ds == dsServed && off == turnOffAsked:
+			// Being turned off, its DS is removed first, whether or not
+			// it serves keys.
+			return stepRemoveDS
 		case ds == dsServed:
 			// A DS at the parent of a Zone that serves no keys fails
-			// validation, whatever its Provider reports.
+			// validation, whatever its Provider reports: it is removed.
 			return stepMismatch
 		case signingReported(z) && off != turnOffSent:
 			// A Zone turned off this session may still be reported

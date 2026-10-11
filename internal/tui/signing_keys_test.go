@@ -242,7 +242,7 @@ func TestARefreshThatTurnsDNSSECOnLooksUpTheKeysAgain(t *testing.T) {
 	h.assertStatusBarShows("DNSSEC: publish the DS")
 }
 
-func TestAParentDSForAZoneThatServesNoKeysSaysItDoesNotMatch(t *testing.T) {
+func TestAParentDSForAZoneThatServesNoKeysSaysItDoesNotMatchAndOffersToRemoveIt(t *testing.T) {
 	for _, dnssec := range []dnsprovider.Setting{dnsprovider.Off, dnsprovider.Unknown, dnsprovider.On} {
 		t.Run(dnssec.String(), func(t *testing.T) {
 			r := &fakeResolver{}
@@ -251,7 +251,7 @@ func TestAParentDSForAZoneThatServesNoKeysSaysItDoesNotMatch(t *testing.T) {
 			h := newKeysHarness(t, r, dnssec)
 
 			h.assertStatusBarShows("DNSSEC: DS does not match")
-			h.assertBadges(map[string]string{"DNSSEC: DS does not match": red})
+			h.assertBadges(map[string]string{"DNSSEC: DS does not match (S removes it)": red})
 		})
 	}
 }

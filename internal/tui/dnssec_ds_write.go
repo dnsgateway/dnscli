@@ -31,6 +31,9 @@ const (
 	// dsRemove removes the DS of a Zone being turned off, before it is
 	// unsigned.
 	dsRemove
+	// dsRemoveStray removes a DS for a Zone that serves no keys, which
+	// fails validation: the Zone has no keys to replace it with.
+	dsRemoveStray
 )
 
 // dsWriteWords is how a kind of DS write is said, and the DNSSEC step
@@ -68,6 +71,8 @@ const (
 	unsignOnceGone = "dnscli unsigns the Zone once the parent zone stops serving the DS and its TTL passes."
 	// copyKeysByHand is how to write a Zone's keys at its registrar by hand.
 	copyKeysByHand = "copy it into the registrar's panel."
+	// removeByHand is how to remove a Zone's DS at its registrar by hand.
+	removeByHand = "remove it in the registrar's panel; " + watchesDSGo
 )
 
 // dsWrites says each kind of DS write.
@@ -91,16 +96,27 @@ var dsWrites = [...]dsWriteWords{
 		verb: "remove", does: "removes", done: "removed", doing: "removing…",
 		todo: "DNSSEC: remove the DS at the registrar to turn it off",
 		why:  unsignOnceGone,
-		next: unsignOnceGone, byHand: "remove it in the registrar's panel; " + watchesDSGo,
+		next: unsignOnceGone, byHand: removeByHand,
+	},
+	dsRemoveStray: {
+		step: stepMismatch,
+		verb: "remove", does: "removes", done: "removed", doing: "removing…",
+		todo: "DNSSEC: DS does not match",
+		why:  "the Zone serves no keys, so the DS the parent zone serves fails validation; removing it ends that.",
+		next: "DNSSEC is off once the parent zone stops serving it.", byHand: removeByHand,
 	},
 }
 
-// dsWriteKindOf is the kind of DS write step takes.
-func dsWriteKindOf(step dnssecStep) dsWriteKind {
-	switch step {
-	case stepMismatch:
+// dsWriteKindOf is the kind of DS write step takes, for a Zone whose
+// keys are keys: a DS that matches none is replaced with them, or removed
+// when there are none.
+func dsWriteKindOf(step dnssecStep, keys []dns.SigningKey) dsWriteKind {
+	switch {
+	case step == stepMismatch && len(keys) == 0:
+		return dsRemoveStray
+	case step == stepMismatch:
 		return dsReplace
-	case stepRemoveDS:
+	case step == stepRemoveDS:
 		return dsRemove
 	}
 
@@ -205,11 +221,11 @@ func (m *Model) dsWritable(z dns.Zone, kind dsWriteKind, keys []dns.SigningKey) 
 // says how to do it by hand: the keys to copy into the registrar's panel,
 // or to remove the DS there.
 func (m *Model) writeDS(z dns.Zone, step dnssecStep) tea.Cmd {
-	kind := dsWriteKindOf(step)
+	keys := m.signingKeysOf(z)
 
-	var keys []dns.SigningKey
-	if dsWrites[kind].sendsKeys {
-		keys = m.signingKeysOf(z)
+	kind := dsWriteKindOf(step, keys)
+	if !dsWrites[kind].sendsKeys {
+		keys = nil
 	}
 
 	if !m.dsWritable(z, kind, keys) {
@@ -269,8 +285,12 @@ func (m *Model) writeDSByHand(z dns.Zone, kind dsWriteKind, n notice) {
 		return
 	}
 
-	if n.text == "" {
+	switch {
+	case n.text != "":
+	case kind == dsRemove:
 		n.text = capitalise(removeDSFirst(z.Name)) + ": " + watchesDSGo
+	default:
+		n.text = "Remove the DS record for " + z.Name + " in the registrar's panel: " + watchesDSGo
 	}
 
 	m.notice = n
@@ -563,8 +583,9 @@ func (m *Model) dsStepText(z dns.Zone, step dnssecStep) string {
 		return "DNSSEC: DS " + dsWrites[sent].done + ", waiting for the parent zone"
 	}
 
-	kind := dsWriteKindOf(step)
-	w, keys := dsWrites[kind], m.signingKeysOf(z)
+	keys := m.signingKeysOf(z)
+	kind := dsWriteKindOf(step, keys)
+	w := dsWrites[kind]
 	k := m.keys.keysFor
 
 	var how []string

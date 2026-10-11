@@ -184,3 +184,78 @@ func TestAParentDSThatMatchesNoKeyIsReplacedWithTheZonesKeys(t *testing.T) {
 	h.passTime(time.Minute)
 	h.assertStatusBarShows("DNSSEC: On")
 }
+
+func TestCancellingTheReplacementWritesNothingAndKeepsTheMismatch(t *testing.T) {
+	c := &testClock{now: testNow}
+	r := &fakeResolver{}
+	r.setKeys(rfcZone, rfcKey)
+	r.setDS(rfcZone, dsOne)
+	f := turnOnFake(dnsprovider.On)
+	f.SetRegistration("zd1")
+
+	h, _ := newTurnOnHarness(t, f, r, c)
+
+	h.press("S")
+	h.assertShows("Replace the DS of example.net at cloudflare.work?")
+
+	h.press("esc")
+	h.assertHides("Replace the DS of")
+	h.assertStatusBarShows("DNSSEC: DS does not match (S replaces it, s shows the keys)")
+
+	if calls := setDSCalls(f); len(calls) != 0 {
+		t.Fatalf("SetDelegationSigners once canceled: %+v", calls)
+	}
+}
+
+func TestTurningOffAZoneThatServesNoKeysOffersToRemoveTheDS(t *testing.T) {
+	c := &testClock{now: testNow}
+	r := &fakeResolver{}
+	r.setKeys(rfcZone)
+	r.setDS(rfcZone, rfcDS)
+	f := turnOnFake(dnsprovider.On)
+	f.SetRegistration("zd1", rfcModuleKey)
+
+	h, _ := newTurnOnHarness(t, f, r, c)
+	pickDNSSECOff(h)
+	h.press("esc")
+	h.assertStatusBarShows("DNSSEC: remove the DS at the registrar to turn it off (S removes it)")
+
+	h.press("S")
+	h.assertShows("Remove the DS of example.net at cloudflare.work?", rfcDS)
+	h.press("enter")
+
+	calls := setDSCalls(f)
+	if len(calls) != 1 || calls[0].Zone.ID != "zd1" || len(calls[0].Keys) != 0 {
+		t.Fatalf("SetDelegationSigners calls = %+v, want one emptying the set of zd1", calls)
+	}
+
+	h.assertStatusBarShows("DNSSEC: DS removed, waiting for the parent zone")
+}
+
+func TestADSForAZoneThatServesNoKeysIsOfferedForRemoval(t *testing.T) {
+	c := &testClock{now: testNow}
+	r := &fakeResolver{}
+	r.setKeys(rfcZone)
+	r.setDS(rfcZone, rfcDS)
+	f := turnOnFake(dnsprovider.Off)
+	f.SetRegistration("zd1", rfcModuleKey)
+
+	h, _ := newTurnOnHarness(t, f, r, c)
+	h.assertStatusBarShows("DNSSEC: DS does not match (S removes it)")
+
+	h.press("S")
+	h.assertShows("Remove the DS of example.net at cloudflare.work?", rfcDS, "the Zone serves no keys")
+	h.assertHides("DNSSEC keys for example.net", "unsigns the Zone")
+	h.press("enter")
+
+	calls := setDSCalls(f)
+	if len(calls) != 1 || calls[0].Zone.ID != "zd1" || len(calls[0].Keys) != 0 {
+		t.Fatalf("SetDelegationSigners calls = %+v, want one emptying the set of zd1", calls)
+	}
+
+	h.assertStatusBarShows("DNSSEC: DS removed, waiting for the parent zone")
+
+	r.setDS(rfcZone)
+	h.passTime(time.Minute)
+	h.assertStatusBarShows("DNSSEC: off")
+}
