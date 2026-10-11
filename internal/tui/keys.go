@@ -85,7 +85,8 @@ const (
 	ActionShowKeys
 	// ActionDNSSECStep takes the open Zone's next DNSSEC step, the one
 	// the Zone Status bar offers, such as turning signing on, a Zone
-	// write that is confirmed first.
+	// write, or publishing the DS at the registrar, a Delegation write:
+	// each is confirmed first.
 	ActionDNSSECStep
 )
 
@@ -132,7 +133,7 @@ func DefaultShortcutProfile() ShortcutProfile {
 			{Action: ActionApplyOver, Keys: []string{"O"}},
 			{Action: ActionRelistZones, Keys: []string{"L"}},
 			{Action: ActionShowKeys, Keys: []string{"s"}, Help: "show the open Zone's DNSSEC keys and DS to copy"},
-			{Action: ActionDNSSECStep, Keys: []string{"S"}, Help: "take the open Zone's next DNSSEC step, such as turning it on"},
+			{Action: ActionDNSSECStep, Keys: []string{"S"}, Help: "take the open Zone's next DNSSEC step, such as turning it on or publishing its DS"},
 			{Action: ActionEnrollKeychain, Keys: []string{"K"}, Help: "enroll the Keychain (Touch ID)"},
 			{Action: ActionHelp, Keys: []string{"?"}, Help: "toggle help"},
 			{Action: ActionClose, Keys: []string{"esc"}, Help: "close"},
