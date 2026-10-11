@@ -114,10 +114,10 @@ type Model struct {
 	// dsWrite asks to write the open Zone's DS at its registrar; nil
 	// when closed.
 	dsWrite *dsWrite
-	// dsSent holds, by Zone ID, the DNSSEC step whose DS write this
-	// session sent to the Zone's registrar, until DNSSEC is turned on or
-	// off again: the Zone waits for the parent zone to serve the new set.
-	dsSent map[int64]dnssecStep
+	// dsSent holds, by Zone ID, the kind of DS write this session sent to
+	// the Zone's registrar, until DNSSEC is turned on or off again: the
+	// Zone waits for the parent zone to serve the new set.
+	dsSent map[int64]dsWriteKind
 
 	// addForm is the add-Account dialog; nil when closed.
 	addForm *addAccountForm

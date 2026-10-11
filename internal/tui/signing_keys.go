@@ -321,13 +321,19 @@ func (m *Model) dnssecState(z dns.Zone) (string, lipgloss.Style) {
 
 		return "DNSSEC: DS can be published after " + clockText(end, m.deps.now()), badgePendingStyle
 	case stepPublish:
-		return m.publishText(z), badgePendingStyle
+		return m.dsStepText(z, stepPublish), badgePendingStyle
 	case stepOn:
 		return "DNSSEC: On", badgeOnStyle
 	case stepMismatch:
-		return m.mismatchText(z)
+		// A DS that matches no key fails validation, until a new one is
+		// waited for.
+		if _, sent := m.dsSentFor(z, stepMismatch); sent {
+			return m.dsStepText(z, stepMismatch), badgePendingStyle
+		}
+
+		return m.dsStepText(z, stepMismatch), errorStyle
 	case stepRemoveDS:
-		return m.removeDSText(z), badgePendingStyle
+		return m.dsStepText(z, stepRemoveDS), badgePendingStyle
 	case stepWaitUnsign:
 		return "DNSSEC: unsign after " + clockText(m.unsignAfter(z.DSSeen), m.deps.now()), badgePendingStyle
 	case stepUnsign:

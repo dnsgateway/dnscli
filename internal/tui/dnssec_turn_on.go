@@ -217,7 +217,9 @@ func (m *Model) waits(z dns.Zone, step dnssecStep) bool {
 	case stepWaitKeys, stepWaitTTL, stepPublish, stepRemoveDS, stepWaitUnsign, stepWaitUnsigned:
 		return true
 	case stepMismatch:
-		return m.dsSentAt(z, stepMismatch)
+		_, sent := m.dsSentFor(z, stepMismatch)
+
+		return sent
 	}
 
 	return false

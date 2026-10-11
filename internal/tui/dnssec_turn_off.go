@@ -79,7 +79,7 @@ func (m *Model) dnssecTurned(zoneID int64, v string) {
 func (m *Model) unsignRefusal(z dns.Zone) string {
 	switch ds := m.dsPresenceOf(z.Name); ds {
 	case dsServed:
-		return "DNSSEC stays on: " + removeDSFirst(z.Name) + ". dnscli watches the parent zone for it to go."
+		return "DNSSEC stays on: " + removeDSFirst(z.Name) + ". " + watchesDSGo
 	case dsNone:
 		if end := m.unsignAfter(z.DSSeen); m.deps.now().Before(end) {
 			return "DNSSEC stays on until " + clockText(end, m.deps.now()) + ": resolvers may still hold the DS record of " +

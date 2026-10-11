@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 
@@ -18,21 +19,112 @@ import (
 	"github.com/sergelogvinov/dnscli/internal/vault"
 )
 
+// dsWriteKind is what a DS write does at the registrar.
+type dsWriteKind int
+
+const (
+	// dsPublish publishes the keys of a signed Zone.
+	dsPublish dsWriteKind = iota
+	// dsReplace replaces a DS that matches none of the Zone's keys with
+	// them.
+	dsReplace
+	// dsRemove removes the DS of a Zone being turned off, before it is
+	// unsigned.
+	dsRemove
+)
+
+// dsWriteWords is how a kind of DS write is said, and the DNSSEC step
+// that takes it.
+type dsWriteWords struct {
+	// step is the DNSSEC step that takes it.
+	step dnssecStep
+	// sendsKeys is set when it sends the Zone's keys; else it sends none,
+	// removing the DS.
+	sendsKeys bool
+	// verb, does, done and doing are its verb: "publish", "publishes",
+	// "published" and "publishing…".
+	verb, does, done, doing string
+	// todo says, in the Zone Status bar, that it is to be taken.
+	todo string
+	// shows is what ActionShowKeys shows meanwhile, when the Zone's keys
+	// are read; empty when it shows nothing of use.
+	shows string
+	// why says, in its confirmation, how it changes the Delegation.
+	why string
+	// next says what follows once it is written.
+	next string
+	// byHand says how to do it in the registrar's panel instead.
+	byHand string
+}
+
+// watchesDSGo says that dnscli sees a DS removed by hand.
+const watchesDSGo = "dnscli watches the parent zone for it to go."
+
+const (
+	// onOnceServed is what follows writing a Zone's keys at its registrar.
+	onOnceServed = "DNSSEC is On once the parent zone serves it."
+	// unsignOnceGone is what follows removing the DS of a Zone being
+	// turned off.
+	unsignOnceGone = "dnscli unsigns the Zone once the parent zone stops serving the DS and its TTL passes."
+	// copyKeysByHand is how to write a Zone's keys at its registrar by hand.
+	copyKeysByHand = "copy it into the registrar's panel."
+)
+
+// dsWrites says each kind of DS write.
+var dsWrites = [...]dsWriteWords{
+	dsPublish: {
+		step: stepPublish, sendsKeys: true,
+		verb: "publish", does: "publishes", done: "published", doing: "publishing…",
+		todo: "DNSSEC: publish the DS", shows: "it",
+		why:  "the parent zone serves it once the registry publishes it.",
+		next: onOnceServed, byHand: copyKeysByHand,
+	},
+	dsReplace: {
+		step: stepMismatch, sendsKeys: true,
+		verb: "replace", does: "replaces", done: "replaced", doing: "replacing…",
+		todo: "DNSSEC: DS does not match", shows: "the keys",
+		why:  "the DS the parent zone serves matches none of the keys, and these replace it.",
+		next: onOnceServed, byHand: copyKeysByHand,
+	},
+	dsRemove: {
+		step: stepRemoveDS,
+		verb: "remove", does: "removes", done: "removed", doing: "removing…",
+		todo: "DNSSEC: remove the DS at the registrar to turn it off",
+		why:  unsignOnceGone,
+		next: unsignOnceGone, byHand: "remove it in the registrar's panel; " + watchesDSGo,
+	},
+}
+
+// dsWriteKindOf is the kind of DS write step takes.
+func dsWriteKindOf(step dnssecStep) dsWriteKind {
+	switch step {
+	case stepMismatch:
+		return dsReplace
+	case stepRemoveDS:
+		return dsRemove
+	}
+
+	return dsPublish
+}
+
 // dsWrite writes the open Zone's DS at its registrar: the Account, among
 // those holding a Zone of the same name, whose Provider is a Registrar
 // Adapter and registers the domain. It publishes the keys, replaces a DS
 // that matches none of them, or removes the DS before the Zone is
-// unsigned, as its step says. The user confirms the Account and the set
+// unsigned, as its kind says. The user confirms the Account and the set
 // sent first, as it is a Delegation write (ADR-0007).
 type dsWrite struct {
 	// zone is the Live Zone whose DS is written.
 	zone dns.Zone
-	// step is the DNSSEC step the write takes: stepPublish, stepMismatch
-	// or stepRemoveDS.
+	// step is the DNSSEC step the write takes.
 	step dnssecStep
-	// keys are the keys sent: the whole set the registry holds once
-	// written, none to remove the DS.
+	kind dsWriteKind
+	// keys are the keys sent, as shown: the whole set the registry holds
+	// once written, none to remove the DS.
 	keys []dns.SigningKey
+	// removed is the DS the parent zone served when the write was asked,
+	// shown as what a removal ends.
+	removed []string
 	// registration is the Registration the DS is written at, once
 	// picked.
 	registration dns.Zone
@@ -47,45 +139,13 @@ type dsWrite struct {
 	err     string
 }
 
-// dsWriteVerb is how a DS write of step is said: "publish", "replace"
-// or "remove".
-func dsWriteVerb(step dnssecStep) string {
-	switch step {
-	case stepMismatch:
-		return "replace"
-	case stepRemoveDS:
-		return "remove"
-	}
-
-	return "publish"
-}
-
-// dsWriteDoes is a DS write's verb as an Account does it: "publishes",
-// "replaces" or "removes".
-func dsWriteDoes(step dnssecStep) string {
-	if step == stepPublish {
-		return "publishes"
-	}
-
-	return dsWriteVerb(step) + "s"
-}
-
-// dsWriteDone is the past of a DS write's verb: "published", "replaced"
-// or "removed".
-func dsWriteDone(step dnssecStep) string {
-	if step == stepPublish {
-		return "published"
-	}
-
-	return dsWriteVerb(step) + "d"
-}
-
 // registrationsFoundMsg reports which Zones of a Live Zone's name are held
 // by an Account that registers the domain and can write its DS.
 type registrationsFoundMsg struct {
 	zoneID int64
 	// step is the DNSSEC step the Registration was looked for.
 	step  dnssecStep
+	kind  dsWriteKind
 	keys  []dns.SigningKey
 	found []dns.Zone
 	// failed names each Account that could not be asked, other than
@@ -128,22 +188,32 @@ func (m *Model) registrationCandidates(z dns.Zone) []dns.Zone {
 // domain, and writing its DS there.
 const registrationTimeout = 30 * time.Second
 
+// dsWritable reports whether z's DS may be written at its registrar for
+// kind, given its keys: while z may be written, and, for a write that
+// sends them, once they are read.
+//
+// The write gate is the Live Zone's: the DS is written at its
+// Registration, but a registration-only Zone can never be Validated, as
+// its Provider serves no Records for it.
+func (m *Model) dsWritable(z dns.Zone, kind dsWriteKind, keys []dns.SigningKey) bool {
+	return m.writeRefusal(z) == "" && (!dsWrites[kind].sendsKeys || len(keys) > 0)
+}
+
 // writeDS takes z's DNSSEC step that writes its DS at the registrar,
 // step: it looks for the Registration of its name, to write the DS there
 // once the user confirms. Without one, or while z may not be written, it
 // says how to do it by hand: the keys to copy into the registrar's panel,
 // or to remove the DS there.
 func (m *Model) writeDS(z dns.Zone, step dnssecStep) tea.Cmd {
+	kind := dsWriteKindOf(step)
+
 	var keys []dns.SigningKey
-	if step != stepRemoveDS {
+	if dsWrites[kind].sendsKeys {
 		keys = m.signingKeysOf(z)
 	}
 
-	// The write gate is the Live Zone's: the DS is written at its
-	// Registration, but a registration-only Zone can never be Validated,
-	// as its Provider serves no Records for it.
-	if m.writeRefusal(z) != "" || (step != stepRemoveDS && len(keys) == 0) {
-		m.writeDSByHand(z, step, notice{})
+	if !m.dsWritable(z, kind, keys) {
+		m.writeDSByHand(z, kind, notice{})
 
 		return nil
 	}
@@ -165,7 +235,7 @@ func (m *Model) writeDS(z dns.Zone, step dnssecStep) tea.Cmd {
 	ctx, s, key, providers := m.ctx, m.deps.Store, m.key, m.providers
 
 	return func() tea.Msg {
-		msg := registrationsFoundMsg{zoneID: z.ID, step: step, keys: keys}
+		msg := registrationsFoundMsg{zoneID: z.ID, step: step, kind: kind, keys: keys}
 
 		for _, c := range candidates {
 			// The Account registers the domain when it reads its DS.
@@ -188,11 +258,11 @@ func (m *Model) writeDS(z dns.Zone, step dnssecStep) tea.Cmd {
 	}
 }
 
-// writeDSByHand says how to take z's step at the registrar's panel, with
-// n in the status bar: the keys to copy, or, to remove the DS, that
+// writeDSByHand says how to write z's DS of kind in the registrar's panel,
+// with n in the status bar: the keys to copy, or, to remove the DS, that
 // dnscli watches the parent zone for it to go.
-func (m *Model) writeDSByHand(z dns.Zone, step dnssecStep, n notice) {
-	if step != stepRemoveDS {
+func (m *Model) writeDSByHand(z dns.Zone, kind dsWriteKind, n notice) {
+	if dsWrites[kind].sendsKeys {
 		m.notice = n
 		m.openSigningKeys()
 
@@ -200,20 +270,10 @@ func (m *Model) writeDSByHand(z dns.Zone, step dnssecStep, n notice) {
 	}
 
 	if n.text == "" {
-		n.text = capitalise(removeDSFirst(z.Name)) + ": dnscli watches the parent zone for it to go."
+		n.text = capitalise(removeDSFirst(z.Name)) + ": " + watchesDSGo
 	}
 
 	m.notice = n
-}
-
-// byHand says how to take a DS write's step in the registrar's panel
-// instead.
-func byHand(step dnssecStep) string {
-	if step == stepRemoveDS {
-		return "remove it in the registrar's panel; dnscli watches the parent zone for it to go."
-	}
-
-	return "copy it into the registrar's panel."
 }
 
 // errNoRegistrar is an Account whose Provider is no Registrar Adapter.
@@ -265,23 +325,31 @@ func (m *Model) registrationsFound(msg registrationsFoundMsg) {
 	}
 
 	z := *m.open
-	verb := dsWriteVerb(msg.step)
+	w := dsWrites[msg.kind]
 
 	if len(msg.found) == 0 {
-		none := "Account in dnscli " + dsWriteDoes(msg.step) + " the DS of " + z.Name + ": " + byHand(msg.step)
+		none := "Account in dnscli " + w.does + " the DS of " + z.Name + ": " + w.byHand
 
 		n := notice{text: "No " + none}
 		if len(msg.failed) > 0 {
 			n = notice{text: "Could not ask " + strings.Join(msg.failed, ", ") + ", and no other " + none, err: true}
 		}
 
-		m.writeDSByHand(z, msg.step, n)
+		m.writeDSByHand(z, msg.kind, n)
 
 		return
 	}
 
 	m.notice = notice{}
-	d := &dsWrite{zone: z, step: msg.step, keys: msg.keys, registration: msg.found[0], unasked: msg.failed}
+	d := &dsWrite{
+		zone: z, step: msg.step, kind: msg.kind, keys: msg.keys,
+		registration: msg.found[0], unasked: msg.failed,
+	}
+
+	if !w.sendsKeys {
+		d.removed = slices.Clone(m.parentDS[nameKey(z.Name)].ds)
+	}
+
 	m.dsWrite = d
 
 	if len(msg.found) == 1 {
@@ -300,7 +368,7 @@ func (m *Model) registrationsFound(msg registrationsFoundMsg) {
 	}
 
 	d.picker = &picker{
-		title:   capitalise(verb) + " the DS of " + z.Name + " at",
+		title:   capitalise(w.verb) + " the DS of " + z.Name + " at",
 		options: labels,
 		pick:    func(i int) { d.registration = msg.found[i] },
 	}
@@ -376,10 +444,11 @@ func (m *Model) dsWritten(msg dsWrittenMsg) tea.Cmd {
 	}
 
 	a, _ := m.account(d.registration.AccountID)
+	w := dsWrites[d.kind]
 
 	if msg.err != nil {
 		d.busy = false
-		d.err = dsWriteError(d.zone.Name, d.step, a, msg.err)
+		d.err = dsWriteError(d.zone.Name, w, a, msg.err)
 
 		return nil
 	}
@@ -387,26 +456,21 @@ func (m *Model) dsWritten(msg dsWrittenMsg) tea.Cmd {
 	m.dsWrite = nil
 
 	if m.dsSent == nil {
-		m.dsSent = map[int64]dnssecStep{}
+		m.dsSent = map[int64]dsWriteKind{}
 	}
 
-	m.dsSent[d.zone.ID] = d.step
+	m.dsSent[d.zone.ID] = d.kind
 
-	next := "DNSSEC is On once the parent zone serves it."
-	if d.step == stepRemoveDS {
-		next = "dnscli unsigns the Zone once the parent zone stops serving it and its TTL passes."
-	}
-
-	m.notice = notice{text: "DS of " + d.zone.Name + " " + dsWriteDone(d.step) + " at " + a.Label() + ": " + next}
+	m.notice = notice{text: "DS of " + d.zone.Name + " " + w.done + " at " + a.Label() + ": " + w.next}
 	// The re-checks of the parent start again.
 	m.dnssecWatch = nil
 
 	return m.checkParentDS(d.zone)
 }
 
-// dsWriteError says why writing the DS of zone at a, for step, failed: a
+// dsWriteError says why writing the DS of zone at a, as w, failed: a
 // registry that refuses the keys is named as such, as no retry helps.
-func dsWriteError(zone string, step dnssecStep, a dns.Account, err error) string {
+func dsWriteError(zone string, w dsWriteWords, a dns.Account, err error) string {
 	switch {
 	case errors.Is(err, dnsprovider.ErrUnsupported):
 		return "The registry of " + zone + " refuses this key's algorithm or form, which is not a dnscli error: " + err.Error()
@@ -414,11 +478,12 @@ func dsWriteError(zone string, step dnssecStep, a dns.Account, err error) string
 		return a.Label() + " does not register " + zone + ": " + err.Error()
 	}
 
-	return "Could not " + dsWriteVerb(step) + " the DS at " + a.Label() + ": " + err.Error()
+	return "Could not " + w.verb + " the DS at " + a.Label() + ": " + err.Error()
 }
 
-// dsWriteView asks to confirm writing the DS, naming the Account and the
-// exact set sent, or, to remove it, the DS the parent zone serves.
+// dsWriteView asks to confirm writing the DS, naming the Account and
+// exactly what was shown when it was asked: the set sent, or, to remove
+// it, the DS the parent zone served.
 func (m *Model) dsWriteView() string {
 	d := m.dsWrite
 	if d.picker != nil {
@@ -426,31 +491,23 @@ func (m *Model) dsWriteView() string {
 	}
 
 	a, _ := m.account(d.registration.AccountID)
-	verb := dsWriteVerb(d.step)
-	title := capitalise(verb) + " the DS"
-
-	why := "It changes the Delegation: the parent zone serves it once the registry publishes it."
-
-	switch d.step {
-	case stepMismatch:
-		why = "It changes the Delegation: the DS the parent zone serves matches none of the keys, and these replace it."
-	case stepRemoveDS:
-		why = "It changes the Delegation: dnscli unsigns the Zone once the parent zone stops serving the DS and its TTL passes."
-	}
+	w := dsWrites[d.kind]
+	title := capitalise(w.verb) + " the DS"
 
 	notes := wrapNote(lipgloss.NewStyle(), title+" of "+d.zone.Name+" at "+a.Label()+"?", noteWidth)
-	notes = append(notes, wrapNote(hintStyle, why, noteWidth)...)
+	notes = append(notes, wrapNote(hintStyle, "It changes the Delegation: "+w.why, noteWidth)...)
 	notes = append(notes, "")
 
 	// The values wrap only when the terminal cannot hold them.
 	valueW := max(m.width-16, 20)
+	value := func(name, v string) {
+		notes = append(notes, helpKeyStyle.Render(name))
+		notes = append(notes, strings.Split(ansi.Hardwrap(v, valueW, false), "\n")...)
+	}
 
-	if d.step == stepRemoveDS {
-		// Every DS record the parent zone serves goes.
-		for _, ds := range m.parentDS[nameKey(d.zone.Name)].ds {
-			notes = append(notes, helpKeyStyle.Render("DS"))
-			notes = append(notes, strings.Split(ansi.Hardwrap(ds, valueW, false), "\n")...)
-		}
+	// Every DS record the parent zone served goes.
+	for _, ds := range d.removed {
+		value("DS", ds)
 	}
 
 	// Every key shows as it is sent, its DNSKEY and each of its DS
@@ -460,12 +517,10 @@ func (m *Model) dsWriteView() string {
 			notes = append(notes, "")
 		}
 
-		notes = append(notes, helpKeyStyle.Render("DNSKEY"))
-		notes = append(notes, strings.Split(ansi.Hardwrap(k.DNSKEY, valueW, false), "\n")...)
+		value("DNSKEY", k.DNSKEY)
 
 		for _, ds := range k.DS {
-			notes = append(notes, helpKeyStyle.Render("DS"))
-			notes = append(notes, strings.Split(ansi.Hardwrap(ds, valueW, false), "\n")...)
+			value("DS", ds)
 		}
 	}
 
@@ -480,10 +535,10 @@ func (m *Model) dsWriteView() string {
 	}
 
 	k := m.keys.keysFor
-	hint := k(ActionSelect) + " " + verb + " · " + k(ActionClose) + " cancel"
+	hint := k(ActionSelect) + " " + w.verb + " · " + k(ActionClose) + " cancel"
 
 	if d.busy {
-		hint = strings.TrimSuffix(verb, "e") + "ing…"
+		hint = w.doing
 	}
 
 	notes = append(notes, "", hintStyle.Render(hint))
@@ -491,61 +546,39 @@ func (m *Model) dsWriteView() string {
 	return dialogView(title, nil, 0, false, notes)
 }
 
-// dsSentAt reports whether z's DS was written at its registrar this
-// session for step, and is waited for at the parent zone.
-func (m *Model) dsSentAt(z dns.Zone, step dnssecStep) bool {
-	s, ok := m.dsSent[z.ID]
+// dsSentFor reports the kind of DS write sent this session to z's
+// registrar, when it was for step: it is waited for at the parent zone.
+func (m *Model) dsSentFor(z dns.Zone, step dnssecStep) (dsWriteKind, bool) {
+	k, ok := m.dsSent[z.ID]
 
-	return ok && s == step
+	return k, ok && dsWrites[k].step == step
 }
 
-// publishText says z's DS is to be published, and how: at the registrar
-// while z may be written, else by copying the keys; or that it was
-// published this session, and is waited for at the parent zone.
-func (m *Model) publishText(z dns.Zone) string {
-	if m.dsSentAt(z, stepPublish) {
-		return "DNSSEC: DS published, waiting for the parent zone"
+// dsStepText says, for the Zone Status bar, that z's step writing its DS
+// at the registrar is to be taken, and how: by ActionDNSSECStep while it
+// may be written, else by hand, with the keys ActionShowKeys shows; or that
+// it was written this session, and is waited for at the parent zone.
+func (m *Model) dsStepText(z dns.Zone, step dnssecStep) string {
+	if sent, ok := m.dsSentFor(z, step); ok {
+		return "DNSSEC: DS " + dsWrites[sent].done + ", waiting for the parent zone"
 	}
 
-	k := m.keys.keysFor
-	if m.writeRefusal(z) != "" {
-		return "DNSSEC: publish the DS (" + k(ActionShowKeys) + " shows it)"
-	}
-
-	return "DNSSEC: publish the DS (" + k(ActionDNSSECStep) + " publishes it, " + k(ActionShowKeys) + " shows it)"
-}
-
-// removeDSText says the DS of z, being turned off, is to be removed
-// first, and how while z may be written; or that it was removed this
-// session, and its going is waited for at the parent zone.
-func (m *Model) removeDSText(z dns.Zone) string {
-	if m.dsSentAt(z, stepRemoveDS) {
-		return "DNSSEC: DS removed, waiting for the parent zone"
-	}
-
-	text := "DNSSEC: remove the DS at the registrar to turn it off"
-	if m.writeRefusal(z) != "" {
-		return text
-	}
-
-	return text + " (" + m.keys.keysFor(ActionDNSSECStep) + " removes it)"
-}
-
-// mismatchText says, in its style, that the DS z's parent serves matches
-// none of its keys, and how to replace it while z may be written and its
-// keys are read; or that it was replaced this session, and the new one is
-// waited for at the parent zone.
-func (m *Model) mismatchText(z dns.Zone) (string, lipgloss.Style) {
-	if m.dsSentAt(z, stepMismatch) {
-		return "DNSSEC: DS replaced, waiting for the parent zone", badgePendingStyle
-	}
-
-	text := "DNSSEC: DS does not match"
-	if m.writeRefusal(z) != "" || len(m.signingKeysOf(z)) == 0 {
-		return text, errorStyle
-	}
-
+	kind := dsWriteKindOf(step)
+	w, keys := dsWrites[kind], m.signingKeysOf(z)
 	k := m.keys.keysFor
 
-	return text + " (" + k(ActionDNSSECStep) + " replaces it, " + k(ActionShowKeys) + " shows the keys)", errorStyle
+	var how []string
+	if m.dsWritable(z, kind, keys) {
+		how = append(how, k(ActionDNSSECStep)+" "+w.does+" it")
+	}
+
+	if w.shows != "" && len(keys) > 0 {
+		how = append(how, k(ActionShowKeys)+" shows "+w.shows)
+	}
+
+	if len(how) == 0 {
+		return w.todo
+	}
+
+	return w.todo + " (" + strings.Join(how, ", ") + ")"
 }
