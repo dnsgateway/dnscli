@@ -341,18 +341,20 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case dsCheckedMsg:
 		m.recordDSCheck(msg)
 
-		return m, m.lookupAnswered()
+		return m, tea.Batch(m.noteDSOfName(msg.name), m.lookupAnswered())
 	case keysLookedUpMsg:
 		again := m.recordKeyLookup(msg)
 
 		var seen tea.Cmd
 		if z, ok := m.zoneByID[msg.zoneID]; ok {
-			seen = m.noteSigning(z)
+			seen = tea.Batch(m.noteSigning(z), m.noteDS(z))
 		}
 
 		return m, tea.Batch(again, seen, m.lookupAnswered())
 	case signingSeenMsg:
 		m.signingSeen(msg)
+	case dsSeenMsg:
+		m.dsSeen(msg)
 	case dnssecWatchMsg:
 		return m, m.dnssecWatched(msg)
 	case serialCheckedMsg:

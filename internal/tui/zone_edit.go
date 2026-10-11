@@ -308,9 +308,9 @@ type zoneEditOpenedMsg struct {
 	account dns.Account
 	p       dnsprovider.Provider
 	err     error
-	// turnOn opens the dialog asking to confirm turning DNSSEC on, the
-	// DNSSEC step taken from the Zone page.
-	turnOn bool
+	// turnDNSSEC opens the dialog asking to confirm turning DNSSEC "on"
+	// or "off", the DNSSEC step taken from the Zone page; empty for none.
+	turnDNSSEC string
 }
 
 // zoneSettingsSavedMsg reports changes of a Zone's settings: the Zone as
@@ -361,28 +361,33 @@ func (m *Model) editZone() tea.Cmd {
 	case m.key == nil:
 		m.openZoneEdit(z, a, nil, "The session is sealed: Enter on a setting Unseals it, to change the settings.", true)
 	default:
-		return tea.Batch(checkDS, m.editZoneOf(z.ID, false))
+		return tea.Batch(checkDS, m.editZoneOf(z.ID, ""))
 	}
 
 	return checkDS
 }
 
+// cannotTurnDNSSEC says an Account's Provider cannot turn DNSSEC "on" or
+// "off" through its API.
+func cannotTurnDNSSEC(a dns.Account, v string) string {
+	return a.Label() + " cannot turn DNSSEC " + v + " through its API: turn it " + v + " in its own panel."
+}
+
 // cannotTurnDNSSECOn says an Account's Provider cannot turn DNSSEC on
 // through its API.
 func cannotTurnDNSSECOn(a dns.Account) string {
-	return a.Label() + " cannot turn DNSSEC on through its API: turn it on in its own panel."
+	return cannotTurnDNSSEC(a, "on")
 }
 
-// confirmTurningOn picks DNSSEC on and asks to confirm it, as Save would.
-func (f *zoneEditForm) confirmTurningOn() {
+// pickDNSSEC picks DNSSEC v, "on" or "off", and moves to the Save button.
+func (f *zoneEditForm) pickDNSSEC(v string) {
 	for i, s := range f.settings {
 		if s == dnssecSetting {
-			f.choice[i] = slices.Index(f.options(i), "on")
+			f.choice[i] = slices.Index(f.options(i), v)
 		}
 	}
 
 	f.field = f.saveField()
-	f.confirming = len(f.changes()) > 0
 }
 
 // cannotChangeZoneSettings says an Account's Provider cannot change Zone
@@ -392,9 +397,9 @@ func cannotChangeZoneSettings(a dns.Account) string {
 }
 
 // editZoneOf opens the Provider of a Zone's Account, as it is now, for
-// the Edit Zone dialog: asking to confirm turning DNSSEC on when turnOn
-// is set.
-func (m *Model) editZoneOf(zoneID int64, turnOn bool) tea.Cmd {
+// the Edit Zone dialog: asking to confirm turning DNSSEC on or off when
+// turnDNSSEC says so.
+func (m *Model) editZoneOf(zoneID int64, turnDNSSEC string) tea.Cmd {
 	z, ok := m.zoneByID[zoneID]
 	if !ok {
 		return nil
@@ -410,14 +415,14 @@ func (m *Model) editZoneOf(zoneID int64, turnOn bool) tea.Cmd {
 	return func() tea.Msg {
 		p, _, err := accountProvider(ctx, s, key, providers, a)
 
-		return zoneEditOpenedMsg{zone: z, account: a, p: p, err: err, turnOn: turnOn}
+		return zoneEditOpenedMsg{zone: z, account: a, p: p, err: err, turnDNSSEC: turnDNSSEC}
 	}
 }
 
 // tenantUse opens the Edit Zone dialog again, for the Zone as it is by
 // then.
 func (msg zoneEditOpenedMsg) tenantUse(m *Model) (int64, func() tea.Cmd, error) {
-	return msg.account.ID, func() tea.Cmd { return m.editZoneOf(msg.zone.ID, msg.turnOn) }, msg.err
+	return msg.account.ID, func() tea.Cmd { return m.editZoneOf(msg.zone.ID, msg.turnDNSSEC) }, msg.err
 }
 
 // openFailedText says the Provider of msg's Account could not be opened, and
@@ -445,13 +450,17 @@ func (m *Model) zoneEditOpened(msg zoneEditOpenedMsg) {
 	}
 
 	switch up, ok := msg.p.(dnsprovider.ZoneUpdater); {
-	case msg.turnOn && msg.err != nil:
+	case msg.turnDNSSEC != "" && msg.err != nil:
 		m.notice = notice{text: msg.openFailedText(), err: true}
-	case msg.turnOn && !ok:
-		m.notice = notice{text: cannotTurnDNSSECOn(msg.account), err: true}
-	case msg.turnOn:
+	case msg.turnDNSSEC != "" && !ok:
+		m.notice = notice{text: cannotTurnDNSSEC(msg.account, msg.turnDNSSEC), err: true}
+	case msg.turnDNSSEC != "":
 		m.openZoneEdit(z, msg.account, up, "", false)
-		m.zoneEdit.confirmTurningOn()
+		m.zoneEdit.pickDNSSEC(msg.turnDNSSEC)
+
+		if len(m.zoneEdit.changes()) > 0 {
+			m.confirmZoneEdit(m.zoneEdit)
+		}
 	case msg.err != nil:
 		m.openZoneEdit(z, msg.account, nil, msg.openFailedText(), false)
 	case !ok:
@@ -566,7 +575,7 @@ func (m *Model) zoneEditKey(msg tea.KeyMsg) tea.Cmd {
 			m.zoneEdit = nil
 			id := f.zone.ID
 
-			return m.withSecrets(func() tea.Cmd { return m.editZoneOf(id, false) })
+			return m.withSecrets(func() tea.Cmd { return m.editZoneOf(id, "") })
 		default:
 			f.field++
 		}

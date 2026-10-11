@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -13,8 +14,10 @@ import (
 // like the Delegation: a zone name with none was not checked this session.
 type dsCheck struct {
 	state lookup
-	// ds are the DS records the parent serves, in presentation form.
+	// ds are the DS records the parent serves, in presentation form,
+	// and ttl the TTL of their set.
 	ds  []string
+	ttl time.Duration
 	err error
 }
 
@@ -22,6 +25,7 @@ type dsCheck struct {
 type dsCheckedMsg struct {
 	name string // nameKey of the zone name
 	ds   []string
+	ttl  time.Duration
 	err  error
 }
 
@@ -66,7 +70,7 @@ func (m *Model) recordDSCheck(msg dsCheckedMsg) {
 	if msg.err != nil {
 		*c = dsCheck{state: lookupFailed, err: msg.err}
 	} else {
-		*c = dsCheck{state: lookupDone, ds: msg.ds}
+		*c = dsCheck{state: lookupDone, ds: msg.ds, ttl: msg.ttl}
 	}
 }
 

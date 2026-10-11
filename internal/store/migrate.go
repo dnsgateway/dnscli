@@ -79,6 +79,11 @@ var migrations = []string{
 	`
 	ALTER TABLE zones ADD COLUMN signing_seen_at INTEGER NOT NULL DEFAULT 0; -- unix seconds, 0 = not seen signed
 	`,
+	// 8: when each signed Zone's DS was first seen gone, and the TTL it was last served with, for the wait before unsigning it.
+	`
+	ALTER TABLE zones ADD COLUMN ds_gone_at INTEGER NOT NULL DEFAULT 0; -- unix seconds, 0 = not seen gone
+	ALTER TABLE zones ADD COLUMN ds_ttl     INTEGER NOT NULL DEFAULT 0; -- seconds, 0 = no DS seen
+	`,
 }
 
 // migrate applies pending migrations in one write transaction. BEGIN IMMEDIATE

@@ -161,9 +161,11 @@ func TestTurningDNSSECOffDoesNotWarnWhenTheParentServesNoDS(t *testing.T) {
 
 	h.assertHides("Remove the DS record")
 
+	// dnscli never saw a DS go, nor its TTL: it waits a day from now,
+	// as long as the largest TLDs' DS TTL, before unsigning.
 	h.press(saveFromDNSSEC...)
-	h.assertShows("Turn DNSSEC off for work.example")
-	h.assertHides("Remove the DS record")
+	h.assertShows("DNSSEC stays on until Oct 8 12:00")
+	h.assertHides("Remove the DS record", "Turn DNSSEC off for work.example")
 }
 
 func TestRefreshingTheZoneChecksTheDSAtItsParentAgain(t *testing.T) {

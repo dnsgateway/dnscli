@@ -25,8 +25,8 @@ import (
 //
 // A changed Provider zone ID is another zone at the Provider, so it
 // forgets, in the same transaction, everything cached of the old one: its
-// Records, serial, last Refresh time, nameservers, Zone Status and when it
-// was first seen signed. Only what z itself sets is stored. replaced
+// Records, serial, last Refresh time, nameservers, Zone Status, when it
+// was first seen signed and what was seen of its DS. Only what z itself sets is stored. replaced
 // reports that it did so.
 func (s *Store) PutZone(ctx context.Context, z dns.Zone) (stored dns.Zone, replaced bool, err error) {
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -93,7 +93,9 @@ func putZone(ctx context.Context, db execQueryRower, z dns.Zone, listing bool) (
 			hsts             = IIF(excluded.provider_zone_id = provider_zone_id, hsts, 0),
 			min_tls          = IIF(excluded.provider_zone_id = provider_zone_id, min_tls, ''),
 			status_at        = IIF(excluded.provider_zone_id = provider_zone_id, status_at, 0),
-			signing_seen_at  = IIF(excluded.provider_zone_id = provider_zone_id, signing_seen_at, 0)
+			signing_seen_at  = IIF(excluded.provider_zone_id = provider_zone_id, signing_seen_at, 0),
+			ds_gone_at       = IIF(excluded.provider_zone_id = provider_zone_id, ds_gone_at, 0),
+			ds_ttl           = IIF(excluded.provider_zone_id = provider_zone_id, ds_ttl, 0)
 		RETURNING id, `+zoneStateColumns,
 		z.AccountID, z.Name, z.ProviderID, z.Serial, unixOrZero(z.RefreshedAt), joinNames(z.Nameservers), hostingWord(z.State), listing,
 	).Scan(scan.dests(&z.ID)...)
@@ -305,7 +307,7 @@ func (s *Store) SaveRefresh(ctx context.Context, z dns.Zone, records []dns.Recor
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	var refreshed, statusAt, signingSeen int64
+	var refreshed, statusAt, signingSeen, dsGone, dsTTL int64
 
 	err = tx.QueryRowContext(ctx, `
 		UPDATE zones SET
@@ -316,10 +318,10 @@ func (s *Store) SaveRefresh(ctx context.Context, z dns.Zone, records []dns.Recor
 			min_tls      = IIF(?7 = 0 OR status_at >= ?7, min_tls, ?10),
 			status_at    = IIF(?7 = 0 OR status_at >= ?7, status_at, ?2)
 		WHERE id = ?3 AND account_id = ?4 AND name = ?5 AND provider_zone_id = ?6
-		RETURNING soa_serial, refreshed_at, dnssec, hsts, min_tls, status_at, signing_seen_at`,
+		RETURNING soa_serial, refreshed_at, dnssec, hsts, min_tls, status_at, signing_seen_at, ds_gone_at, ds_ttl`,
 		serial, unixOrZero(at), z.ID, z.AccountID, z.Name, z.ProviderID,
 		unixOrZero(z.StatusAt), z.Status.DNSSEC, z.Status.HSTS, z.Status.MinTLS,
-	).Scan(&z.Serial, &refreshed, &z.Status.DNSSEC, &z.Status.HSTS, &z.Status.MinTLS, &statusAt, &signingSeen)
+	).Scan(&z.Serial, &refreshed, &z.Status.DNSSEC, &z.Status.HSTS, &z.Status.MinTLS, &statusAt, &signingSeen, &dsGone, &dsTTL)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrZoneNotCached
 	}
@@ -331,6 +333,8 @@ func (s *Store) SaveRefresh(ctx context.Context, z dns.Zone, records []dns.Recor
 	z.RefreshedAt = timeOrZero(refreshed)
 	z.StatusAt = timeOrZero(statusAt)
 	z.SigningSeenAt = timeOrZero(signingSeen)
+	z.DSGoneAt = timeOrZero(dsGone)
+	z.DSTTL = time.Duration(dsTTL) * time.Second
 
 	if err := replaceRecords(ctx, tx, z.ID, records); err != nil {
 		return dns.Zone{}, fmt.Errorf("save refresh: %w", err)
@@ -382,7 +386,8 @@ func (s *Store) SaveZoneStatus(ctx context.Context, z dns.Zone, u dnsprovider.Zo
 
 // SaveSigningSeen records what dnscli saw of a Zone's signing at at:
 // signed sets when it was first seen signed, unless it was already;
-// unsigned clears it, so the next signing is waited for afresh. It
+// unsigned clears it, so the next signing is waited for afresh, and when
+// its DS was first seen gone, which only a signed Zone waits on. It
 // returns the Zone's SigningSeenAt as stored. Like SaveRefresh, it
 // returns ErrZoneNotCached unless the cache still has that very Zone.
 func (s *Store) SaveSigningSeen(ctx context.Context, z dns.Zone, signed bool, at time.Time) (time.Time, error) {
@@ -390,7 +395,8 @@ func (s *Store) SaveSigningSeen(ctx context.Context, z dns.Zone, signed bool, at
 
 	err := s.db.QueryRowContext(ctx, `
 		UPDATE zones SET
-			signing_seen_at = IIF(?1, IIF(signing_seen_at = 0, ?2, signing_seen_at), 0)
+			signing_seen_at = IIF(?1, IIF(signing_seen_at = 0, ?2, signing_seen_at), 0),
+			ds_gone_at      = IIF(?1, ds_gone_at, 0)
 		WHERE id = ?3 AND account_id = ?4 AND name = ?5 AND provider_zone_id = ?6
 		RETURNING signing_seen_at`,
 		signed, unixOrZero(at), z.ID, z.AccountID, z.Name, z.ProviderID,
@@ -404,6 +410,33 @@ func (s *Store) SaveSigningSeen(ctx context.Context, z dns.Zone, signed bool, at
 	}
 
 	return timeOrZero(seen), nil
+}
+
+// SaveDSSeen records what dnscli saw of the DS a signed Zone's parent
+// serves at at: a DS served stores the TTL of its set and clears when it
+// was first seen gone; none sets that, unless it was already. It returns
+// the Zone's DSGoneAt and DSTTL as stored. Like SaveRefresh, it returns
+// ErrZoneNotCached unless the cache still has that very Zone.
+func (s *Store) SaveDSSeen(ctx context.Context, z dns.Zone, served bool, ttl time.Duration, at time.Time) (goneAt time.Time, dsTTL time.Duration, err error) {
+	var gone, secs int64
+
+	err = s.db.QueryRowContext(ctx, `
+		UPDATE zones SET
+			ds_gone_at = IIF(?1, 0, IIF(ds_gone_at = 0, ?2, ds_gone_at)),
+			ds_ttl     = IIF(?1, ?3, ds_ttl)
+		WHERE id = ?4 AND account_id = ?5 AND name = ?6 AND provider_zone_id = ?7
+		RETURNING ds_gone_at, ds_ttl`,
+		served, unixOrZero(at), int64(ttl/time.Second), z.ID, z.AccountID, z.Name, z.ProviderID,
+	).Scan(&gone, &secs)
+	if errors.Is(err, sql.ErrNoRows) {
+		err = ErrZoneNotCached
+	}
+
+	if err != nil {
+		return time.Time{}, 0, fmt.Errorf("save DS seen: %w", err)
+	}
+
+	return timeOrZero(gone), time.Duration(secs) * time.Second, nil
 }
 
 // ErrNoRecordID is returned by SaveApply for a change whose Record has no
@@ -592,20 +625,21 @@ func timeOrZero(unix int64) time.Time {
 
 // zoneStateColumns are the columns of a cached Zone's state, in the order
 // a zoneScan reads them.
-const zoneStateColumns = `soa_serial, refreshed_at, dnssec, hsts, min_tls, status_at, nameservers, hosting_state, signing_seen_at`
+const zoneStateColumns = `soa_serial, refreshed_at, dnssec, hsts, min_tls, status_at, nameservers, hosting_state, signing_seen_at, ds_gone_at, ds_ttl`
 
 // zoneScan reads zoneStateColumns into a Zone: Scan into its dests, then
 // fill the Zone.
 type zoneScan struct {
 	z                                *dns.Zone
 	refreshed, statusAt, signingSeen int64
+	dsGone, dsTTL                    int64
 	ns, state                        string
 }
 
 // dests are the Scan destinations of zoneStateColumns, after any before.
 func (s *zoneScan) dests(before ...any) []any {
 	return append(before, &s.z.Serial, &s.refreshed, &s.z.Status.DNSSEC, &s.z.Status.HSTS, &s.z.Status.MinTLS,
-		&s.statusAt, &s.ns, &s.state, &s.signingSeen)
+		&s.statusAt, &s.ns, &s.state, &s.signingSeen, &s.dsGone, &s.dsTTL)
 }
 
 // fill sets the Zone's state from what was scanned.
@@ -615,6 +649,8 @@ func (s *zoneScan) fill() {
 	s.z.Nameservers = splitNames(s.ns)
 	s.z.State = hostingStateOf(s.state)
 	s.z.SigningSeenAt = timeOrZero(s.signingSeen)
+	s.z.DSGoneAt = timeOrZero(s.dsGone)
+	s.z.DSTTL = time.Duration(s.dsTTL) * time.Second
 }
 
 // joinNames stores a list of DNS names, such as nameservers, in one column.

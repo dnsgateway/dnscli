@@ -189,9 +189,9 @@ func (m *Model) startLookup(job lookupJob) tea.Cmd {
 		c.state = lookupResolving
 
 		return func() tea.Msg {
-			ds, _, err := resolver.DSAt(ctx, k)
+			ds, ttl, err := resolver.DSAt(ctx, k)
 
-			return dsCheckedMsg{name: k, ds: ds, err: err}
+			return dsCheckedMsg{name: k, ds: ds, ttl: ttl, err: err}
 		}
 	case lookupKeys:
 		c, ok := m.keyLookups[job.zoneID]

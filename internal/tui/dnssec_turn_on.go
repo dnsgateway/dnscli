@@ -21,7 +21,8 @@ type signingSeenMsg struct {
 // noteSigning stores what a Key Lookup of z saw of its signing, when it
 // changes what the cache holds: the time it was first seen signed, its
 // keys read, or that it was seen unsigned, serving no keys while its
-// Provider does not report it signed. A failed lookup, or keys the
+// Provider does not report it signed, which also forgets when its DS was
+// first seen gone. A failed lookup, or keys the
 // nameservers do not agree on yet, say neither.
 func (m *Model) noteSigning(z dns.Zone) tea.Cmd {
 	c, ok := m.keyLookups[z.ID]
@@ -34,7 +35,7 @@ func (m *Model) noteSigning(z dns.Zone) tea.Cmd {
 	switch {
 	case signed && !z.SigningSeenAt.IsZero():
 		return nil
-	case !signed && (z.SigningSeenAt.IsZero() || signingReported(z)):
+	case !signed && ((z.SigningSeenAt.IsZero() && z.DSGoneAt.IsZero()) || signingReported(z)):
 		return nil
 	}
 
@@ -63,6 +64,12 @@ func (m *Model) signingSeen(msg signingSeenMsg) {
 
 	if z, ok := m.zoneByID[msg.zoneID]; ok {
 		z.SigningSeenAt = msg.at
+		if msg.at.IsZero() {
+			// Seen unsigned: it no longer waits on its DS.
+			z.DSGoneAt = time.Time{}
+			delete(m.turningOff, z.ID)
+		}
+
 		m.updateZone(z)
 	}
 }
@@ -146,9 +153,9 @@ func (m *Model) turnOnRefusal(z dns.Zone) (why string, inPanel bool) {
 }
 
 // takeDNSSECStep takes the open Zone's next DNSSEC step: turning signing
-// on asks to confirm it in the Edit Zone dialog, once its Provider can
-// and the Zone passes the write gate; publishing the DS shows the keys to
-// copy. Any other step is only waited for.
+// on or off asks to confirm it in the Edit Zone dialog, once its Provider
+// can and the Zone passes the write gate; publishing the DS shows the
+// keys to copy. Any other step is only waited for.
 func (m *Model) takeDNSSECStep() tea.Cmd {
 	if m.open == nil {
 		m.notice = notice{text: "Open a Zone first.", err: true}
@@ -164,6 +171,14 @@ func (m *Model) takeDNSSECStep() tea.Cmd {
 		m.openSigningKeys()
 
 		return nil
+	case stepUnsign:
+		if m.writeRefusal(z) != "" {
+			_, cmd, _ := m.writeGate()
+
+			return cmd
+		}
+
+		return m.editZoneOf(z.ID, "off")
 	default:
 		m.notice = notice{text: "No DNSSEC step to take for " + z.Name + " now."}
 
@@ -181,7 +196,7 @@ func (m *Model) takeDNSSECStep() tea.Cmd {
 		return cmd
 	}
 
-	return m.editZoneOf(z.ID, true)
+	return m.editZoneOf(z.ID, "on")
 }
 
 // dnssecRecheckWaits are the waits between re-checks of the open Zone
@@ -197,7 +212,7 @@ var dnssecRecheckWaits = []time.Duration{
 // so is re-checked.
 func (s dnssecStep) waits() bool {
 	switch s {
-	case stepWaitKeys, stepWaitTTL, stepPublish:
+	case stepWaitKeys, stepWaitTTL, stepPublish, stepRemoveDS, stepWaitUnsign:
 		return true
 	}
 
@@ -263,12 +278,26 @@ func (m *Model) watchDNSSEC() tea.Cmd {
 		w.next = min(w.next+1, len(dnssecRecheckWaits)-1)
 	}
 
-	if end, known := m.publishAfter(z, m.recordsOf(z)); step == stepWaitTTL && known && !end.Equal(w.waitEnd) {
+	if end, known := m.waitEnd(z, step); known && !end.Equal(w.waitEnd) {
 		w.waitEnd = end
 		cmds = append(cmds, m.dnssecTimer(w, end.Sub(m.deps.now()), false))
 	}
 
 	return tea.Batch(cmds...)
+}
+
+// waitEnd is when the wait of z's step ends, for the steps that wait
+// until a stated time; known is false for any other, and while it is not
+// known.
+func (m *Model) waitEnd(z dns.Zone, step dnssecStep) (end time.Time, known bool) {
+	switch step {
+	case stepWaitTTL:
+		return m.publishAfter(z, m.recordsOf(z))
+	case stepWaitUnsign:
+		return m.unsignAfter(z), true
+	}
+
+	return time.Time{}, false
 }
 
 // dnssecTimer waits d on the Clock for w; quitting stops it.

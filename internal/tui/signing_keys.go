@@ -222,6 +222,12 @@ const (
 	// stepRemoveDS is a signed Zone being turned off whose parent still
 	// serves a DS: it is removed at the registrar first.
 	stepRemoveDS
+	// stepWaitUnsign is a signed Zone being turned off whose DS is gone
+	// from the parent, but may still be held by resolvers: it is unsigned
+	// only after unsignAfter.
+	stepWaitUnsign
+	// stepUnsign is a signed Zone being turned off that may be unsigned.
+	stepUnsign
 )
 
 // dnssecStepOf works out z's DNSSEC step: On when the parent serves a DS
@@ -314,6 +320,10 @@ func (m *Model) dnssecState(z dns.Zone) (string, lipgloss.Style) {
 		return "DNSSEC: DS does not match", errorStyle
 	case stepRemoveDS:
 		return "DNSSEC: remove the DS at the registrar to turn it off", badgePendingStyle
+	case stepWaitUnsign:
+		return "DNSSEC: unsign after " + clockText(m.unsignAfter(z), m.deps.now()), badgePendingStyle
+	case stepUnsign:
+		return m.unsignText(z), badgePendingStyle
 	}
 
 	return "", statusStyle

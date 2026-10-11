@@ -50,6 +50,14 @@ type Zone struct {
 	// read; zero when it has not, or has seen it unsigned since. The DS is
 	// published only once resolvers may have flushed its unsigned data.
 	SigningSeenAt time.Time
+	// DSGoneAt is when dnscli first saw the parent serve no DS for the
+	// signed Zone; zero when it has not, or has seen a DS or the Zone
+	// unsigned since. The Zone is unsigned only once resolvers may have
+	// flushed the DS.
+	DSGoneAt time.Time
+	// DSTTL is the TTL of the DS set the parent last served, as last seen;
+	// zero when none was seen.
+	DSTTL time.Duration
 }
 
 // Record is a single DNS resource record inside a Zone.
