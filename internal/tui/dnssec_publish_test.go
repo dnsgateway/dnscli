@@ -308,3 +308,27 @@ func TestARegistryThatRefusesTheKeySaysSoClearly(t *testing.T) {
 	h.assertStatusBarShows("DNSSEC: publish the DS")
 	h.assertHides("DS published")
 }
+
+func TestASealedSessionIsShownTheKeysToCopyAndAsksNoRegistrar(t *testing.T) {
+	c := &testClock{now: testNow}
+	r := &fakeResolver{}
+	r.setKeys(rfcZone, rfcKey)
+	r.setDS(rfcZone)
+	f := turnOnFake(dnsprovider.On)
+	f.SetRegistration("zd1")
+
+	_, s := newTurnOnHarness(t, f, r, c)
+	seenSigned(t, s, rfcZone, testNow.Add(-2*time.Hour))
+
+	h := restart(t, s, f, r, c)
+	h.assertStatusBarShows("DNSSEC: publish the DS (s shows it)")
+	h.assertHides("S publishes it")
+
+	h.press("S")
+	h.assertShows("DNSSEC keys for example.net", rfcDS)
+	h.assertHides("Publish the DS of")
+
+	if n := f.count(providertest.OpDelegationSigners); n != 0 {
+		t.Fatalf("DelegationSigners asked %d times in a sealed session", n)
+	}
+}
