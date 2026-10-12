@@ -36,10 +36,6 @@ func (o otherTenants) ListZones(ctx context.Context, f dnsprovider.ZoneFilter) (
 	return zones, nil
 }
 
-func (o otherTenants) Tenants(ctx context.Context) ([]dnsprovider.Tenant, error) {
-	return o.Provider.(dnsprovider.TenantLister).Tenants(ctx)
-}
-
 // otherTenantsRegistry is the fake's Tenant-taking Registry whose
 // Providers built unscoped list others too.
 func otherTenantsRegistry(f *fakeProvider, others ...dnsprovider.Zone) dnsprovider.Registry {
@@ -112,7 +108,7 @@ func TestRelistingKeepsTheAccountsOwnTenantsZoneOverAnotherTenantsOfThatName(t *
 func TestRelistingFailsWhenTheTenantsCannotBeListedLeavingTheCache(t *testing.T) {
 	f := newFake().AddZone(dns.Zone{Name: "own.example", ProviderID: "own1"})
 	f.SetTenants(twoTenants...)
-	f.Fail(providertest.OpTenants, &dnsprovider.APIError{Provider: "cloudflare", StatusCode: 503, Messages: []string{"unavailable"}})
+	f.Fail(providertest.OpListTenants, &dnsprovider.APIError{Provider: "cloudflare", StatusCode: 503, Messages: []string{"unavailable"}})
 
 	s, _ := enrollFirstAccount(t)
 	old := addOldAccount(t, s, "cloudflare", "old", `{"token":"tok","account":"b2"}`)

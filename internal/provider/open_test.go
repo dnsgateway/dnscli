@@ -184,13 +184,13 @@ type scoped struct {
 	r     *tenanted
 }
 
-func (s scoped) Tenants(ctx context.Context) ([]dnsprovider.Tenant, error) {
+func (s scoped) ListTenants(ctx context.Context) ([]dnsprovider.Tenant, error) {
 	if s.r.listing != nil {
 		s.r.listing <- struct{}{}
 		<-s.r.release
 	}
 
-	return s.Provider.(dnsprovider.TenantLister).Tenants(ctx)
+	return s.Provider.ListTenants(ctx)
 }
 
 func (s scoped) Account(ctx context.Context) (dnsprovider.AccountInfo, error) {
@@ -277,7 +277,7 @@ func TestATokenReachingSeveralTenantsIsOpenedOnlyOnceOneIsChosen(t *testing.T) {
 
 	// Only the Tenants were asked for.
 	for _, c := range r.fake.Calls() {
-		if c.Op != providertest.OpNew && c.Op != providertest.OpTenants {
+		if c.Op != providertest.OpNew && c.Op != providertest.OpListTenants {
 			t.Errorf("called %s before a Tenant was chosen", c.Op)
 		}
 	}
@@ -285,7 +285,7 @@ func TestATokenReachingSeveralTenantsIsOpenedOnlyOnceOneIsChosen(t *testing.T) {
 
 func TestATokenThatMayNotListTenantsRunsUnscoped(t *testing.T) {
 	r := newTenanted(dnsprovider.Tenant{ID: tenantID})
-	r.fake.Fail(providertest.OpTenants, dnsprovider.ErrUnauthorized)
+	r.fake.Fail(providertest.OpListTenants, dnsprovider.ErrUnauthorized)
 
 	open(t, provider.NewOpener(r.registry()), "tok")
 
@@ -298,7 +298,7 @@ func TestTheTenantOutcomeIsKeptPerTokenAndBuildsOnce(t *testing.T) {
 	for name, fail := range map[string]bool{"scoped": false, "unscoped as the token may not list them": true} {
 		r := newTenanted(dnsprovider.Tenant{ID: tenantID})
 		if fail {
-			r.fake.Fail(providertest.OpTenants, dnsprovider.ErrUnauthorized)
+			r.fake.Fail(providertest.OpListTenants, dnsprovider.ErrUnauthorized)
 		}
 
 		o := provider.NewOpener(r.registry())
@@ -310,7 +310,7 @@ func TestTheTenantOutcomeIsKeptPerTokenAndBuildsOnce(t *testing.T) {
 			open(t, o, "tok")
 		}
 
-		if n := count(r.fake, providertest.OpTenants); n != 1 {
+		if n := count(r.fake, providertest.OpListTenants); n != 1 {
 			t.Errorf("%s: Tenants listed %d times, want once", name, n)
 		}
 
@@ -320,7 +320,7 @@ func TestTheTenantOutcomeIsKeptPerTokenAndBuildsOnce(t *testing.T) {
 
 		open(t, o, "other")
 
-		if n := count(r.fake, providertest.OpTenants); n != 2 {
+		if n := count(r.fake, providertest.OpListTenants); n != 2 {
 			t.Errorf("%s: Tenants listed %d times after another token, want twice", name, n)
 		}
 	}
@@ -328,7 +328,7 @@ func TestTheTenantOutcomeIsKeptPerTokenAndBuildsOnce(t *testing.T) {
 
 func TestAFailedTenantListFailsTheOpenAndIsAskedAgain(t *testing.T) {
 	r := newTenanted(dnsprovider.Tenant{ID: "a1"}, dnsprovider.Tenant{ID: "b2"})
-	r.fake.Fail(providertest.OpTenants, dnsprovider.ErrRateLimited)
+	r.fake.Fail(providertest.OpListTenants, dnsprovider.ErrRateLimited)
 
 	o := provider.NewOpener(r.registry())
 
@@ -337,7 +337,7 @@ func TestAFailedTenantListFailsTheOpenAndIsAskedAgain(t *testing.T) {
 		t.Fatalf("Open = %v, want ErrRateLimited", err)
 	}
 
-	r.fake.Fail(providertest.OpTenants, nil)
+	r.fake.Fail(providertest.OpListTenants, nil)
 
 	var choice *provider.TenantChoiceError
 	if _, err := o.Open(context.Background(), "tenanted", creds("tok")); !errors.As(err, &choice) {
@@ -361,14 +361,14 @@ func TestConcurrentOpensListTheTenantsOnce(t *testing.T) {
 
 	wg.Wait()
 
-	if n := count(r.fake, providertest.OpTenants); n != 1 {
+	if n := count(r.fake, providertest.OpListTenants); n != 1 {
 		t.Errorf("Tenants listed %d times, want once", n)
 	}
 }
 
 func TestOpensWaitingOnAFailedTenantListGetItsError(t *testing.T) {
 	r := newTenanted(dnsprovider.Tenant{ID: "a1"}, dnsprovider.Tenant{ID: "b2"})
-	r.fake.Fail(providertest.OpTenants, dnsprovider.ErrRateLimited)
+	r.fake.Fail(providertest.OpListTenants, dnsprovider.ErrRateLimited)
 	r.listing, r.release = make(chan struct{}, 8), make(chan struct{})
 
 	o := provider.NewOpener(r.registry())
@@ -429,7 +429,7 @@ func TestOpenersKeepNothingInCommon(t *testing.T) {
 	open(t, provider.NewOpener(r.registry()), "tok")
 	open(t, provider.NewOpener(r.registry()), "tok")
 
-	if n := count(r.fake, providertest.OpTenants); n != 2 {
+	if n := count(r.fake, providertest.OpListTenants); n != 2 {
 		t.Errorf("Tenants listed %d times by two Openers, want twice", n)
 	}
 }
@@ -507,7 +507,7 @@ func TestAStoredTenantScopesTheProviderWithoutListingTenants(t *testing.T) {
 		t.Errorf("built with Tenants %q, want the stored one only", b)
 	}
 
-	if n := count(r.fake, providertest.OpTenants); n != 0 {
+	if n := count(r.fake, providertest.OpListTenants); n != 0 {
 		t.Errorf("Tenants listed %d times, want none", n)
 	}
 }
@@ -560,7 +560,7 @@ func TestVerifyScopesATenantOwnedTokenToTheOnlyTenantItReaches(t *testing.T) {
 	// Opening the credentials again keeps the Tenant Verify found.
 	open(t, o, ownedPrefix+"tok")
 
-	if n := count(r.fake, providertest.OpTenants); n != 1 {
+	if n := count(r.fake, providertest.OpListTenants); n != 1 {
 		t.Errorf("Tenants listed %d times, want once", n)
 	}
 }
@@ -719,7 +719,7 @@ func TestCredentialsReachingSeveralTenantsListZonesOfEveryOneUnscopedBuiltOnce(t
 		t.Errorf("built with Tenants %q, want the stored one each time, and unscoped once", b)
 	}
 
-	if n := count(r.fake, providertest.OpTenants); n != 1 {
+	if n := count(r.fake, providertest.OpListTenants); n != 1 {
 		t.Errorf("Tenants listed %d times, want once", n)
 	}
 }
@@ -740,14 +740,14 @@ func TestAProviderWithoutTenantsListsZonesWithTheProviderOpened(t *testing.T) {
 		t.Errorf("every-Tenant Provider = %#v, want none", every)
 	}
 
-	if n := count(f, providertest.OpTenants); n != 0 {
+	if n := count(f, providertest.OpListTenants); n != 0 {
 		t.Errorf("Tenants listed %d times, want none", n)
 	}
 }
 
 func TestATenantListThatFailsLeavesWhetherThereAreSeveralUnknown(t *testing.T) {
 	r := newTenanted(dnsprovider.Tenant{ID: tenantID}, dnsprovider.Tenant{ID: "b2"})
-	r.fake.Fail(providertest.OpTenants, errors.New("rate limited"))
+	r.fake.Fail(providertest.OpListTenants, errors.New("rate limited"))
 
 	every, err := provider.NewOpener(r.registry()).EveryTenant(context.Background(), "tenanted", map[string]string{"token": "tok", "scope": "b2"})
 	if every != nil || err == nil {
@@ -766,7 +766,7 @@ func TestATenantFieldStoredEmptySharesTheTenantList(t *testing.T) {
 
 	everyTenant(t, o, "tenanted", map[string]string{"token": "tok", "scope": "b2"})
 
-	if n := count(r.fake, providertest.OpTenants); n != 1 {
+	if n := count(r.fake, providertest.OpListTenants); n != 1 {
 		t.Errorf("Tenants listed %d times, want once", n)
 	}
 }

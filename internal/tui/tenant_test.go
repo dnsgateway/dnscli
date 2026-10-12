@@ -47,7 +47,7 @@ func TestAnAccountWhoseTokenReachesOneTenantActsWithinIt(t *testing.T) {
 		t.Errorf("built with Tenants %q, want the first unscoped and every later one scoped to %s", built, acmeTenant)
 	}
 
-	if n := f.count(providertest.OpTenants); n != 1 {
+	if n := f.count(providertest.OpListTenants); n != 1 {
 		t.Errorf("Tenants listed %d times, want once", n)
 	}
 }
@@ -59,7 +59,7 @@ func TestAnAccountWhoseTokenReachesNoTenantsOrMayNotListThemRunsUnscoped(t *test
 		},
 		"may not list": func(f *fakeProvider) {
 			f.SetTenants(dnsprovider.Tenant{ID: acmeTenant})
-			f.Fail(providertest.OpTenants, dnsprovider.ErrUnauthorized)
+			f.Fail(providertest.OpListTenants, dnsprovider.ErrUnauthorized)
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -73,7 +73,7 @@ func TestAnAccountWhoseTokenReachesNoTenantsOrMayNotListThemRunsUnscoped(t *test
 				t.Errorf("built with Tenants %q, want every build unscoped", built)
 			}
 
-			if n := f.count(providertest.OpTenants); n != 1 {
+			if n := f.count(providertest.OpListTenants); n != 1 {
 				t.Errorf("Tenants listed %d times, want once", n)
 			}
 		})
@@ -151,7 +151,7 @@ func TestAddingAnAccountWhoseTokenReachesSeveralTenantsAsksWhichAndNamesItAfterI
 	h.assertHides("work.example")
 
 	for _, c := range f.Calls() {
-		if c.Op != providertest.OpNew && c.Op != providertest.OpTenants {
+		if c.Op != providertest.OpNew && c.Op != providertest.OpListTenants {
 			t.Errorf("called %s before a Tenant was picked", c.Op)
 		}
 	}
@@ -311,7 +311,7 @@ func onlyTenantsListed(t *testing.T, f *fakeProvider) {
 	t.Helper()
 
 	for _, c := range f.Calls() {
-		if c.Op != providertest.OpNew && c.Op != providertest.OpTenants {
+		if c.Op != providertest.OpNew && c.Op != providertest.OpListTenants {
 			t.Errorf("called %s before a Tenant was picked", c.Op)
 		}
 	}
@@ -387,7 +387,7 @@ func TestAClosedTenantPickerIsOpenedAgainOnTheNextUse(t *testing.T) {
 	h.assertShows("Tenant of cloudflare.old")
 	onlyTenantsListed(t, f)
 
-	if n := f.count(providertest.OpTenants); n != 1 {
+	if n := f.count(providertest.OpListTenants); n != 1 {
 		t.Errorf("Tenants listed %d times, want once this session", n)
 	}
 }
@@ -459,7 +459,7 @@ func TestATenantListThatCannotReachTheProviderIsNotARefusal(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			f := refreshZones()
 			f.SetTenants(twoTenants...)
-			f.Fail(providertest.OpTenants, err)
+			f.Fail(providertest.OpListTenants, err)
 
 			h, s := newTenantHarness(t, f)
 			h.fillAddAccount("work", "tok")

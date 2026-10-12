@@ -178,10 +178,6 @@ const ownedTokenPrefix = "owned-"
 // Tenant: Cloudflare refuses to verify the token outside it.
 type unscopedOwned struct{ dnsprovider.Provider }
 
-func (u unscopedOwned) Tenants(ctx context.Context) ([]dnsprovider.Tenant, error) {
-	return u.Provider.(dnsprovider.TenantLister).Tenants(ctx)
-}
-
 func (unscopedOwned) Account(context.Context) (dnsprovider.AccountInfo, error) {
 	return dnsprovider.AccountInfo{}, dnsprovider.ErrUnauthorized
 }

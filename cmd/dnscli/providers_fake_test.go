@@ -35,7 +35,7 @@ func TestTheFakeBuildServesTheDSPublishedAtTheFakeAccount(t *testing.T) {
 	}
 
 	z := dnsprovider.Zone{ID: "fz2", Name: "example.net"}
-	if err := p.(dnsprovider.DSRegistrar).SetDelegationSigners(ctx, z, []dnsprovider.SigningKey{fakeKey}); err != nil {
+	if err := p.SetDelegationSigners(ctx, z, []dnsprovider.SigningKey{fakeKey}); err != nil {
 		t.Fatal(err)
 	}
 

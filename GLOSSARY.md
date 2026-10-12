@@ -54,7 +54,7 @@ The Zone, among those sharing a zone name, held by an Account whose Provider is 
 _Avoid_: registrar zone
 
 **Registrar Adapter**:
-A Provider that can read and replace the Delegation Signer records of the names its Accounts register; in dnsprovider, one implementing `DSRegistrar`.
+A Provider that can read and replace the Delegation Signer records of the names its Accounts register; in dnsprovider, one whose Traits declare `CapDSRegistrar`.
 _Avoid_: registrar provider, DS provider
 
 **Changeset**:

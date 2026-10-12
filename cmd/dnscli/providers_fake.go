@@ -112,7 +112,7 @@ func (r *fakeResolver) DSAt(ctx context.Context, zone string) ([]string, time.Du
 		return nil, 0, err
 	}
 
-	keys, err := p.(dnsprovider.DSRegistrar).ListDelegationSigners(ctx, z)
+	keys, err := p.ListDelegationSigners(ctx, z)
 	if err != nil {
 		return nil, 0, err
 	}

@@ -255,7 +255,7 @@ func (m *Model) writeDS(z dns.Zone, step dnssecStep) tea.Cmd {
 
 		for _, c := range candidates {
 			// The Account registers the domain when it reads its DS.
-			err := withRegistrar(ctx, s, key, providers, c.account, func(ctx context.Context, r dnsprovider.DSRegistrar) error {
+			err := withRegistrar(ctx, s, key, providers, c.account, func(ctx context.Context, r dnsprovider.Provider) error {
 				_, err := r.ListDelegationSigners(ctx, provider.ModuleZone(c.zone))
 
 				return err
@@ -303,7 +303,7 @@ var errNoRegistrar = errors.New("no Registrar Adapter")
 // runs use on it, within registrationTimeout: errNoRegistrar when its
 // Provider is none.
 func withRegistrar(ctx context.Context, s *store.Store, key *vault.Key, providers *provider.Opener, a dns.Account,
-	use func(ctx context.Context, r dnsprovider.DSRegistrar) error,
+	use func(ctx context.Context, r dnsprovider.Provider) error,
 ) error {
 	ctx, cancel := context.WithTimeout(ctx, registrationTimeout)
 	defer cancel()
@@ -313,12 +313,11 @@ func withRegistrar(ctx context.Context, s *store.Store, key *vault.Key, provider
 		return err
 	}
 
-	r, ok := p.(dnsprovider.DSRegistrar)
-	if !ok {
+	if !dnsprovider.Can(p, dnsprovider.CapDSRegistrar) {
 		return errNoRegistrar
 	}
 
-	return use(ctx, r)
+	return use(ctx, p)
 }
 
 // dsWriteUpdate takes a result of writing the DS: the Registrations
@@ -456,7 +455,7 @@ func (m *Model) sendDS(d *dsWrite) tea.Cmd {
 	zoneID := d.zone.ID
 
 	return func() tea.Msg {
-		err := withRegistrar(ctx, s, key, providers, a, func(ctx context.Context, r dnsprovider.DSRegistrar) error {
+		err := withRegistrar(ctx, s, key, providers, a, func(ctx context.Context, r dnsprovider.Provider) error {
 			if len(keys) == 0 {
 				return r.DeleteDelegationSigners(ctx, provider.ModuleZone(z))
 			}

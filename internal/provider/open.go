@@ -135,14 +135,13 @@ func (o *Opener) listTenants(ctx context.Context, typ string, fields map[string]
 			return nil, err
 		}
 
-		lister, ok := built.(dnsprovider.TenantLister)
-		if !ok {
+		if !dnsprovider.Can(built, dnsprovider.CapTenantLister) {
 			return nil, nil
 		}
 
 		// Credentials that may not list Tenants have none to choose
 		// from; any other failure says nothing of them.
-		list, err := lister.Tenants(ctx)
+		list, err := built.ListTenants(ctx)
 		if errors.Is(err, dnsprovider.ErrUnauthorized) {
 			return nil, nil
 		}
