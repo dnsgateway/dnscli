@@ -71,7 +71,7 @@ func TestTheDSIsPublishedAtTheLiveZonesOwnAccountWhenItRegistersTheDomain(t *tes
 	f.SetRegistration("zd1")
 
 	h := newPublishHarness(t, f, r, c)
-	h.assertStatusBarShows("DNSSEC: publish the DS (S publishes it, s shows it)")
+	h.assertStatusBarShows("DNSSEC: publish the DS (S publishes it)")
 
 	h.press("S")
 	h.assertShows("Publish the DS of example.net at cloudflare.work?", rfcDS)
@@ -275,7 +275,7 @@ func TestWithoutAnAccountThatRegistersTheDomainTheKeysAreShownToCopy(t *testing.
 	h := newPublishHarness(t, f, r, c)
 
 	h.press("S")
-	h.assertShows("DNSSEC keys for example.net", rfcDS, "No Account in dnscli publishes the DS of example.net")
+	h.assertShows("Edit Zone example.net", rfcDS, "No Account in dnscli publishes the DS of example.net")
 	h.assertHides("Publish the DS of")
 }
 
@@ -292,7 +292,7 @@ func TestCancellingThePublishConfirmationWritesNothing(t *testing.T) {
 
 	h.press("esc")
 	h.assertHides("Publish the DS of")
-	h.assertStatusBarShows("DNSSEC: publish the DS (S publishes it, s shows it)")
+	h.assertStatusBarShows("DNSSEC: publish the DS (S publishes it)")
 
 	if calls := setDSCalls(f); len(calls) != 0 {
 		t.Fatalf("SetDelegationSigners once canceled: %+v", calls)
@@ -326,11 +326,11 @@ func TestASealedSessionIsShownTheKeysToCopyAndAsksNoRegistrar(t *testing.T) {
 	seenSigned(t, s, rfcZone, testNow.Add(-2*time.Hour))
 
 	h := restart(t, s, f, r, c)
-	h.assertStatusBarShows("DNSSEC: publish the DS (s shows it)")
+	h.assertStatusBarShows("DNSSEC: publish the DS (S shows it)")
 	h.assertHides("S publishes it")
 
 	h.press("S")
-	h.assertShows("DNSSEC keys for example.net", rfcDS)
+	h.assertShows("Edit Zone example.net", rfcDS)
 	h.assertHides("Publish the DS of")
 
 	if n := f.count(providertest.OpListDelegationSigners); n != 0 {
@@ -392,7 +392,7 @@ func TestAnAccountThatCannotBeOpenedFallsBackToTheKeysToCopyNamingIt(t *testing.
 	g.Fail(providertest.OpNew, errors.New("porkbun: no API key"))
 
 	h.press("S")
-	h.assertShows("DNSSEC keys for example.net", rfcDS)
-	h.assertStatusLineShows("Could not ask porkbun.home", "no API key")
+	h.assertShows("Edit Zone example.net", rfcDS)
+	h.assertShows("Could not ask porkbun.home", "no API key")
 	h.assertHides("Publish the DS of")
 }

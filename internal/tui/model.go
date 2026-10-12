@@ -45,8 +45,11 @@ type Model struct {
 	width, height int
 	focus         pane
 	cursor        [paneCount]int
-	help          bool // help overlay shown
-	search        [paneCount]search
+	// top is each pane's first row shown, as window keeps it while the
+	// cursor moves within the rows shown.
+	top    [paneCount]int
+	help   bool // help overlay shown
+	search [paneCount]search
 
 	loaded   bool
 	err      error // reading Accounts and Zones failed
@@ -98,9 +101,6 @@ type Model struct {
 	// keyLookups is what this session's Key Lookup of each Zone found,
 	// by Zone ID.
 	keyLookups map[int64]*keyLookup
-	// showSigningKeys shows the open Zone's key-signing keys and their
-	// DS, to copy into a registrar's panel.
-	showSigningKeys bool
 	// lookups schedules the Delegation lookups, the DS Checks and the Key
 	// Lookups, under one limit.
 	lookups workQueue[lookupJob]
@@ -510,16 +510,6 @@ func (m *Model) handle(a Action) tea.Cmd {
 		return nil
 	}
 
-	if m.showSigningKeys {
-		// So does the keys overlay.
-		switch a {
-		case ActionShowKeys, ActionClose:
-			m.showSigningKeys = false
-		}
-
-		return nil
-	}
-
 	switch a {
 	case ActionNone, ActionUp, ActionDown, ActionPageUp, ActionPageDown:
 	default:
@@ -529,8 +519,6 @@ func (m *Model) handle(a Action) tea.Cmd {
 	switch a {
 	case ActionHelp:
 		m.help = true
-	case ActionShowKeys:
-		m.openSigningKeys()
 	case ActionDNSSECStep:
 		return m.takeDNSSECStep()
 	case ActionNextPane:

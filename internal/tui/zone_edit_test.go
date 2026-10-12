@@ -737,3 +737,16 @@ func TestASealedSessionShowsTheDelegationWithoutUnseal(t *testing.T) {
 		t.Fatalf("Provider calls = %+v, want none", calls)
 	}
 }
+
+func TestUnsealingFromASettingReopensTheDialogOnThatSetting(t *testing.T) {
+	s, _ := enrollFirstAccount(t)
+	status := dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Off, HSTS: dnsprovider.On}
+	withZoneStatus(t, s, "work.example", status)
+
+	h := newAccountHarness(t, s, settingsFake(status, true))
+
+	h.press("e", "down", "enter")
+	h.unsealWith(passphrase)
+
+	h.assertShows("Edit Zone work.example", "› HSTS", "[ Save ]")
+}

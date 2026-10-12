@@ -152,7 +152,7 @@ func TestWithoutAnAccountThatRegistersTheDomainAMismatchedDSShowsTheKeysToCopy(t
 	h, _ := newTurnOnHarness(t, f, r, c)
 
 	h.press("S")
-	h.assertShows("DNSSEC keys for example.net", rfcDS, "No Account in dnscli replaces the DS of example.net")
+	h.assertShows("Edit Zone example.net", rfcDS, "No Account in dnscli replaces the DS of example.net")
 	h.assertHides("Replace the DS of")
 }
 
@@ -165,7 +165,7 @@ func TestAParentDSThatMatchesNoKeyIsReplacedWithTheZonesKeys(t *testing.T) {
 	f.SetRegistration("zd1")
 
 	h, _ := newTurnOnHarness(t, f, r, c)
-	h.assertStatusBarShows("DNSSEC: DS does not match (S replaces it, s shows the keys)")
+	h.assertStatusBarShows("DNSSEC: DS does not match (S replaces it)")
 
 	h.press("S")
 	h.assertShows("Replace the DS of example.net at cloudflare.work?", rfcDNSKEY, rfcDS)
@@ -200,7 +200,7 @@ func TestCancellingTheReplacementWritesNothingAndKeepsTheMismatch(t *testing.T) 
 
 	h.press("esc")
 	h.assertHides("Replace the DS of")
-	h.assertStatusBarShows("DNSSEC: DS does not match (S replaces it, s shows the keys)")
+	h.assertStatusBarShows("DNSSEC: DS does not match (S replaces it)")
 
 	if calls := setDSCalls(f); len(calls) != 0 {
 		t.Fatalf("SetDelegationSigners once canceled: %+v", calls)
@@ -245,7 +245,7 @@ func TestADSForAZoneThatServesNoKeysIsOfferedForRemoval(t *testing.T) {
 
 	h.press("S")
 	h.assertShows("Remove the DS of example.net at cloudflare.work?", rfcDS, "the Zone serves no keys")
-	h.assertHides("DNSSEC keys for example.net", "unsigns the Zone")
+	h.assertHides("Edit Zone example.net", "unsigns the Zone")
 	h.press("enter")
 
 	calls := setDSCalls(f)

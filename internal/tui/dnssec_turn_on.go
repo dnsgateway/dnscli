@@ -197,7 +197,7 @@ func (m *Model) takeDNSSECStep() tea.Cmd {
 		return cmd
 	}
 
-	return m.editZoneOf(z.ID, v)
+	return m.editZoneOf(z.ID, v, zoneEditOpening{})
 }
 
 // dnssecRecheckWaits are the waits between re-checks of the open Zone

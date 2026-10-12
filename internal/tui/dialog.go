@@ -46,7 +46,12 @@ type dialogSize struct{ w, h int }
 
 // grow returns the size that holds both s and the rendered dialog d.
 func (s dialogSize) grow(d string) dialogSize {
-	return dialogSize{max(s.w, lipgloss.Width(d)), max(s.h, lipgloss.Height(d))}
+	return s.max(dialogSize{lipgloss.Width(d), lipgloss.Height(d)})
+}
+
+// max returns the size that holds both s and o.
+func (s dialogSize) max(o dialogSize) dialogSize {
+	return dialogSize{max(s.w, o.w), max(s.h, o.h)}
 }
 
 // sizedDialogView is dialogView in a box at least least in size, so that
@@ -158,6 +163,8 @@ type picker struct {
 	title   string
 	options []string
 	cursor  int
+	// top is the first value shown, as window keeps it.
+	top int
 	// pick sets the field to its i-th value.
 	pick func(i int)
 }
@@ -190,7 +197,7 @@ func (p *picker) view(h int) string {
 		width = max(width, lipgloss.Width(o)+6)
 	}
 
-	start, end := window(len(p.options), p.cursor, max(h-2, 1))
+	start, end := window(len(p.options), p.cursor, max(h-2, 1), &p.top)
 
 	lines := make([]string, 0, end-start)
 

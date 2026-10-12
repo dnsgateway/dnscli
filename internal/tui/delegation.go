@@ -22,6 +22,23 @@ const (
 	lookupFailed                  // the resolver failed
 )
 
+// lookupRow is what a lookup found, as a dialog row lists it, or how far
+// it got; asked is false when it was never asked for.
+func lookupRow(asked bool, state lookup, found []string) []string {
+	switch {
+	case !asked:
+		return []string{"not looked up"}
+	case state == lookupFailed:
+		return []string{"lookup failed"}
+	case state != lookupDone:
+		return []string{"resolving…"}
+	case len(found) == 0:
+		return []string{"none"}
+	}
+
+	return found
+}
+
 // delegation is what this session knows about one zone name's Delegation.
 // It is held in memory only, like freshness.
 type delegation struct {

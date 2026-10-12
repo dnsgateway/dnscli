@@ -115,7 +115,8 @@ func (m *Model) keyReadFor(zoneID int64) func(ctx context.Context) (keys []dns.S
 }
 
 // recordKeyLookup records what a Key Lookup found, unless its Zone is no
-// longer tracked, and looks the keys up again when asked to meanwhile.
+// longer tracked, sizes the Zone's Edit Zone dialog for it, and looks the
+// keys up again when asked to meanwhile.
 func (m *Model) recordKeyLookup(msg keysLookedUpMsg) tea.Cmd {
 	c, ok := m.keyLookups[msg.zoneID]
 	if !ok {
@@ -128,6 +129,12 @@ func (m *Model) recordKeyLookup(msg keysLookedUpMsg) tea.Cmd {
 		*c = keyLookup{state: lookupFailed, zone: c.zone, servers: c.servers, err: msg.err}
 	} else {
 		*c = keyLookup{state: lookupDone, zone: c.zone, servers: c.servers, keys: msg.keys}
+	}
+
+	// The Edit Zone dialog of the Zone keeps one size over its rows,
+	// whose hints now show the keys read.
+	if f := m.zoneEdit; f != nil && f.zone.ID == msg.zoneID {
+		f.size = f.size.max(m.measureZoneEdit())
 	}
 
 	if z, ok := m.zoneByID[msg.zoneID]; ok && again {
@@ -174,16 +181,6 @@ func (m *Model) signingKeysChanged(before dns.Zone) tea.Cmd {
 func (m *Model) signingKeysOf(z dns.Zone) []dns.SigningKey {
 	if c, ok := m.keyLookups[z.ID]; ok && c.state == lookupDone {
 		return c.keys
-	}
-
-	return nil
-}
-
-// signingKeysError is why this session's Key Lookup of a Zone failed,
-// naming the nameserver; nil when it did not fail.
-func (m *Model) signingKeysError(z dns.Zone) error {
-	if c, ok := m.keyLookups[z.ID]; ok && c.state == lookupFailed {
-		return c.err
 	}
 
 	return nil
@@ -363,61 +360,85 @@ func anyDSMatches(zone string, ds []string, keys []dns.SigningKey) bool {
 	return false
 }
 
-// openSigningKeys shows the open Zone's key-signing keys, or why its Key
-// Lookup failed, naming the nameserver; else it says there are none.
-func (m *Model) openSigningKeys() {
-	if m.open == nil {
-		return
+// keyDS is a key-signing key's SHA-256 DS, as the Edit Zone dialog shows
+// it; empty when it has none.
+func keyDS(k dns.SigningKey) string {
+	if len(k.DS) == 0 {
+		return ""
 	}
 
-	if len(m.signingKeysOf(*m.open)) == 0 && m.signingKeysError(*m.open) == nil {
-		m.notice = notice{text: "No DNSSEC keys read for " + m.open.Name + " this session."}
-
-		return
-	}
-
-	m.showSigningKeys = true
+	return k.DS[0]
 }
 
-// signingKeysView shows the open Zone's key-signing keys, each as its
-// SHA-256 DS and its DNSKEY, in full, on lines of their own to copy into
-// a registrar's panel: some registrars take a DS, others the key itself.
-// A failed Key Lookup shows why instead.
-func (m *Model) signingKeysView() string {
-	z := *m.open
+// keyDNSKEY is a key-signing key's DNSKEY, as the Edit Zone dialog shows
+// it.
+func keyDNSKEY(k dns.SigningKey) string { return k.DNSKEY }
 
-	// The values wrap only when the terminal cannot hold them.
+// zoneKeys are z's key-signing keys as the Edit Zone dialog's row shows
+// them, each as value gives it, or how far its Key Lookup got.
+func (m *Model) zoneKeys(z dns.Zone, value func(dns.SigningKey) string) []string {
+	c, ok := m.keyLookups[z.ID]
+	if !ok {
+		c = &keyLookup{}
+	}
+
+	return lookupRow(ok, c.state, keyValues(m.signingKeysOf(z), value))
+}
+
+// keyValues are keys, each as value gives it, leaving out the empty ones.
+func keyValues(keys []dns.SigningKey, value func(dns.SigningKey) string) []string {
+	var values []string
+
+	for _, k := range keys {
+		if v := value(k); v != "" {
+			values = append(values, v)
+		}
+	}
+
+	return values
+}
+
+// keysHint ends the hint of the Edit Zone dialog's key rows: why z's keys
+// are not shown, when they are not.
+func (m *Model) keysHint(z dns.Zone) string {
+	c, ok := m.keyLookups[z.ID]
+
+	switch {
+	case !ok:
+		return "; they are looked up only for a Zone that may be the Live Zone and whose nameservers are known."
+	case c.state == lookupFailed:
+		return "; could not read them from its nameservers: " + c.err.Error() + "."
+	case c.state == lookupDone && len(c.keys) == 0:
+		return "; it has none."
+	}
+
+	return "."
+}
+
+// keyLines are z's key-signing keys, each as value gives it, in full, on
+// lines of their own under the hint of the Edit Zone dialog's key rows,
+// to copy: some registrars take a DS, others the key itself. They wrap
+// only when the terminal cannot hold them, and line up on the left
+// however the dialog centers its hints.
+func (m *Model) keyLines(z dns.Zone, value func(dns.SigningKey) string) []string {
 	valueW := max(m.width-8, 20)
 
-	lines := []string{""}
+	values := keyValues(m.signingKeysOf(z), value)
+	lines := make([]string, 0, 2*len(values))
 
-	if err := m.signingKeysError(z); err != nil {
-		lines = append(lines, wrapNote(errorStyle, "Could not read the keys from the nameservers of "+z.Name+": "+err.Error()+".", noteWidth)...)
-	} else {
-		lines = append(lines, wrapNote(lipgloss.NewStyle(), "Publish one of these at the registrar of "+z.Name+": the DS, or the DNSKEY where the registrar takes key data.", noteWidth)...)
-	}
-
-	for _, k := range m.signingKeysOf(z) {
+	for _, v := range values {
 		lines = append(lines, "")
-
-		if len(k.DS) > 0 {
-			lines = append(lines, helpKeyStyle.Render("DS (SHA-256)"))
-			lines = append(lines, strings.Split(ansi.Hardwrap(k.DS[0], valueW, false), "\n")...)
-		}
-
-		lines = append(lines, helpKeyStyle.Render("DNSKEY"))
-		lines = append(lines, strings.Split(ansi.Hardwrap(k.DNSKEY, valueW, false), "\n")...)
+		lines = append(lines, strings.Split(ansi.Hardwrap(v, valueW, false), "\n")...)
 	}
-
-	lines = append(lines, "", hintStyle.Render(m.keys.keysFor(ActionClose)+" close"))
 
 	width := 0
-	for i, l := range lines {
-		lines[i] = " " + l
-		width = max(width, lipgloss.Width(lines[i])+1)
+	for _, l := range lines {
+		width = max(width, lipgloss.Width(l))
 	}
 
-	lines = append(lines, "")
+	for i, l := range lines {
+		lines[i] = l + strings.Repeat(" ", width-lipgloss.Width(l))
+	}
 
-	return box("DNSSEC keys for "+z.Name, lines, width+2, len(lines)+2, true)
+	return lines
 }

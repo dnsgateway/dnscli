@@ -89,8 +89,6 @@ func (m *Model) View() string {
 	switch {
 	case m.help:
 		view = overlay(view, m.helpView(), m.width, m.height)
-	case m.showSigningKeys:
-		view = overlay(view, m.signingKeysView(), m.width, m.height)
 	case m.unseal != nil:
 		view = overlay(view, m.unsealView(), m.width, m.height)
 	case m.addForm != nil:
@@ -154,7 +152,7 @@ func (m *Model) domainLines(w, h int) []string {
 	lines := m.searchLines(paneDomains, w)
 	h -= len(lines)
 
-	start, end := window(len(m.visible), m.cursor[paneDomains], h)
+	start, end := window(len(m.visible), m.cursor[paneDomains], h, &m.top[paneDomains])
 
 	for i := start; i < end; i++ {
 		// Stale Zones are dimmed. The markers show a pending Changeset,
@@ -282,7 +280,7 @@ func hostingWord(s dnsprovider.HostingState) string {
 }
 
 func (m *Model) accountLines(w, h int) []string {
-	start, end := window(len(m.accounts), m.cursor[paneAccounts], h)
+	start, end := window(len(m.accounts), m.cursor[paneAccounts], h, &m.top[paneAccounts])
 
 	var lines []string
 	for i := start; i < end; i++ {
@@ -329,7 +327,7 @@ func (m *Model) recordLines(w, h int) []string {
 	lines := append(m.searchLines(paneRecords, w), header)
 
 	records := m.visibleRecords
-	start, end := window(len(records), m.cursor[paneRecords], h-len(lines))
+	start, end := window(len(records), m.cursor[paneRecords], h-len(lines), &m.top[paneRecords])
 
 	for i := start; i < end; i++ {
 		r := records[i].rec
@@ -439,14 +437,28 @@ func (c columns) format(mark, name, typ, content, ttl string, extras ...string) 
 }
 
 // window returns the range [start, end) of n list items that fits in h rows
-// and keeps cursor visible, so only the visible rows are rendered.
-func window(n, cursor, h int) (start, end int) {
+// and keeps cursor visible, so only the visible rows are rendered. top is
+// the list's first row as last rendered, which it keeps: the list scrolls
+// only once the cursor moves past its top or bottom edge.
+func window(n, cursor, h int, top *int) (start, end int) {
 	h = max(h, 1) // a box always has at least one row
 	if n <= h {
+		*top = 0
+
 		return 0, n
 	}
 
-	start = min(max(cursor-h+1, 0), n-h)
+	start = *top
+
+	switch {
+	case cursor < start:
+		start = cursor
+	case cursor >= start+h:
+		start = cursor - h + 1
+	}
+
+	start = min(max(start, 0), n-h)
+	*top = start
 
 	return start, start + h
 }

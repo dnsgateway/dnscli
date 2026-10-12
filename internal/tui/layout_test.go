@@ -41,6 +41,28 @@ func TestPaneScrollsToKeepTheCursorVisible(t *testing.T) {
 	h.assertHides("example.com", "example.org")
 }
 
+func TestPaneScrollsUpOnlyPastItsFirstRowShown(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	h := newHarness(t, s)
+	h.send(tea.WindowSizeMsg{Width: 120, Height: 9}) // the Domains pane has room for two rows
+
+	h.press("j", "j")
+	h.assertShows("example.org", "two.tv")
+	h.assertHides("example.com")
+
+	// Up within the rows shown moves the cursor, not the list.
+	h.press("k")
+	h.assertShows("example.org", "two.tv")
+	h.assertHides("example.com")
+
+	// Up past the first row shown scrolls the list one row.
+	h.press("k")
+	h.assertShows("example.com", "example.org")
+	h.assertHides("two.tv")
+}
+
 func TestViewFitsSmallTerminals(t *testing.T) {
 	for _, size := range [][2]int{{80, 24}, {40, 8}, {20, 4}, {10, 3}, {1, 1}} {
 		w, ht := size[0], size[1]

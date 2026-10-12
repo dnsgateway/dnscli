@@ -49,8 +49,9 @@ type dsWriteWords struct {
 	verb, does, done, doing string
 	// todo says, in the Zone Status bar, that it is to be taken.
 	todo string
-	// shows is what ActionShowKeys shows meanwhile, when the Zone's keys
-	// are read; empty when it shows nothing of use.
+	// shows is what ActionDNSSECStep shows instead, in the Edit Zone
+	// dialog, while it may not be written and the Zone's keys are read;
+	// empty when it shows nothing of use.
 	shows string
 	// why says, in its confirmation, how it changes the Delegation.
 	why string
@@ -229,9 +230,7 @@ func (m *Model) writeDS(z dns.Zone, step dnssecStep) tea.Cmd {
 	}
 
 	if !m.dsWritable(z, kind, keys) {
-		m.writeDSByHand(z, kind, notice{})
-
-		return nil
+		return m.writeDSByHand(z, kind, notice{})
 	}
 
 	type candidate struct {
@@ -275,14 +274,12 @@ func (m *Model) writeDS(z dns.Zone, step dnssecStep) tea.Cmd {
 }
 
 // writeDSByHand says how to write z's DS of kind in the registrar's panel,
-// with n in the status bar: the keys to copy, or, to remove the DS, that
-// dnscli watches the parent zone for it to go.
-func (m *Model) writeDSByHand(z dns.Zone, kind dsWriteKind, n notice) {
+// saying n too. To publish or replace the DS, it opens the Edit Zone
+// dialog on the keys to copy, n its note; to remove the DS, it says in the
+// status bar that dnscli watches the parent zone for it to go.
+func (m *Model) writeDSByHand(z dns.Zone, kind dsWriteKind, n notice) tea.Cmd {
 	if dsWrites[kind].sendsKeys {
-		m.notice = n
-		m.openSigningKeys()
-
-		return
+		return m.editZoneAt(z, zoneEditOpening{keys: true, note: n})
 	}
 
 	switch {
@@ -294,6 +291,8 @@ func (m *Model) writeDSByHand(z dns.Zone, kind dsWriteKind, n notice) {
 	}
 
 	m.notice = n
+
+	return nil
 }
 
 // errNoRegistrar is an Account whose Provider is no Registrar Adapter.
@@ -325,7 +324,7 @@ func withRegistrar(ctx context.Context, s *store.Store, key *vault.Key, provider
 func (m *Model) dsWriteUpdate(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case registrationsFoundMsg:
-		m.registrationsFound(msg)
+		return m.registrationsFound(msg)
 	case dsWrittenMsg:
 		return m.dsWritten(msg)
 	}
@@ -338,9 +337,9 @@ func (m *Model) dsWriteUpdate(msg tea.Msg) tea.Cmd {
 // such as once the parent serves the DS published: it asks to confirm the
 // write at the one found, lets the user pick one when several were, or
 // says how to do it by hand when none was.
-func (m *Model) registrationsFound(msg registrationsFoundMsg) {
+func (m *Model) registrationsFound(msg registrationsFoundMsg) tea.Cmd {
 	if m.open == nil || m.open.ID != msg.zoneID || m.dialogOpen() || m.dnssecStepOf(*m.open) != msg.step {
-		return
+		return nil
 	}
 
 	z := *m.open
@@ -354,9 +353,7 @@ func (m *Model) registrationsFound(msg registrationsFoundMsg) {
 			n = notice{text: "Could not ask " + strings.Join(msg.failed, ", ") + ", and no other " + none, err: true}
 		}
 
-		m.writeDSByHand(z, msg.kind, n)
-
-		return
+		return m.writeDSByHand(z, msg.kind, n)
 	}
 
 	m.notice = notice{}
@@ -372,7 +369,7 @@ func (m *Model) registrationsFound(msg registrationsFoundMsg) {
 	m.dsWrite = d
 
 	if len(msg.found) == 1 {
-		return
+		return nil
 	}
 
 	// Several Accounts register it: the user picks one, each time.
@@ -391,6 +388,8 @@ func (m *Model) registrationsFound(msg registrationsFoundMsg) {
 		options: labels,
 		pick:    func(i int) { d.registration = msg.found[i] },
 	}
+
+	return nil
 }
 
 // dsWriteKey handles a key while writing the DS is asked about: Enter
@@ -609,9 +608,10 @@ func (m *Model) dsSentFor(z dns.Zone, step dnssecStep) (dsWriteKind, bool) {
 }
 
 // dsStepText says, for the Zone Status bar, that z's step writing its DS
-// at the registrar is to be taken, and how: by ActionDNSSECStep while it
-// may be written, else by hand, with the keys ActionShowKeys shows; or that
-// it was written this session, and is waited for at the parent zone.
+// at the registrar is to be taken, and how: by ActionDNSSECStep, which
+// writes it while it may be written, else shows the keys to copy by hand
+// in the Edit Zone dialog; or that it was written this session, and is
+// waited for at the parent zone.
 func (m *Model) dsStepText(z dns.Zone, step dnssecStep) string {
 	if sent, ok := m.dsSentFor(z, step); ok {
 		return "DNSSEC: DS " + dsWrites[sent].done + ", waiting for the parent zone"
@@ -622,18 +622,12 @@ func (m *Model) dsStepText(z dns.Zone, step dnssecStep) string {
 	w := dsWrites[kind]
 	k := m.keys.keysFor
 
-	var how []string
-	if m.dsWritable(z, kind, keys) {
-		how = append(how, k(ActionDNSSECStep)+" "+w.does+" it")
+	switch {
+	case m.dsWritable(z, kind, keys):
+		return w.todo + " (" + k(ActionDNSSECStep) + " " + w.does + " it)"
+	case w.shows != "" && len(keys) > 0:
+		return w.todo + " (" + k(ActionDNSSECStep) + " shows " + w.shows + ")"
 	}
 
-	if w.shows != "" && len(keys) > 0 {
-		how = append(how, k(ActionShowKeys)+" shows "+w.shows)
-	}
-
-	if len(how) == 0 {
-		return w.todo
-	}
-
-	return w.todo + " (" + strings.Join(how, ", ") + ")"
+	return w.todo
 }

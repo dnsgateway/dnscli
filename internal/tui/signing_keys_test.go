@@ -4,8 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/dnsgateway/dnsprovider"
 
@@ -100,7 +103,7 @@ func TestAParentDSThatMatchesNoKeySaysItDoesNotMatch(t *testing.T) {
 	h := newSignedZoneHarness(t, r)
 
 	h.assertStatusBarShows("DNSSEC: DS does not match")
-	h.assertBadges(map[string]string{"DNSSEC: DS does not match (S replaces it, s shows the keys)": red})
+	h.assertBadges(map[string]string{"DNSSEC: DS does not match (S replaces it)": red})
 	h.assertHides("DNSSEC: On")
 }
 
@@ -110,6 +113,14 @@ var ecKey = dns.SigningKey{
 	DNSKEY: "257 3 13 mdsswUyr3DPW132mOi8V9xESWE8jTo0dxCjjnopKl+GqJxpVXckHAeF+KkxLbxILfDLUT0rAK9iUzy1L53eKGQ==",
 	KeyTag: 2371,
 	DS:     []string{"2371 13 2 1F987CC6583E92DF0890718C42"},
+}
+
+// showKeys opens the Edit Zone dialog of the open Zone, highlighted in the
+// Domains pane, on its DS row, whose hint shows the keys to copy; Down
+// moves to the DNSKEY row.
+func (h *harness) showKeys() {
+	h.t.Helper()
+	h.press("left", "e", "up", "up", "up", "up")
 }
 
 func TestWithoutADSAtTheParentTheKeysAreShownToCopy(t *testing.T) {
@@ -122,8 +133,12 @@ func TestWithoutADSAtTheParentTheKeysAreShownToCopy(t *testing.T) {
 	h.assertStatusBarShows("DNSSEC: publish the DS")
 	h.assertHides(ecKey.DNSKEY)
 
-	h.press("s")
-	h.assertShows("DNSKEY", ecKey.DNSKEY, "DS", ecKey.DS[0])
+	h.showKeys()
+	h.assertShows("Edit Zone example.net", ecKey.DS[0])
+	h.assertHides(ecKey.DNSKEY)
+
+	h.press("down")
+	h.assertShows(ecKey.DNSKEY)
 
 	h.press("esc")
 	h.assertHides(ecKey.DNSKEY)
@@ -139,9 +154,8 @@ func TestKeysTheNameserversDoNotAgreeOnAreWaitedFor(t *testing.T) {
 
 	// The keys say why they are waited for, naming the nameserver.
 	h.assertHides("dee.ns.cloudflare.com")
-	h.press("s")
-	h.assertHides("DNSKEY")
-	h.assertShows("Could not read the keys", "dee.ns.cloudflare.com:", "different key-signing keys")
+	h.showKeys()
+	h.assertShows("DS           lookup failed", "dee.ns.cloudflare.com:", "serve different", "key-signing keys.")
 }
 
 func TestASignedZoneWhoseNameserversServeNoKeysYetIsWaitedFor(t *testing.T) {
@@ -164,8 +178,8 @@ func TestAFailedKeyLookupShowsUnknown(t *testing.T) {
 
 	// The keys say why they are unknown, naming the nameserver.
 	h.assertHides("cruz.ns.cloudflare.com")
-	h.press("s")
-	h.assertShows("Could not read the keys", "cruz.ns.cloudflare.com: i/o timeout")
+	h.showKeys()
+	h.assertShows("DS           lookup failed", "cruz.ns.cloudflare.com: i/o timeout")
 }
 
 func TestAFailedDSCheckWithKeysShowsUnknown(t *testing.T) {
@@ -309,7 +323,8 @@ func TestKeysAProviderFailsToReturnAreAskedOfTheNameservers(t *testing.T) {
 				t.Fatalf("DNSKEY queries = %+v, want %s asked at its nameservers %v", q, rfcZone, cruzDee)
 			}
 
-			h.press("s")
+			h.showKeys()
+			h.press("down")
 			h.assertShows(ecKey.DNSKEY)
 			h.assertHides(rfcDNSKEY)
 		})
@@ -350,6 +365,67 @@ func TestTheKeysAProviderReturnsNoneOfAreAskedOfTheNameservers(t *testing.T) {
 		t.Fatalf("DNSKEY queries = %+v, want %s asked at its nameservers %v", q, rfcZone, cruzDee)
 	}
 
-	h.press("s")
+	h.showKeys()
+	h.press("down")
 	h.assertShows(rfcDNSKEY)
+}
+
+func TestEditZoneLooksUpTheKeysOfAZoneNotOpen(t *testing.T) {
+	r := &fakeResolver{ns: map[string][]string{rfcZone: cruzDee}}
+	r.setKeys(rfcZone, ecKey)
+	r.setDS(rfcZone)
+
+	s, _ := openStore(t)
+	h := newHarnessWith(t, s, tui.Deps{Providers: newKeysFake(dnsprovider.On).registry(), UnsealMethod: fastPassphrase(), Resolver: r})
+	h.fillAddAccount("work", token)
+	h.typeText(passphrase)
+	h.press("tab")
+	h.typeText(passphrase)
+	h.press("enter")
+	h.assertShows(rfcZone, "unsealed")
+
+	h.showKeys()
+	h.assertShows("Edit Zone example.net", "› DS           "+ecKey.DS[0])
+}
+
+// dialogWidth is the width of the open dialog, by its title row.
+func (h *harness) dialogWidth(title string) int {
+	h.t.Helper()
+
+	for l := range strings.SplitSeq(h.rawView(), "\n") {
+		if i := strings.Index(l, "┏"); i >= 0 && strings.Contains(l, title) {
+			return lipgloss.Width(l[i : strings.LastIndex(l, "┓")+len("┓")])
+		}
+	}
+
+	h.t.Fatalf("no dialog %q:\n%s", title, h.view())
+
+	return 0
+}
+
+func TestEditZoneKeepsOneSizeOnceItsKeysAreRead(t *testing.T) {
+	r := &fakeResolver{ns: map[string][]string{rfcZone: cruzDee}}
+	r.setKeys(rfcZone, rfcKey)
+	r.setDS(rfcZone)
+
+	s, _ := openStore(t)
+	h := newHarnessWith(t, s, tui.Deps{Providers: newKeysFake(dnsprovider.On).registry(), UnsealMethod: fastPassphrase(), Resolver: r})
+	h.fillAddAccount("work", token)
+	h.typeText(passphrase)
+	h.press("tab")
+	h.typeText(passphrase)
+	h.press("enter")
+	h.assertShows(rfcZone, "unsealed")
+
+	h.showKeys()
+	h.press("down")
+	h.assertShows(rfcDNSKEY)
+	onKeys := h.dialogWidth("Edit Zone example.net")
+
+	h.press("down", "down")
+	h.assertShows("› Account")
+
+	if w := h.dialogWidth("Edit Zone example.net"); w != onKeys {
+		t.Fatalf("dialog is %d wide on the Account row, %d on the DNSKEY row", w, onKeys)
+	}
 }

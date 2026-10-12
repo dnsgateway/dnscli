@@ -177,7 +177,8 @@ func changesUpdate(cs []zoneSettingChange) dnsprovider.ZoneUpdate {
 }
 
 // The rows of the Edit Zone dialog: the Account, a field per Zone setting
-// from zoneFieldSettings on, then the Delegation rows and the Save button.
+// from zoneFieldSettings on, then the Delegation rows, the key rows and
+// the Save button.
 // Only the settings change; the other rows are shown with their hints.
 const (
 	zoneFieldAccount = iota
@@ -185,10 +186,11 @@ const (
 )
 
 // zoneEditForm is the Edit Zone dialog. It shows the highlighted Zone's
-// settings and its Delegation, read-only (ADR-0004), in any session; its
-// settings change, a Zone write, once the session is Unsealed and the
-// Account's Provider is opened and can change them. Saving asks to
-// confirm the changes, then makes them in one update.
+// settings, its Delegation, read-only (ADR-0004), and its key-signing keys
+// and their DS, read-only, to copy into a registrar's panel, in any
+// session; its settings change, a Zone write, once the session is
+// Unsealed and the Account's Provider is opened and can change them.
+// Saving asks to confirm the changes, then makes them in one update.
 type zoneEditForm struct {
 	zone    dns.Zone
 	account dns.Account
@@ -216,6 +218,9 @@ type zoneEditForm struct {
 	confirming bool
 	busy       bool // the changes are being made
 	err        string
+	// note says why the dialog opened, such as that no Account in dnscli
+	// publishes the DS; empty when there is nothing to say.
+	note notice
 	// size is the dialog's size, which it keeps as the user moves
 	// through its fields.
 	size dialogSize
@@ -224,7 +229,9 @@ type zoneEditForm struct {
 func (f *zoneEditForm) delegationField() int  { return zoneFieldSettings + len(f.settings) }
 func (f *zoneEditForm) nameserversField() int { return f.delegationField() + 1 }
 func (f *zoneEditForm) liveField() int        { return f.delegationField() + 2 }
-func (f *zoneEditForm) saveField() int        { return f.delegationField() + 3 }
+func (f *zoneEditForm) dsField() int          { return f.delegationField() + 3 }
+func (f *zoneEditForm) dnskeyField() int      { return f.delegationField() + 4 }
+func (f *zoneEditForm) saveField() int        { return f.delegationField() + 5 }
 
 // setting is the index in settings of the setting the focused field
 // changes; ok is false on any other row.
@@ -330,6 +337,32 @@ type zoneEditOpenedMsg struct {
 	// or "off", the DNSSEC step taken from the Zone page; keepDNSSEC
 	// opens it as it is.
 	turnDNSSEC string
+	// opening is the row it opens on, and its note.
+	opening zoneEditOpening
+}
+
+// zoneEditOpening is where the Edit Zone dialog opens, and what it says
+// there. The zero value opens it on the first setting, saying nothing.
+type zoneEditOpening struct {
+	// keys opens it on the DS row, for the keys to be copied.
+	keys bool
+	// field opens it on this row instead, such as the setting Enter
+	// Unsealed the session on; zero is the first setting.
+	field int
+	// note is the dialog's note.
+	note notice
+}
+
+// open moves the dialog to the row o opens it on, with o's note.
+func (f *zoneEditForm) open(o zoneEditOpening) {
+	switch {
+	case o.keys:
+		f.field = f.dsField()
+	case o.field > 0:
+		f.field = o.field
+	}
+
+	f.note = o.note
 }
 
 // keepDNSSEC opens the Edit Zone dialog without asking to turn DNSSEC on
@@ -364,16 +397,24 @@ func (m *Model) editZone() tea.Cmd {
 		return nil
 	}
 
-	z := m.visible[m.cursor[paneDomains]]
+	return m.editZoneAt(m.visible[m.cursor[paneDomains]], zoneEditOpening{})
+}
 
+// editZoneAt opens the Edit Zone dialog for z, as editZone does, where o
+// says.
+func (m *Model) editZoneAt(z dns.Zone, o zoneEditOpening) tea.Cmd {
 	a, ok := m.account(z.AccountID)
 	if !ok {
 		return nil
 	}
 
 	// Whether the parent serves a DS decides the DNSSEC warning; it is
-	// public, so it is checked whatever the session.
-	checkDS := m.checkParentDS(z)
+	// public, so it is checked whatever the session. So are the keys the
+	// dialog shows, unless this session looked them up already.
+	lookups := m.checkParentDS(z)
+	if _, ok := m.keyLookups[z.ID]; !ok {
+		lookups = tea.Batch(lookups, m.lookUpSigningKeys(z))
+	}
 
 	// Whether the Provider can is known only once it is opened, which
 	// needs secrets; a Provider type without Zone settings shows them
@@ -384,10 +425,12 @@ func (m *Model) editZone() tea.Cmd {
 	case m.key == nil:
 		m.openZoneEdit(z, a, nil, "The session is sealed: Enter on a setting Unseals it, to change the settings.", true)
 	default:
-		return tea.Batch(checkDS, m.editZoneOf(z.ID, keepDNSSEC))
+		return tea.Batch(lookups, m.editZoneOf(z.ID, keepDNSSEC, o))
 	}
 
-	return checkDS
+	m.zoneEdit.open(o)
+
+	return lookups
 }
 
 // cannotTurnDNSSEC says an Account's Provider cannot turn DNSSEC "on" or
@@ -415,8 +458,8 @@ func cannotChangeZoneSettings(a dns.Account) string {
 
 // editZoneOf opens the Provider of a Zone's Account, as it is now, for
 // the Edit Zone dialog: asking to confirm turning DNSSEC on or off when
-// turnDNSSEC says so.
-func (m *Model) editZoneOf(zoneID int64, turnDNSSEC string) tea.Cmd {
+// turnDNSSEC says so, else where o says.
+func (m *Model) editZoneOf(zoneID int64, turnDNSSEC string, o zoneEditOpening) tea.Cmd {
 	z, ok := m.zoneByID[zoneID]
 	if !ok {
 		return nil
@@ -432,14 +475,14 @@ func (m *Model) editZoneOf(zoneID int64, turnDNSSEC string) tea.Cmd {
 	return func() tea.Msg {
 		p, _, err := accountProvider(ctx, s, key, providers, a)
 
-		return zoneEditOpenedMsg{zone: z, account: a, p: p, err: err, turnDNSSEC: turnDNSSEC}
+		return zoneEditOpenedMsg{zone: z, account: a, p: p, err: err, turnDNSSEC: turnDNSSEC, opening: o}
 	}
 }
 
 // tenantUse opens the Edit Zone dialog again, for the Zone as it is by
 // then.
 func (msg zoneEditOpenedMsg) tenantUse(m *Model) (int64, func() tea.Cmd, error) {
-	return msg.account.ID, func() tea.Cmd { return m.editZoneOf(msg.zone.ID, msg.turnDNSSEC) }, msg.err
+	return msg.account.ID, func() tea.Cmd { return m.editZoneOf(msg.zone.ID, msg.turnDNSSEC, msg.opening) }, msg.err
 }
 
 // openFailedText says the Provider of msg's Account could not be opened, and
@@ -485,6 +528,10 @@ func (m *Model) zoneEditOpened(msg zoneEditOpenedMsg) {
 		m.openZoneEdit(z, msg.account, nil, cannotChangeZoneSettings(msg.account), false)
 	default:
 		m.openZoneEdit(z, msg.account, up, "", false)
+	}
+
+	if msg.turnDNSSEC == keepDNSSEC && m.zoneEdit != nil {
+		m.zoneEdit.open(msg.opening)
 	}
 }
 
@@ -592,12 +639,13 @@ func (m *Model) zoneEditKey(msg tea.KeyMsg) tea.Cmd {
 				pick:    func(j int) { f.pick(i, j) },
 			}
 		case onSetting && f.unseal:
-			// The dialog opens again, its settings to change, once the
-			// session is Unsealed and the Provider opened.
+			// The dialog opens again, its settings to change, on the
+			// same setting and saying the same, once the session is
+			// Unsealed and the Provider opened.
 			m.zoneEdit = nil
-			id := f.zone.ID
+			id, o := f.zone.ID, zoneEditOpening{field: f.field, note: f.note}
 
-			return m.withSecrets(func() tea.Cmd { return m.editZoneOf(id, keepDNSSEC) })
+			return m.withSecrets(func() tea.Cmd { return m.editZoneOf(id, keepDNSSEC, o) })
 		default:
 			f.field++
 		}
@@ -759,17 +807,22 @@ func settingWord(s dnsprovider.Setting) string {
 // it: the delegated nameservers, or how far the lookup got.
 func (m *Model) zoneDelegation(z dns.Zone) []string {
 	d, ok := m.delegations[nameKey(z.Name)]
-
-	switch {
-	case m.deps.Resolver == nil || !ok:
-		return []string{"not looked up"}
-	case d.state == lookupDone:
-		return d.ns
-	case d.state == lookupFailed:
-		return []string{"lookup failed"}
+	if !ok {
+		d = &delegation{}
 	}
 
-	return []string{"resolving…"}
+	return lookupRow(ok && m.deps.Resolver != nil, d.state, d.ns)
+}
+
+// widen stands widest in for each of values: as many rows as they take,
+// each as wide as the dialog shows a value at most.
+func widen(values []string, widest string) []string {
+	out := make([]string, len(values))
+	for i := range out {
+		out[i] = widest
+	}
+
+	return out
 }
 
 // listField is a fixed dialog row showing values one per row.
@@ -811,6 +864,8 @@ func (m *Model) zoneEditFields(f *zoneEditForm, value func(i int) string) []dial
 		listField("Delegation", m.zoneDelegation(f.zone)),
 		listField("Nameservers", ns),
 		dialogField{label: "Live Zone", value: m.liveWord(f.zone), fixed: true},
+		listField("DS", m.zoneKeys(f.zone, keyDS)),
+		listField("DNSKEY", m.zoneKeys(f.zone, keyDNSKEY)),
 	)
 }
 
@@ -845,6 +900,11 @@ func (m *Model) zoneEditHints(f *zoneEditForm, field int, warn string) []string 
 		}
 	case field == f.liveField():
 		hint = "A Zone is the Live Zone when its nameservers are the delegated ones: its Records are the ones that answer."
+	case field == f.dsField():
+		hint = "The DS (SHA-256) of each of the Zone's key-signing keys, to copy into the registrar's panel of " + z.Name + m.keysHint(z)
+	case field == f.dnskeyField():
+		hint = "The Zone's key-signing keys, to copy into the registrar's panel of " + z.Name +
+			" where it takes key data rather than a DS" + m.keysHint(z)
 	case f.p == nil:
 		hint = "Closes the dialog."
 	default:
@@ -852,6 +912,13 @@ func (m *Model) zoneEditHints(f *zoneEditForm, field int, warn string) []string 
 	}
 
 	hints := wrapNote(hintStyle, hint, noteWidth)
+
+	switch field {
+	case f.dsField():
+		hints = append(hints, m.keyLines(z, keyDS)...)
+	case f.dnskeyField():
+		hints = append(hints, m.keyLines(z, keyDNSKEY)...)
+	}
 
 	if f.readOnly != "" && (onSetting || field == f.saveField()) {
 		hints = append(hints, "")
@@ -927,8 +994,17 @@ func (m *Model) zoneEditView() string {
 		footer = append(m.zoneEditHints(f, f.field, f.warning(m.dsPresenceOf(z.Name))), "", f.buttonRow(f.field == f.saveField()))
 	}
 
+	if f.note.text != "" {
+		style := lipgloss.NewStyle()
+		if f.note.err {
+			style = errorStyle
+		}
+
+		notes = wrapNote(style, f.note.text, noteWidth)
+	}
+
 	if f.err != "" {
-		notes = wrapNote(errorStyle, f.err, noteWidth)
+		notes = append(notes, wrapNote(errorStyle, f.err, noteWidth)...)
 	}
 
 	return sizedDialogView("Edit Zone "+z.Name, m.zoneEditFields(f, f.settingValue), f.field, false, notes, footer, f.size)
@@ -956,9 +1032,10 @@ func applyRow() string {
 
 // measureZoneEdit works out the largest size the dialog takes, over every
 // focused row and every value a setting may be changed to, with the other
-// rows as wide as the dialog shows them, two nameservers each. The dialog
-// then keeps that size; only more nameservers, an error or the
-// confirmation grow it.
+// rows as wide as the dialog shows them, two nameservers each, and the
+// keys as read, their full values under the key rows. The dialog then
+// keeps that size; only more nameservers, keys read once it opened, an
+// error or the confirmation grow it.
 func (m *Model) measureZoneEdit() dialogSize {
 	f := m.zoneEdit
 	widest := strings.Repeat("W", maxValueWidth)
@@ -966,6 +1043,8 @@ func (m *Model) measureZoneEdit() dialogSize {
 	fields := m.zoneEditFields(f, func(int) string { return "unknown → off" })
 	fields[f.delegationField()] = listField("Delegation", []string{widest, widest})
 	fields[f.nameserversField()] = listField("Nameservers", []string{widest, widest})
+	fields[f.dsField()] = listField("DS", widen(m.zoneKeys(f.zone, keyDS), widest))
+	fields[f.dnskeyField()] = listField("DNSKEY", widen(m.zoneKeys(f.zone, keyDNSKEY), widest))
 
 	var size dialogSize
 

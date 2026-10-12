@@ -80,9 +80,6 @@ const (
 	// built-in Template's Records into the open Zone's pending Changeset.
 	// Like editing, it obeys the write gate.
 	ActionApplyTemplate
-	// ActionShowKeys shows the open Zone's key-signing keys and their DS,
-	// as its nameservers serve them, to copy into a registrar's panel.
-	ActionShowKeys
 	// ActionDNSSECStep takes the open Zone's next DNSSEC step, the one
 	// the Zone Status bar offers, such as turning signing on, a Zone
 	// write, or publishing, replacing or removing the DS at the registrar,
@@ -132,7 +129,6 @@ func DefaultShortcutProfile() ShortcutProfile {
 			{Action: ActionDiscardChanges, Keys: []string{"D"}},
 			{Action: ActionApplyOver, Keys: []string{"O"}},
 			{Action: ActionRelistZones, Keys: []string{"L"}},
-			{Action: ActionShowKeys, Keys: []string{"s"}, Help: "show the open Zone's DNSSEC keys and DS to copy"},
 			{Action: ActionDNSSECStep, Keys: []string{"S"}, Help: "take the open Zone's next DNSSEC step, such as turning it on, or publishing, replacing or removing its DS"},
 			{Action: ActionEnrollKeychain, Keys: []string{"K"}, Help: "enroll the Keychain (Touch ID)"},
 			{Action: ActionHelp, Keys: []string{"?"}, Help: "toggle help"},
@@ -155,7 +151,7 @@ var paneHelp = map[pane][]paneBinding{
 	paneDomains: {
 		{ActionShow, "show the Zone's Records"},
 		{ActionInsert, "Onboard a zone name in an Account (starts hosting, never registers)"},
-		{ActionEdit, "edit the Zone: its DNSSEC, HSTS or minimum TLS version, and its Delegation, read-only"},
+		{ActionEdit, "edit the Zone: its DNSSEC, HSTS or minimum TLS version, and its Delegation and DNSSEC keys, read-only"},
 		{ActionDelete, "Offboard the Zone, not the Live Zone (stops hosting, never touches the registration)"},
 		{ActionRefresh, "re-list the Zones of the Account shown, or of every Account"},
 	},
