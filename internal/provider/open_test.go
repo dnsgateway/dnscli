@@ -53,7 +53,7 @@ func TestOldSingleTokensBuildWorkingProviders(t *testing.T) {
 		typ, token, path, want string
 	}{
 		{"cloudflare", "cf-token", "/client/v4/", "Bearer cf-token"},
-		{"godaddy", "gd-key:gd-secret", "", "sso-key gd-key:gd-secret"},
+		{"godaddy", "gd-token", "", "Bearer gd-token"},
 		{"namecheap", "apiuser:apikey:192.0.2.10", "", "apiuser apikey 192.0.2.10"},
 	} {
 		t.Run(tc.typ, func(t *testing.T) {
@@ -90,8 +90,6 @@ func TestOldSingleTokensBuildWorkingProviders(t *testing.T) {
 
 func TestMalformedOldTokensAreRefusedWithTheirShape(t *testing.T) {
 	for _, tc := range []struct{ typ, token, want string }{
-		{"godaddy", "only-a-key", "KEY:SECRET"},
-		{"godaddy", ":secret", "KEY:SECRET"},
 		{"namecheap", "user:key", "APIUSER:APIKEY:CLIENTIP"},
 		{"namecheap", "user::192.0.2.10", "APIUSER:APIKEY:CLIENTIP"},
 		{"namecheap", "user:key:2001:db8::1", "APIUSER:APIKEY:CLIENTIP"},

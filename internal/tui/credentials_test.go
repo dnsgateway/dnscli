@@ -38,12 +38,12 @@ func TestAddAccountShowsOneInputPerFieldOfTheChosenProvider(t *testing.T) {
 	h.assertHides("Account ID", "API key")
 
 	h.pressRightTo("godaddy")
-	h.assertShows("‹ godaddy ›", "API key", "API secret")
-	h.assertHides("API token")
+	h.assertShows("‹ godaddy ›", "Personal access token")
+	h.assertHides("API token", "API key")
 
 	h.pressRightTo("namecheap")
 	h.assertShows("‹ namecheap ›", "API user", "API key", "Whitelisted client IPv4")
-	h.assertHides("API secret")
+	h.assertHides("Personal access token")
 
 	// Secret Fields are masked; the others show as typed.
 	h.press("down", "down")
@@ -155,7 +155,7 @@ var credentialCases = []struct {
 	old    string
 }{
 	{"cloudflare", []string{"cf-token"}, map[string]string{"token": "cf-token"}, "cf-token"},
-	{"godaddy", []string{"gd-key", "gd-secret"}, map[string]string{"key": "gd-key", "secret": "gd-secret"}, "gd-key:gd-secret"},
+	{"godaddy", []string{"gd-token"}, map[string]string{"token": "gd-token"}, "gd-token"},
 	{
 		"namecheap",
 		[]string{"apiuser", "apikey", "192.0.2.10"},
@@ -234,7 +234,7 @@ func TestCredentialsTheProviderRefusesAreShownAndNothingIsSaved(t *testing.T) {
 	f.Fail(providertest.OpAccount, dnsprovider.ErrUnauthorized)
 	h := newFieldsHarness(t, s, f, &fieldBuilds{})
 
-	h.fillAccountFields("godaddy", "home", "gd-key", "wrong-secret")
+	h.fillAccountFields("godaddy", "home", "wrong-token")
 	h.unsealWith(passphrase)
 
 	h.assertShows("Add Account", "The Provider did not accept the credentials", "authorized")
@@ -250,8 +250,9 @@ func TestCredentialsTheProviderRefusesAreShownAndNothingIsSaved(t *testing.T) {
 
 	// Corrected, the same dialog saves.
 	f.Fail(providertest.OpAccount, nil)
-	h.press("up", "backspace", "backspace", "backspace", "backspace", "backspace", "backspace", "backspace", "backspace", "backspace", "backspace", "backspace", "backspace")
-	h.typeText("gd-secret")
+	h.press("up")
+	h.clearText(len("wrong-token"))
+	h.typeText("gd-token")
 	h.press("enter", "enter")
 
 	h.assertShows("godaddy.home")
@@ -392,7 +393,7 @@ func TestEditingShowsTheStoredFieldsThatAreNotSecret(t *testing.T) {
 
 func TestAnAccountWithUnreadableCredentialsCanBeRenamedOrRepaired(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
-	addOldAccount(t, s, "godaddy", "old", "only-a-key")
+	addOldAccount(t, s, "namecheap", "old", "user:key")
 
 	f := newFake()
 	fb := &fieldBuilds{}
@@ -400,31 +401,33 @@ func TestAnAccountWithUnreadableCredentialsCanBeRenamedOrRepaired(t *testing.T) 
 
 	h.press("shift+tab", "j", "e")
 	h.unsealWith(passphrase)
-	h.assertShows("Edit Account godaddy.old", "cannot read the stored credentials", "KEY:SECRET")
+	h.assertShows("Edit Account namecheap.old", "cannot read the stored credentials", "APIUSER:APIKEY:CLIENTIP")
 
 	// A rename reseals the credentials as they are.
 	h.typeText("2")
-	h.press("down", "down", "down", "enter")
-	h.assertShows("Saved godaddy.old2.")
+	h.press("down", "down", "down", "down", "enter")
+	h.assertShows("Saved namecheap.old2.")
 
-	if got := storedPlaintext(t, s, accountLabeled(t, s, "godaddy.old2")); got != "only-a-key" {
+	if got := storedPlaintext(t, s, accountLabeled(t, s, "namecheap.old2")); got != "user:key" {
 		t.Errorf("renaming resealed the credentials as %q, want them as they were", got)
 	}
 
 	// Typing one field cannot fill the others from them.
 	h.press("e")
 	h.press("down")
-	h.typeText("gd-key")
-	h.press("down", "down", "enter")
-	h.assertShows("Enter the API secret.")
+	h.typeText("apiuser")
+	h.press("down", "down", "down", "enter")
+	h.assertShows("Enter the API key.")
 
 	// Typed anew in full, they replace them.
-	h.typeText("gd-secret")
+	h.typeText("apikey")
+	h.press("down")
+	h.typeText("192.0.2.10")
 	h.press("down", "enter")
-	h.assertShows("Saved godaddy.old2.")
+	h.assertShows("Saved namecheap.old2.")
 
-	want := map[string]string{"key": "gd-key", "secret": "gd-secret"}
-	if got := storedFields(t, s, accountLabeled(t, s, "godaddy.old2")); !maps.Equal(got, want) {
+	want := map[string]string{"user": "apiuser", "key": "apikey", "client_ip": "192.0.2.10"}
+	if got := storedFields(t, s, accountLabeled(t, s, "namecheap.old2")); !maps.Equal(got, want) {
 		t.Errorf("sealed fields = %v, want %v", got, want)
 	}
 
@@ -454,7 +457,7 @@ func TestAnAccountOfAProviderTypeNotInThisBuildCanBeRenamed(t *testing.T) {
 
 func TestAnAccountWithoutCredentialsNeedsEveryField(t *testing.T) {
 	s, path := enrollFirstAccount(t)
-	addOldAccount(t, s, "godaddy", "home", "gd-key:gd-secret")
+	addOldAccount(t, s, "namecheap", "home", "apiuser:apikey:192.0.2.10")
 	execSQL(t, path, `UPDATE accounts SET secret = NULL WHERE name = 'home'`)
 
 	f := newFake()
@@ -464,9 +467,9 @@ func TestAnAccountWithoutCredentialsNeedsEveryField(t *testing.T) {
 	h.unsealWith(passphrase)
 
 	h.press("down")
-	h.typeText("gd-key")
-	h.press("down", "down", "enter")
-	h.assertShows("Enter the API secret.")
+	h.typeText("apiuser")
+	h.press("down", "down", "down", "enter")
+	h.assertShows("Enter the API key.")
 	h.assertHides("did not accept")
 
 	if n := f.count(providertest.OpAccount); n != 0 {

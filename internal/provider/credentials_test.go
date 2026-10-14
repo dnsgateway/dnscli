@@ -29,7 +29,7 @@ func TestCredentialsReadAnOldTokenIntoTheProvidersFields(t *testing.T) {
 		want       map[string]string
 	}{
 		{"cloudflare", "cf-token", map[string]string{"token": "cf-token"}},
-		{"godaddy", "gd-key:gd:secret", map[string]string{"key": "gd-key", "secret": "gd:secret"}},
+		{"godaddy", "gd-token", map[string]string{"token": "gd-token"}},
 		{"namecheap", "apiuser:apikey:192.0.2.10", map[string]string{"user": "apiuser", "key": "apikey", "client_ip": "192.0.2.10"}},
 	} {
 		got, err := o.Credentials(tc.typ, []byte(tc.token))
@@ -44,7 +44,7 @@ func TestEncodedCredentialsAreJSONAndReadBack(t *testing.T) {
 
 	for typ, old := range map[string]string{
 		"cloudflare": "cf-token",
-		"godaddy":    "gd-key:gd-secret",
+		"godaddy":    "gd-token",
 		"namecheap":  "apiuser:apikey:192.0.2.10",
 	} {
 		fields, err := o.Credentials(typ, []byte(old))

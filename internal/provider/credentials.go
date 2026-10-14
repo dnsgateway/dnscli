@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/dnsgateway/dnsprovider"
-	"github.com/dnsgateway/dnsprovider/providers/godaddy"
 	"github.com/dnsgateway/dnsprovider/providers/namecheap"
 )
 
@@ -38,25 +37,15 @@ func EncodeCredentials(fields map[string]string) []byte {
 	return b
 }
 
-// Shapes of the old single-token credentials that hold several fields.
-var (
-	errGoDaddyShape   = errors.New("godaddy: the API token is the key and secret as KEY:SECRET")
-	errNamecheapShape = errors.New("namecheap: the API token is the API user, API key and whitelisted IPv4 client IP as APIUSER:APIKEY:CLIENTIP")
-)
+// errNamecheapShape is the shape of Namecheap's old single token, which
+// holds several fields.
+var errNamecheapShape = errors.New("namecheap: the API token is the API user, API key and whitelisted IPv4 client IP as APIUSER:APIKEY:CLIENTIP")
 
 // oldTokenFields reads an old single API token into the field map its
-// Provider is built from. GoDaddy's token is KEY:SECRET, Namecheap's
-// APIUSER:APIKEY:CLIENTIP; any other Provider's is its only secret field.
+// Provider is built from. Namecheap's token is APIUSER:APIKEY:CLIENTIP;
+// any other Provider's is its only secret field.
 func oldTokenFields(typ string, fs []dnsprovider.Field, token string) (map[string]string, error) {
-	switch typ {
-	case "godaddy":
-		key, secret, ok := strings.Cut(token, ":")
-		if !ok || key == "" || secret == "" {
-			return nil, errGoDaddyShape
-		}
-
-		return map[string]string{godaddy.FieldKey: key, godaddy.FieldSecret: secret}, nil
-	case "namecheap":
+	if typ == "namecheap" {
 		parts := strings.Split(token, ":")
 		if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
 			return nil, errNamecheapShape
