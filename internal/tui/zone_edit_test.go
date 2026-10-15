@@ -72,13 +72,13 @@ func editValidated(h *harness) {
 	h.press("left", "e")
 }
 
-func TestEnterOnAZoneOpensItsSettings(t *testing.T) {
+func TestEOnAZoneOpensItsSettings(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
 	status := dnsprovider.ZoneStatus{DNSSEC: dnsprovider.Off, HSTS: dnsprovider.On}
 	withZoneStatus(t, s, "work.example", status)
 
 	h := newAccountHarness(t, s, settingsFake(status, true))
-	h.press("enter")
+	h.press("e")
 
 	h.assertShows("Edit Zone work.example", "The session is sealed")
 }

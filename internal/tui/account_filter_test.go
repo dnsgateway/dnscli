@@ -25,6 +25,21 @@ func TestSelectingAnAccountShowsOnlyItsZones(t *testing.T) {
 	h.assertHides("example.com", "two.tv")
 }
 
+func TestEnterSelectsLikeSpaceInTheDomainsAndAccountsPanes(t *testing.T) {
+	s, _ := openStore(t)
+	seedCache(t, s)
+
+	h := newHarness(t, s)
+	h.press("shift+tab", "j", "enter")
+
+	h.assertShows("example.org")
+	h.assertHides("example.com", "two.tv", "Edit Account")
+
+	h.press("tab", "enter")
+	h.assertShows("No cached Records for example.org")
+	h.assertHides("Edit Zone")
+}
+
 func TestSpaceAfterFilteringOpensTheZoneShownUnderTheCursor(t *testing.T) {
 	s, _ := openStore(t)
 	seedCache(t, s)

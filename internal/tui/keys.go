@@ -27,6 +27,9 @@ const (
 	// the rows the pane shows, scrolling its list a page.
 	ActionPageUp
 	ActionPageDown
+	// ActionSelect selects the highlighted item: in the Domains and
+	// Accounts panes as ActionShow does, in the Records pane as ActionEdit
+	// does. In dialogs it moves on or confirms.
 	ActionSelect
 	ActionSearch
 	ActionHelp
@@ -175,15 +178,22 @@ var paneHelp = map[pane][]paneBinding{
 	},
 }
 
-// sameAs maps an Action to another that does the same in every pane, so
-// the help overlay lists both Actions' keys on the first one's line.
-var sameAs = map[Action]Action{ActionEdit: ActionSelect}
+// sameAs maps, per pane, an Action to another that does the same there, so
+// the help overlay lists both Actions' keys on the first one's line: Select
+// shows in the Domains and Accounts panes, and edits in the Records pane.
+var sameAs = map[pane]map[Action]Action{
+	paneDomains:  {ActionShow: ActionSelect},
+	paneAccounts: {ActionShow: ActionSelect},
+	paneRecords:  {ActionEdit: ActionSelect},
+}
 
 // paneAction reports whether Action a acts on some pane's items.
 func paneAction(a Action) bool {
 	for _, same := range sameAs {
-		if same == a {
-			return true
+		for _, s := range same {
+			if s == a {
+				return true
+			}
 		}
 	}
 

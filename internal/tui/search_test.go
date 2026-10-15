@@ -268,19 +268,15 @@ func TestAPrintableShowKeyIsTypedIntoTheDomainsSearch(t *testing.T) {
 	h.assertHides("No cached Records for example.org")
 }
 
-func TestEnterLeavesTheDomainsSearchKeepingItsFilter(t *testing.T) {
+func TestEnterLeavesTheDomainsSearchKeepingItsFilterAndOpensTheMatch(t *testing.T) {
 	s, _ := openStore(t)
 	seedCache(t, s)
 
 	h := newHarness(t, s)
 	h.press("/", "o", "r", "g", "enter")
 
-	h.assertShows("/org", "example.org")
+	h.assertShows("/org", "example.org", "No cached Records for example.org")
 	h.assertHides("Edit Zone", "example.com")
-
-	// Keys are actions again: Space opens the match.
-	h.press("space")
-	h.assertShows("No cached Records for example.org")
 }
 
 func TestPrintableNextPaneKeyStillLeavesTheSearch(t *testing.T) {

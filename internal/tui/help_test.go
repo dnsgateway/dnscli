@@ -40,11 +40,11 @@ func TestHelpOverlayListsTheFocusedPanesKeysBelowTheGlobalOnes(t *testing.T) {
 	h.press("esc", "shift+tab", "?")
 	h.assertShows("── Accounts ─", "show only the Account's Zones", "add an Account", "edit the Account", "remove the Account", "re-list")
 	h.assertHides("── Domains ─", "insert a new Record")
-	// Edit and Select edit alike: one line lists both keys.
-	h.assertShows("e/Enter")
+	// Show and Select show alike here: one line lists both keys.
+	h.assertShows("Space/Enter   show only")
 
-	if n := strings.Count(h.view(), "edit the Account"); n != 1 {
-		t.Fatalf("edit is listed %d times, want once:\n%s", n, h.view())
+	if n := strings.Count(h.view(), "show only the Account's Zones"); n != 1 {
+		t.Fatalf("show is listed %d times, want once:\n%s", n, h.view())
 	}
 
 	// The global keys show in every pane, above the rule.

@@ -634,19 +634,16 @@ func (m *Model) itemCount(p pane) int {
 	return 0
 }
 
-// selectItem opens the highlighted item of the focused pane in its edit
-// dialog, as ActionEdit does.
+// selectItem selects the highlighted item of the focused pane: in the
+// Domains and Accounts panes it shows what the item holds, as ActionShow
+// does, and in the Records pane it opens the Record form, as ActionEdit
+// does.
 func (m *Model) selectItem() tea.Cmd {
-	switch m.focus {
-	case paneDomains:
-		return m.editZone()
-	case paneAccounts:
-		return m.accountAction(ActionEdit)
-	case paneRecords:
+	if m.focus == paneRecords {
 		return m.recordAction(ActionEdit)
 	}
 
-	return nil
+	return m.showItem()
 }
 
 // showItem shows what the highlighted item of the focused pane holds: a

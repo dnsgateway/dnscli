@@ -30,11 +30,11 @@ func (h *harness) relistToken(f *fakeProvider) string {
 	return ""
 }
 
-func TestEnterEditsTheHighlightedAccountAndLeavesTheFilter(t *testing.T) {
+func TestEEditsTheHighlightedAccountAndLeavesTheFilter(t *testing.T) {
 	s, _ := enrollFirstAccount(t)
 	h := newAccountHarness(t, s, workZones())
 
-	h.press("shift+tab", "enter")
+	h.press("shift+tab", "e")
 	h.unsealWith(passphrase)
 
 	h.assertShows("Edit Account cloudflare.work")

@@ -26,7 +26,7 @@ func (m *Model) helpView() string {
 
 	for _, b := range m.paneBindings() {
 		keys := m.keys.keysFor(b.Action)
-		if same, ok := sameAs[b.Action]; ok {
+		if same, ok := sameAs[m.focus][b.Action]; ok {
 			keys = strings.Trim(keys+"/"+m.keys.keysFor(same), "/")
 		}
 
