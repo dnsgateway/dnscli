@@ -9,7 +9,9 @@ builds:
     main: ./cmd/dnscli
     binary: dnscli
     env:
-      - CGO_ENABLED=1
+      # TODO: cgo temporarily disabled (falls back to keychain_other.go) until
+      # darwin builds run on a macOS runner; set back to CGO_ENABLED=1 then.
+      - CGO_ENABLED=0
     flags:
       - -trimpath
     ldflags:
