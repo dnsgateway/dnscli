@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/dnsgateway/dnscli/compare/v0.1.0...v0.1.1) (2026-10-18)
+
+
+### Bug Fixes
+
+* build ([2dcd7c3](https://github.com/dnsgateway/dnscli/commit/2dcd7c357da6d31fc07c0f6cc169fcf91b768730))
+
 ## [0.1.0](https://github.com/dnsgateway/dnscli/compare/v0.0.1...v0.1.0) (2026-10-18)
 
 
