@@ -86,14 +86,11 @@ homebrew_casks:
       branch: main
       token: "{{ .Env.HOMEBREW_TOKEN }}"
 
-    custom_block: |
-      arch arm: "arm64", intel: "amd64"
-
     hooks:
       post:
         install: |
           if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/dnscli_darwin_#{arch}"]
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/dnscli"]
           end
 
 checksum:
