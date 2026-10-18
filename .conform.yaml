@@ -1,0 +1,36 @@
+policies:
+  - type: commit
+    spec:
+      header:
+        length: 89
+        imperative: true
+        case: lower
+        invalidLastCharacters: .
+      body:
+        required: false
+      dco: true
+      spellcheck:
+        locale: US
+      maximumOfOneCommit: true
+      conventional:
+        types:
+          - chore
+          - docs
+          - refactor
+          - revert
+          - style
+          - test
+        descriptionLength: 72
+  - type: license
+    spec:
+      skipPaths:
+        - .git/
+      includeSuffixes:
+        - .go
+      excludeSuffixes:
+        - .pb.go
+      allowPrecedingComments: false
+      header: |
+        // This Source Code Form is subject to the terms of the Mozilla Public
+        // License, v. 2.0. If a copy of the MPL was not distributed with this
+        // file, You can obtain one at http://mozilla.org/MPL/2.0/.

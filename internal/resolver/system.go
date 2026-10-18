@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
 // Package resolver asks the system DNS resolver, the servers listed in
 // /etc/resolv.conf, for the answers dnscli uses as freshness hints, asks a
 // Zone's own nameservers directly for its SOA serial (SOAAt) and its

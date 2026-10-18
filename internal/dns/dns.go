@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
 // Package dns holds dnscli's cache types: Account, and the Zone, Record
 // and Changeset as the cache holds them, with database IDs, Refresh times
 // the cached Hosting State and Zone Status. The dnsprovider module owns the Provider
