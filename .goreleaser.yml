@@ -4,7 +4,8 @@ project_name: dnscli
 
 dist: bin
 builds:
-  - id: default
+  # macOS needs cgo for the Keychain with Touch ID (internal/keychain).
+  - id: darwin
     main: ./cmd/dnscli
     binary: dnscli
     env:
@@ -16,6 +17,26 @@ builds:
       - -X main.commit={{ .Commit }}
     goos:
       - darwin
+    goarch:
+      - amd64
+      - arm64
+    goamd64:
+      - v1
+    goarm64:
+      - v8.0
+
+  # Other platforms have no Keychain backend (keychain_other.go)
+  - id: default
+    main: ./cmd/dnscli
+    binary: dnscli
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .Commit }}
+    goos:
       - linux
       - windows
     goarch:
@@ -33,32 +54,39 @@ changelog:
   disable: true
 
 archives:
-  - formats: [binary]
-    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+  - id: dnscli
+    ids:
+      - darwin
+      - default
+    name_template: "dnscli_{{ .Os }}_{{ .Arch }}"
+    formats:
+      - tar.gz
+    format_overrides:
+      - formats:
+          - zip
+        goos: windows
+    files:
+      - LICENSE
 
 homebrew_casks:
   - name: dnscli
     description: DNS CLI is a command-line interface for managing DNS records
-    homepage: "https://github.com/sergelogvinov/{{ .ProjectName }}"
-    license: Apache-2.0
+    homepage: "https://github.com/dnsgateway/{{ .ProjectName }}"
+    license: "MPL-2.0"
 
     directory: Casks
     commit_author:
-      name: sergelogvinov
-      email: 5407715+sergelogvinov@users.noreply.github.com
+      name: dnsgateway
+      email: dnsgateway@dnsgate.link
     repository:
-      owner: sergelogvinov
+      owner: dnsgateway
       name: homebrew-tap
       branch: main
       token: "{{ .Env.HOMEBREW_TOKEN }}"
 
-    # Bug in goreleaser v2.17.1?: target is bin/dnscli,
-    # but it should be dnscli, so we need to override it in custom_block
     custom_block: |
       arch arm: "arm64", intel: "amd64"
 
-    # Bug?
-    # need set full name of binary in postflight - dnscli_darwin_#{arch}
     hooks:
       post:
         install: |
