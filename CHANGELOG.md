@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.2](https://github.com/dnsgateway/dnscli/compare/v0.1.1...v0.1.2) (2026-10-18)
+
+
+### Bug Fixes
+
+* add license header ([c9840c7](https://github.com/dnsgateway/dnscli/commit/c9840c7c2007f2a0e024e66fdfaeec31491a8918))
+* goreleaser ([58b3d0d](https://github.com/dnsgateway/dnscli/commit/58b3d0d55c93f8f21c3b4fb21a0cea745da6c3ba))
+
 ## [0.1.1](https://github.com/dnsgateway/dnscli/compare/v0.1.0...v0.1.1) (2026-10-18)
 
 
